@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using FFS.Libraries.StaticEcs;
 using NativeWorld = FFS.Libraries.StaticEcs.World<SpaceBattle.SpaceBattleStaticWorld>;
 
@@ -7,20 +8,18 @@ internal readonly struct SpaceBattleStaticWorld : IWorldType { }
 
 public sealed class StaticEcsStore : NativeStore<EntityGID>
 {
-    private struct Wrapper<T> : IComponent where T : unmanaged { public T Value; }
+    private struct Wrapper<T> : IComponent, IComponentConfig<Wrapper<T>> where T : unmanaged { public T Value; public ComponentTypeConfig<Wrapper<T>> Config() => new(noDataLifecycle: true); }
     private static int active;
-    private readonly HashSet<Type> registered = new();
+    private EntityKey[] reverse = Array.Empty<EntityKey>();
 
     // Additional unmanaged types can be registered here, before native Initialize.
     public sealed class ComponentRegistration
     {
         private bool open = true;
-        private readonly HashSet<Type> registered;
-        internal ComponentRegistration(HashSet<Type> registered) => this.registered = registered;
         public void Register<T>() where T : unmanaged
         {
             if (!open) throw new InvalidOperationException("StaticEcs registration has closed.");
-            if (!registered.Add(typeof(T))) return;
+            if (NativeWorld.IsComponentTypeRegistered<Wrapper<T>>()) return;
             NativeWorld.Types().Component<Wrapper<T>>();
         }
         internal void Close() => open = false;
@@ -33,7 +32,7 @@ public sealed class StaticEcsStore : NativeStore<EntityGID>
         if (Interlocked.CompareExchange(ref active, 1, 0) != 0)
             throw new InvalidOperationException("Only one StaticEcsStore may be active; dispose it first.");
         bool created = false;
-        var registration = new ComponentRegistration(registered);
+        var registration = new ComponentRegistration();
         try
         {
             NativeWorld.Create(WorldConfig.Default());
@@ -89,15 +88,26 @@ public sealed class StaticEcsStore : NativeStore<EntityGID>
     private void CheckType<T>() where T : unmanaged
     {
         CheckOpen();
-        if (!registered.Contains(typeof(T)))
+        if (!NativeWorld.IsComponentTypeRegistered<Wrapper<T>>())
             throw new InvalidOperationException($"Register {typeof(T)} in the StaticEcsStore constructor before initialization.");
     }
-    protected override EntityGID CreateNative() => NativeWorld.NewEntity<Default>().GID;
+    protected override EntityGID CreateNative()
+    {
+        var native = NativeWorld.NewEntity<Default>();
+        if (native.ID < (uint)reverse.Length) reverse[native.ID] = default;
+        return native.GID;
+    }
     protected override bool AliveNative(EntityGID e) => e.TryUnpack<SpaceBattleStaticWorld>(out _);
-    protected override void DestroyNative(EntityGID e) => e.Unpack<SpaceBattleStaticWorld>().Destroy();
+    protected override void DestroyNative(EntityGID e)
+    {
+        var native = e.Unpack<SpaceBattleStaticWorld>();
+        if (native.ID < (uint)reverse.Length) reverse[native.ID] = default;
+        native.Destroy();
+    }
     protected override void DisposeNative()
     {
         NativeWorld.Destroy();
+        reverse = Array.Empty<EntityKey>();
         Interlocked.Exchange(ref active, 0);
     }
     public override ref T Get<T>(EntityKey e)
@@ -117,19 +127,13 @@ public sealed class StaticEcsStore : NativeStore<EntityGID>
     {
         CheckMutation();
         CheckType<T>();
-        var native = Native(e).Unpack<SpaceBattleStaticWorld>();
-        if (native.Has<Wrapper<T>>()) native.Ref<Wrapper<T>>().Value = value;
-        else native.Set(new Wrapper<T> { Value = value });
+        Native(e).Unpack<SpaceBattleStaticWorld>().Set(new Wrapper<T> { Value = value });
     }
     public override void Remove<T>(EntityKey e)
     {
         CheckMutation();
         CheckType<T>();
-        if (Alive(e))
-        {
-            var native = Native(e).Unpack<SpaceBattleStaticWorld>();
-            if (native.Has<Wrapper<T>>()) native.Delete<Wrapper<T>>();
-        }
+        if (Alive(e)) Native(e).Unpack<SpaceBattleStaticWorld>().Delete<Wrapper<T>>();
     }
     public override void ForEach<A, P>(ref P p)
     {
@@ -137,8 +141,9 @@ public sealed class StaticEcsStore : NativeStore<EntityGID>
         BeginQuery();
         try
         {
-            foreach (var native in NativeWorld.Query<All<Wrapper<A>>>().Entities())
-                p.Execute(Key(native.GID), ref native.Ref<Wrapper<A>>().Value);
+            var bridge = new Bridge<A, P> { Processor = p, Store = this };
+            NativeWorld.Query().Write<Wrapper<A>>().For(ref bridge);
+            p = bridge.Processor;
         }
         finally { EndQuery(); }
     }
@@ -148,8 +153,9 @@ public sealed class StaticEcsStore : NativeStore<EntityGID>
         BeginQuery();
         try
         {
-            foreach (var native in NativeWorld.Query<All<Wrapper<A>, Wrapper<B>>>().Entities())
-                p.Execute(Key(native.GID), ref native.Ref<Wrapper<A>>().Value, ref native.Ref<Wrapper<B>>().Value);
+            var bridge = new Bridge<A, B, P> { Processor = p, Store = this };
+            NativeWorld.Query().Write<Wrapper<A>, Wrapper<B>>().For(ref bridge);
+            p = bridge.Processor;
         }
         finally { EndQuery(); }
     }
@@ -159,9 +165,66 @@ public sealed class StaticEcsStore : NativeStore<EntityGID>
         BeginQuery();
         try
         {
-            foreach (var native in NativeWorld.Query<All<Wrapper<A>, Wrapper<B>, Wrapper<C>>>().Entities())
-                p.Execute(Key(native.GID), ref native.Ref<Wrapper<A>>().Value, ref native.Ref<Wrapper<B>>().Value, ref native.Ref<Wrapper<C>>().Value);
+            var bridge = new Bridge<A, B, C, P> { Processor = p, Store = this };
+            NativeWorld.Query().Write<Wrapper<A>, Wrapper<B>, Wrapper<C>>().For(ref bridge);
+            p = bridge.Processor;
         }
         finally { EndQuery(); }
+    }
+    public override void ForEachComponents<A, B, C, P>(ref P processor)
+    {
+        CheckType<A>(); CheckType<B>(); CheckType<C>();
+        BeginQuery();
+        try
+        {
+            var bridge = new ComponentsBridge<A, B, C, P> { Processor = processor };
+            NativeWorld.Query().WriteBlock<Wrapper<A>, Wrapper<B>, Wrapper<C>>().For(ref bridge);
+            processor = bridge.Processor;
+        }
+        finally { EndQuery(); }
+    }
+    private EntityKey QueryKey(NativeWorld.Entity native)
+    {
+        var id = native.ID;
+        if (id < (uint)reverse.Length)
+        {
+            var cached = reverse[id];
+            if (cached.Generation != 0) return cached;
+        }
+        var key = Key(native.GID);
+        if (id >= (uint)reverse.Length)
+            Array.Resize(ref reverse, (int)Math.Max(id + 1, Math.Max(64u, (uint)reverse.Length * 2)));
+        reverse[id] = key;
+        return key;
+    }
+
+    private struct Bridge<A, P> : NativeWorld.IQuery.Write<Wrapper<A>> where A : unmanaged where P : struct, IProcessor<A>
+    {
+        public P Processor; public StaticEcsStore Store;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Invoke(NativeWorld.Entity e, ref Wrapper<A> a) => Processor.Execute(Store.QueryKey(e), ref a.Value);
+    }
+    private struct Bridge<A, B, P> : NativeWorld.IQuery.Write<Wrapper<A>, Wrapper<B>> where A : unmanaged where B : unmanaged where P : struct, IProcessor<A, B>
+    {
+        public P Processor; public StaticEcsStore Store;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Invoke(NativeWorld.Entity e, ref Wrapper<A> a, ref Wrapper<B> b) => Processor.Execute(Store.QueryKey(e), ref a.Value, ref b.Value);
+    }
+    private struct Bridge<A, B, C, P> : NativeWorld.IQuery.Write<Wrapper<A>, Wrapper<B>, Wrapper<C>> where A : unmanaged where B : unmanaged where C : unmanaged where P : struct, IProcessor<A, B, C>
+    {
+        public P Processor; public StaticEcsStore Store;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Invoke(NativeWorld.Entity e, ref Wrapper<A> a, ref Wrapper<B> b, ref Wrapper<C> c) => Processor.Execute(Store.QueryKey(e), ref a.Value, ref b.Value, ref c.Value);
+    }
+    private struct ComponentsBridge<A, B, C, P> : NativeWorld.IQueryBlock.Write<Wrapper<A>, Wrapper<B>, Wrapper<C>>
+        where A : unmanaged where B : unmanaged where C : unmanaged where P : struct, IComponentProcessor<A, B, C>
+    {
+        public P Processor;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Invoke(uint count, NativeWorld.EntityBlock entitiesBlock, Block<Wrapper<A>> first, Block<Wrapper<B>> second, Block<Wrapper<C>> third)
+        {
+            for (uint row = 0; row < count; row++)
+                Processor.Execute(ref first[row].Value, ref second[row].Value, ref third[row].Value);
+        }
     }
 }
