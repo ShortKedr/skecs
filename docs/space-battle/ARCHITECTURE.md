@@ -4,31 +4,66 @@ English | [Русский](ARCHITECTURE.ru.md)
 
 [Overview](README.md) | [Current report](REPORT.md)
 
-This is a map of the current implementation. Core owns combat rules and the tick sequence; stores own ECS components and query membership; hosts decide how to advance, observe and present the battle.
+Each framework owns its complete simulation in `SpaceBattle.Simulations`: SKECS,
+LeoECS Lite, LeoECS Classic, Morpeh and StaticEcs. Hosts select a concrete
+implementation before simulation begins. Gameplay logic, physics and native ECS
+queries run in that implementation; tick parity is checked by software outside it.
 
 ## Projects and Data Flow
 
 ```mermaid
-flowchart LR
-    Headless[Headless: five-store comparison] --> Battle[Core: Battle of TStore]
-    Game[Game: Silk.NET / OpenGL] --> Battle
-    Web[Web: Mono AOT / Canvas] --> Battle
-    Battle --> Store[IEcsStore]
-    Store --> SKECS[SKECS store]
-    Store --> Adapters[Lite / Classic / Morpeh / StaticEcs]
-    Battle --> Physics[Core circle physics]
-    Battle --> Frame[BattleFrame / browser render buffer]
+flowchart TB
+    Select[Framework selection] --> Headless[Five concrete headless runners]
+    Select --> Game[Five Silk.NET frontends]
+    Select --> Web[Five Web bridges and Canvas scenes]
+    Headless --> Native[Five independent simulation cores]
+    Game --> Native
+    Web --> Native
+    Native --> ECS[Each core's native ECS world and queries]
+    Native --> Frame[Presentation DTOs and exported replay state]
+    Frame --> Replay[External Replay hashing and parity checks]
+    Oracle[SKECS reference replay] --> Replay
+    Contracts[Core configuration and data contracts] --> Native
 ```
 
-[Core](../../SpaceBattle.Core/Battle.cs) contains configuration, ship catalogue, AI, weapons, damage, physics and lifecycle. [SKECS integration](../../SpaceBattle.SKECS/SkecsStore.cs) and [native adapters](../../SpaceBattle.Adapters/README.md) implement the same [store contract](../../SpaceBattle.Core/EcsContract.cs) using each framework's native storage and queries. `EntityKey` carries a store-local ID and generation; gameplay serials provide stable ordering independently of native entity IDs.
+[`SpaceBattle.Simulations`](../../SpaceBattle.Simulations) has separate `Skecs`,
+`LeoEcsLite`, `LeoEcsClassic`, `Morpeh` and `StaticEcs` directories. Each owns its
+`Battle`, combat, AI, lifecycle, spatial structures, physics and `NativeWorld`
+implementation. There is no production `Battle<TStore>`, `IEcsStore` dispatch,
+identity-remapping dictionary or shared simulation superclass. `EntityKey`
+contains a native identity and generation; stable gameplay serials define replay
+ordering independently of native IDs. Morpeh's native handle lookup is indexed
+by native ID; it does not assign another logical identity.
 
-[Headless](../../SpaceBattle.Benchmarks/Measurement/MeasurementProgram.cs) runs `Step`, records timing/counters/checkpoints and serializes results after measurement. [Game](../../SpaceBattle.Game/README.md) and [Web](../../SpaceBattle.Web/README.md) use SKECS. They call shared simulation and presentation APIs; the web bridge prepares a reused binary render buffer for Canvas. `Capture` builds a presentation view with separate ship/turret lists and omits docked ships from visible ship rows. Rendered, ship and total ECS counts therefore describe different populations.
+[`SpaceBattle.Core`](../../SpaceBattle.Core) provides common configuration,
+component/data definitions, catalogues and presentation contracts. Its retained
+generic battle, [`SpaceBattle.SKECS`](../../SpaceBattle.SKECS) and
+[`SpaceBattle.Adapters`](../../SpaceBattle.Adapters/README.md) support focused
+compatibility/regression fixtures. Production hosts do not route ticks through them.
+
+[Headless runners](../../SpaceBattle.Benchmarks/Measurement/Headless) each call
+one concrete core directly. [Game](../../SpaceBattle.Game/README.md) has a separate
+app, scene renderer and profiler per framework. [Web](../../SpaceBattle.Web/README.md)
+has a separate C# bridge and Canvas scene per framework. Shared OpenGL primitives,
+assets, UI helpers and DTO definitions do not select or abstract the simulation.
+`Capture` creates ship/turret presentation lists and omits docked ships and their
+mounts from visible rows. Rendered, ship and total ECS counts describe different populations.
+
+[`SpaceBattle.Replay`](../../SpaceBattle.Replay/ReplayHash.cs) computes hashes and
+rejects divergence. Cores export ordered state through `CopyReplayState`; they do
+not compute hashes, select an oracle or decide whether replay matches. Before a
+headless measurement, a separate SKECS battle generates the reference at tick zero
+and after every requested tick. Each concrete runner then checks its initial
+state and every measured tick against that trace. Hash capture and comparison run
+after the Step timer and per-tick allocation counter have stopped. Reference
+creation, warmup, presentation and report serialization are outside Step timing;
+wall duration and process memory still include harness work.
 
 Host configuration matters: interactive clients explicitly choose LightSwarm, dispersed deployment and endless reinforcements. The default `BattleConfig` uses Uniform and legacy deployment, enables carrier replacement and leaves endless warp reinforcements off. Read the [current report](REPORT.md) for the measured headless configuration.
 
 ## One Tick: Nine Timed Stages
 
-[`Battle.Step`](../../SpaceBattle.Core/Battle.cs) increments `Tick`, then runs these stages in order. They are timing intervals containing processors and helper work. The default tick rate is 60 ticks per second; rendering and host scheduling are outside Step.
+Each concrete [`Battle.Step`](../../SpaceBattle.Simulations/Skecs/Battle.cs) increments `Tick`, then runs these stages in order. They are timing intervals containing processors and helper work. The default tick rate is 60 ticks per second; rendering and host scheduling are outside Step.
 
 | Stage | Responsibility |
 | --- | --- |
@@ -42,7 +77,7 @@ Host configuration matters: interactive clients explicitly choose LightSwarm, di
 | `hits` | Resolve damaging contacts and swept projectile/debris queries; apply shield/hull damage, create effects and queue retirements/destruction. |
 | `lifecycle` | Apply state tags, docking, destruction and builds; remove attached guns/bodies; commit, compact moving rows, synchronize turrets and refresh ship views; update optional warp waves. |
 
-The final stage includes additional commits when warp arrivals or gate effects change composition. There is no single global end-of-tick event dispatcher: `Battle` owns shot, state, build and retirement queues, each consumed at its explicit boundary. The [combat implementation](../../SpaceBattle.Core/CombatSystems.cs) and [warp logic](../../SpaceBattle.Core/WarpReinforcements.cs) define these boundaries.
+The final stage includes additional commits when warp arrivals or gate effects change composition. There is no single global end-of-tick event dispatcher: `Battle` owns shot, state, build and retirement queues, each consumed at its explicit boundary. The [combat implementation](../../SpaceBattle.Simulations/Skecs/CombatSystems.cs) and [warp logic](../../SpaceBattle.Simulations/Skecs/WarpReinforcements.cs) define these boundaries.
 
 ## Component Groups
 
@@ -63,10 +98,33 @@ Turrets are separate ECS entities bound to a parent hull, with their own targeti
 
 ## Mutation and Observation Boundaries
 
-`ForEach` exposes live component refs. Processors may update existing values and append requests; store guards reject `Create`, `Destroy`, `Set`, `Remove`, `Commit` and disposal while a query is active. Outside queries, direct structural work occurs in shot flushing, hit effects, lifecycle and warp spawning. Reacquire refs after structural changes; never keep them across mutation or disposal.
+Each `NativeWorld` executes its framework's native queries and supplies live
+component references to its concrete processors. Systems update existing values
+and queue structural requests; shot flushing, hit effects, lifecycle and warp
+spawning apply those requests at explicit boundaries. Reacquire references after
+structural changes and never retain them across mutation or disposal. The
+production cores use native framework rules rather than the compatibility
+adapters' general mutation guards.
 
-`Commit` makes staged native changes available before subsequent queries. Morpeh needs its staged flush; the other stores use immediate changes with the same guarded boundary. The optimized SKECS `ForEachComponents` path traverses native columns for work that does not need the current row's entity key; the other adapters use the keyed fallback. Both retain the mutation guard.
+Morpeh's `Commit` flushes staged changes before subsequent queries. Other cores
+apply native changes immediately. SKECS uses typed native queries; Lite uses
+filters/pools, Classic uses typed filters, Morpeh uses filters/stashes, and
+StaticEcs uses its typed world and queries. These paths belong to their cores.
 
-Tactical snapshots and sorted views are temporary read structures; they do not replace ECS storage. Physics keeps body/contact/query state synchronized with ship components. Presentation, statistics and explicit checksum requests have separate scopes. Matching recorded checksums is bounded replay evidence, not a complete snapshot or proof of cross-platform determinism.
+Tactical snapshots and sorted views are temporary read structures; ECS remains
+the component source. Each core's physics maintains its own bodies, contacts and
+queries. Presentation and statistics sit outside simulation timing. Matching all
+recorded tick hashes is bounded evidence for the tested configuration/runtime,
+not a proof of cross-platform floating-point determinism or a complete save format.
+
+## Changes and Validation
+
+A logic change in any core must be applied to all five cores and their matching
+frontends. Update the corresponding headless, desktop and web implementations
+together, and keep configuration/contracts and replay exports synchronized.
+`measure --validate-ports` checks the concrete cores against SKECS at every tick;
+production headless measurements repeat this check outside the timers. Existing
+focused gameplay/adapter fixtures still exercise retained compatibility code and
+supplement these checks; they do not replace concrete-core replay and frontend validation.
 
 For rule details see [tactics v3](TACTICS.md), [physics](PHYSICS.md), [armament](ARMAMENT.md), [damage](DAMAGE.md) and [reinforcements](REINFORCEMENTS.md). For capture/profiling scopes use the client engineering guides: [desktop](../../SpaceBattle.Game/DEVELOPMENT.md), [web](../../SpaceBattle.Web/DEVELOPMENT.md).

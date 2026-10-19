@@ -1,0 +1,178 @@
+using System.Numerics;
+
+namespace SpaceBattle.Simulations.LeoEcsLite;
+
+// Nongeneric value types avoid Mono WASM AOT generic calling-convention pitfalls.
+internal readonly record struct ShotRequest(EntityKey Owner, EntityKey Target, int Serial, int Slot, Weapon Weapon,
+    EntityKey Gun, Vector2 Origin = default, Vector2 Velocity = default, float Angle = 0);
+internal readonly record struct MountFrame(bool Alive, Transform Transform, float Cos, float Sin);
+internal readonly record struct MountActor(bool Active, Identity Id, Brain Brain, Transform Transform, Motion Motion, float Radius,
+    bool BallisticsReady = false);
+
+public sealed partial class Battle
+{
+    private readonly Dictionary<EntityKey, List<MovingRow>> attachedGuns = new();
+    private readonly List<int> turretCandidates = new();
+    private readonly Dictionary<EntityKey, MountFrame> mountFrames = new();
+    private readonly Dictionary<EntityKey, MountActor> mountActors = new();
+    private void SpawnTurrets(EntityKey parent, Identity id, Transform ship)
+    {
+        var count = ShipCatalog.TurretCount(id.Class);
+        if (count == 0) return;
+        var guns = new List<MovingRow>(count); attachedGuns.Add(parent, guns);
+        var radius = ShipCatalog.Radius(id.Class);
+        for (var slot = 0; slot < count; slot++)
+        {
+            var pairs = count / 2;
+            var x = pairs == 1 ? 0 : 0.45f - 0.9f * (slot / 2) / (pairs - 1);
+            var offset = new Vector2(x, slot % 2 == 0 ? -0.45f : 0.45f) * radius;
+            var gun = Store.Create(); var number = ++serial;
+            var position = ship.Position + Rotate(offset, ship.Angle);
+            Store.Set(gun, new MountedTurret { Serial = number, Slot = slot, Parent = parent, Target = EntityKey.None,
+                LocalOffset = offset, LastFireTick = -1000 });
+            Store.Set(gun, new Transform { Position = position, Previous = position, Angle = ship.Angle });
+            Store.Set(gun, ShipCatalog.TurretWeapon(id.Class, slot));
+            Store.Set(gun, new Heat { Limit = 60, CoolingPerSecond = 12 });
+            turrets.Add(new(gun, number)); Counters.StructuralAdds += 4;
+            guns.Add(new(gun, number));
+        }
+    }
+
+    private static Vector2 Rotate(Vector2 offset, float angle)
+    {
+        var c = MathF.Cos(angle); var s = MathF.Sin(angle);
+        return new(offset.X * c - offset.Y * s, offset.X * s + offset.Y * c);
+    }
+
+    private void SyncTurrets()
+    {
+        // Each synchronization samples its own phase. Never reuse the pre-physics frame afterwards.
+        mountFrames.Clear();
+        foreach (var row in turrets)
+        {
+            ref var mount = ref Store.Get<MountedTurret>(row.Entity);
+            if (!mountFrames.TryGetValue(mount.Parent, out var frame))
+            {
+                frame = default;
+                if (AliveShip(mount.Parent))
+                {
+                    var parent = Store.Get<Transform>(mount.Parent);
+                    frame = new(true, parent, MathF.Cos(parent.Angle), MathF.Sin(parent.Angle));
+                }
+                mountFrames.Add(mount.Parent, frame);
+            }
+            if (!frame.Alive) continue;
+            ref var transform = ref Store.Get<Transform>(row.Entity);
+            transform.Previous = transform.Position;
+            var offset = mount.LocalOffset;
+            transform.Position = frame.Transform.Position + new Vector2(offset.X * frame.Cos - offset.Y * frame.Sin,
+                offset.X * frame.Sin + offset.Y * frame.Cos);
+        }
+    }
+
+    private void UpdateTurrets()
+    {
+        SyncTurrets();
+        mountActors.Clear();
+        foreach (var row in turrets)
+        {
+            var gun = row.Entity;
+            ref var mount = ref Store.Get<MountedTurret>(gun);
+            ref var heat = ref Store.Get<Heat>(gun);
+            heat.Value = MathF.Max(0, heat.Value - heat.CoolingPerSecond / Config.TickRate);
+            if (!mountActors.TryGetValue(mount.Parent, out var actor))
+            {
+                actor = default;
+                if (AliveShip(mount.Parent) && !Store.Has<Docked>(mount.Parent))
+                {
+                    var parentId = Store.Get<Identity>(mount.Parent);
+                    var parentBrain = Store.Get<Brain>(mount.Parent);
+                    if (parentBrain.Mode == BrainMode.Attack && !Store.Has<Overheated>(mount.Parent))
+                        actor = new(true, parentId, parentBrain, default, default, 0);
+                }
+                mountActors.Add(mount.Parent, actor);
+            }
+            if (!actor.Active) continue;
+            var id = actor.Id;
+            var brain = actor.Brain;
+            ref var weapon = ref Store.Get<Weapon>(gun);
+            ref var transform = ref Store.Get<Transform>(gun);
+            if (!TurretTargetAvailable(mount.Target, id.Team, transform.Position, weapon.Range))
+            {
+                mount.Target = EntityKey.None;
+                if (Tick < mount.NextDecisionTick) continue;
+                mount.NextDecisionTick = Tick + ArmamentRules.TurretDecisionTicks + mount.Slot;
+                if (TurretTargetAvailable(brain.Target, id.Team, transform.Position, weapon.Range)) mount.Target = brain.Target;
+                else
+                {
+                    var best = float.PositiveInfinity;
+                    tacticalPoints.Query(transform.Position, weapon.Range, turretCandidates);
+                    foreach (var candidate in turretCandidates)
+                    {
+                        var ship = aiRows[candidate];
+                        if (!TurretTargetAvailable(ship.Entity, id.Team, transform.Position, weapon.Range)) continue;
+                        var cost = Vector2.DistanceSquared(transform.Position, ship.Transform.Position);
+                        if (cost < best) { best = cost; mount.Target = ship.Entity; }
+                    }
+                }
+            }
+            if (mount.Target.IsNone) continue;
+            if (!actor.BallisticsReady)
+            {
+                actor = actor with { Transform = Store.Get<Transform>(mount.Parent), Motion = Store.Get<Motion>(mount.Parent),
+                    Radius = Store.Get<Collider>(mount.Parent).Radius, BallisticsReady = true };
+                mountActors[mount.Parent] = actor;
+            }
+            var parent = actor.Transform;
+            var motion = actor.Motion;
+            var offset = transform.Position - parent.Position;
+            var velocity = motion.Velocity + new Vector2(-offset.Y, offset.X) * motion.AngularVelocity;
+            var target = Store.Get<Transform>(mount.Target).Position;
+            var targetVelocity = Store.Get<Motion>(mount.Target).Velocity;
+            var radius = actor.Radius + 0.8f;
+            var direction = FireControl.Predict(transform.Position, velocity, target, targetVelocity, weapon.Speed, radius).Direction;
+            var muzzle = MuzzleDistance(offset, direction, radius);
+            direction = FireControl.Predict(transform.Position, velocity, target, targetVelocity, weapon.Speed, muzzle).Direction;
+            var desired = MathF.Atan2(direction.Y, direction.X);
+            transform.Angle = WrapAngle(transform.Angle + Math.Clamp(WrapAngle(desired - transform.Angle),
+                -ArmamentRules.TurretTurnRate / Config.TickRate, ArmamentRules.TurretTurnRate / Config.TickRate));
+            if (Tick < weapon.NextFireTick || heat.Value >= heat.Limit ||
+                MathF.Abs(WrapAngle(desired - transform.Angle)) > ArmamentRules.TurretAimTolerance) continue;
+            weapon.NextFireTick = Tick + Math.Max(1, (int)(weapon.Cooldown / Config.ChurnMultiplier));
+            shots.Add(new(mount.Parent, mount.Target, mount.Serial, mount.Slot + 2, weapon,
+                gun, transform.Position, velocity, transform.Angle));
+        }
+    }
+
+    private bool TurretTargetAvailable(EntityKey target, int team, Vector2 position, float range) =>
+        AliveShip(target) && !Store.Has<Docked>(target) && Store.Get<Identity>(target).Team != team &&
+        Vector2.DistanceSquared(position, Store.Get<Transform>(target).Position) <= range * range;
+
+    private static float MuzzleDistance(Vector2 offset, Vector2 direction, float radius)
+    {
+        // Keep the muzzle outside the parent's enclosing circle regardless of owner filtering.
+        var projection = Vector2.Dot(offset, direction);
+        return MathF.Max(0, -projection + MathF.Sqrt(MathF.Max(0, projection * projection + radius * radius - offset.LengthSquared())));
+    }
+
+    private void RefreshTurretAttachments()
+    {
+        foreach (var guns in attachedGuns.Values) guns.Clear();
+        foreach (var row in turrets)
+        {
+            var parent = Store.Get<MountedTurret>(row.Entity).Parent;
+            if (!attachedGuns.TryGetValue(parent, out var guns)) attachedGuns.Add(parent, guns = new());
+            guns.Add(row);
+        }
+    }
+
+    private void DestroyTurrets(EntityKey parent)
+    {
+        if (!attachedGuns.Remove(parent, out var guns)) return;
+        // Retain reverse attachment destruction order; compact the global list once per tick.
+        for (var i = guns.Count - 1; i >= 0; i--)
+        {
+            Store.Destroy(guns[i].Entity); Counters.StructuralRemoves += 4;
+        }
+    }
+}

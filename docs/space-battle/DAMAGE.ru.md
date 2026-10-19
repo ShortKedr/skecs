@@ -2,8 +2,8 @@
 
 # Урон По Слоям
 
-Ревизия текущих исходников: **`layered-weapon-damage-v1`**. Desktop и production
-Mono AOT WASM используют одни [C#-правила](../../SpaceBattle.Core/DamageRules.cs).
+Ревизия текущих исходников: **`layered-weapon-damage-v1`**. Все пять ядер в desktop и production
+Mono AOT WASM используют одни [определения профилей урона](../../SpaceBattle.Core/DamageRules.cs).
 
 ## Профили
 
@@ -67,7 +67,7 @@ var config = new BattleConfig {
 
 ## Проверки
 
-[Headless-проверки](../../SpaceBattle.Benchmarks/Measurement/Validation.cs) покрывают слои урона, оценки AI и повторы на адаптерах. Запуск через [CLI бенчмарков](../../SpaceBattle.Benchmarks/README.ru.md):
+[Headless-проверки](../../SpaceBattle.Benchmarks/Measurement/Validation.cs) покрывают слои урона, оценки AI и повторы на сохранённых хранилищах совместимости. Повторы конкретных ядер [проверяются отдельно после каждого тика](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs). Запуск через [CLI бенчмарков](../../SpaceBattle.Benchmarks/README.ru.md):
 
 ```sh
 dotnet run --project SpaceBattle.Benchmarks -c Release -- validate space-battle

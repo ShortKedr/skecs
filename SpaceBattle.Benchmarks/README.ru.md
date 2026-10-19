@@ -4,7 +4,7 @@
 
 [Руководство SpaceBattle](../docs/space-battle/README.ru.md) | [Текущий отчёт](../docs/space-battle/REPORT.ru.md) | [Desktop-замеры](../docs/space-battle/DESKTOP_TIMING.ru.md) | [Микробенчмарки ECS](../SKECS.Benchmarks/README.ru.md)
 
-Этот исполняемый проект .NET 8 объединяет замеры SpaceBattle, проверки симуляции и анализ сохранённых данных. Он сравнивает SKECS, LeoECS Lite, LeoECS Classic, Morpeh и StaticEcs на общей C#-симуляции. Бенчмарки только SKECS и сравнения микросценариев находятся в `SKECS.Benchmarks`.
+Этот исполняемый проект .NET 8 объединяет замеры SpaceBattle, проверки симуляции и анализ сохранённых данных. Он сравнивает SKECS, LeoECS Lite, LeoECS Classic, Morpeh и StaticEcs на пяти независимых нативных C#-ядрах. Бенчмарки только SKECS и сравнения микросценариев находятся в `SKECS.Benchmarks`.
 
 ## Воспроизведение
 
@@ -15,6 +15,17 @@ dotnet run --project SpaceBattle.Benchmarks -c Release -- validate space-battle
 dotnet run --project SpaceBattle.Benchmarks -c Release -- run space-battle
 dotnet run --project SpaceBattle.Benchmarks -c Release -- report space-battle
 dotnet run --project SpaceBattle.Benchmarks -c Release -- verify space-battle
+```
+
+В Windows пересборка загруженной DLL хоста может завершиться MSB3021. Запустите
+контроллер кампании из нового игнорируемого каталога, отдельно от собираемых и
+измеряемых файлов; сертификация исходников и бинарных файлов сохраняется:
+
+```powershell
+$driver = "artifacts/tooling/space-battle-driver"
+dotnet build SpaceBattle.Benchmarks -c Release
+Copy-Item SpaceBattle.Benchmarks/bin/Release/net8.0 $driver -Recurse
+dotnet "$driver/SpaceBattle.Benchmarks.dll" run space-battle
 ```
 
 Полная кампания использует профиль `high`, preset `game`, игровой `ChurnMultiplier=2`, 108000 измеряемых тиков после 600 отдельных прогревочных тиков, seed 7331 и 96 эскортов на сторону. Синтетический churn и диагностические пулы сущностей не добавляются. Отчёт сохраняет полные времена Step, средние девяти стадий, окна HUD по 600 тиков и начальные фазы.
@@ -62,7 +73,7 @@ Hardware capture записывает переносимые сведения о
 
 [Measurement](Measurement/) содержит headless-хост и проверки симуляции. [Analysis](Analysis/) объединяет отчёты полной кампании, desktop и состава сущностей. Composition проверяет сохранённые `low.json`, `nominal.json` и `high.json`, сохранение числа сущностей/компонентов и доступные хеши источников; эта локальная диагностика не входит в `run all`. Её вывод остаётся в игнорируемых артефактах и не относится к текущей публикации бенчмарков.
 
-[Нативные адаптеры](../SpaceBattle.Adapters/README.ru.md) используют закреплённые runtime-исходники из ECS-проекта. Там доступны проверка vendor и необязательное восстановление отсутствующих файлов:
+[Нативные ядра](../SpaceBattle.Simulations/) используют закреплённые runtime-исходники из ECS-проекта. Адаптеры сохранены только для проверок исходной реализации. Там доступны проверка vendor и необязательное восстановление отсутствующих файлов:
 
 ```sh
 dotnet run --project SKECS.Benchmarks -c Release -- verify-vendor
@@ -71,3 +82,10 @@ dotnet test tools/BenchmarkSupport.Tests/BenchmarkSupport.Tests.csproj -c Releas
 ```
 
 Восстановление читает закреплённые удалённые архивы и записывает только проверенные отсутствующие локальные файлы; изменённые локальные исходники отклоняются. Обычный клон содержит vendor и не требует восстановления. Условия лицензий — в [уведомлениях о сторонних компонентах](../THIRD_PARTY_NOTICES.ru.md).
+
+Каждый [headless-хост](Measurement/Headless/) напрямую вызывает конкретное ядро.
+[SpaceBattle.Replay](../SpaceBattle.Replay/) хеширует начальное состояние и каждый
+тик, включая счётчики; измеряемый тик сравнивается с повтором SKECS из отдельного процесса до прогрева.
+Снимки, хеширование и сравнение исключены из времени Step и managed allocation.
+Format 4 сохраняет `stateHash` каждого тика и SHA-256 полной последовательности;
+анализ отклоняет прежние shared-core кампании и любые расхождения.

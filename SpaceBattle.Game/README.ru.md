@@ -2,7 +2,7 @@
 
 # SpaceBattle Desktop
 
-Наблюдайте за автономным боем флотов в Silk.NET/OpenGL-клиенте. Он запускает общую C#-симуляцию на SKECS. Вы управляете камерой и скоростью симуляции; кораблями управляет ИИ.
+Наблюдайте за автономным боем флотов в Silk.NET/OpenGL-клиенте. Выберите SKECS, LeoECS Lite, LeoECS Classic, Morpeh или StaticEcs: у каждого фреймворка собственные C#-симуляция и desktop-клиент. Вы управляете камерой и скоростью симуляции; кораблями управляет ИИ.
 
 [Обзор SpaceBattle](../docs/space-battle/README.ru.md) | [Текущий отчёт](../docs/space-battle/REPORT.ru.md) | [Техническое руководство](DEVELOPMENT.ru.md)
 
@@ -21,6 +21,7 @@ dotnet build SpaceBattle.Game/SpaceBattle.Game.csproj -c Release
 
 | Параметр | Назначение |
 | --- | --- |
+| `--framework skecs` | Выбор `skecs` (по умолчанию), `lite`, `classic`, `morpeh` или `static` |
 | `--seed 7331` | Повторить начальный сценарий с заданным seed |
 | `--ships-per-team 96` (также `--ships`) | Начальное число эскортов на сторону, без носителей |
 | `--finite` | Отключить бесконечные warp-подкрепления |
@@ -28,6 +29,8 @@ dotnet build SpaceBattle.Game/SpaceBattle.Game.csproj -c Release
 | `--statistics` | Открыть подробную статистику |
 | `--colliders` | Сразу показать контуры столкновений |
 | `--follow-ship 22` | Начать слежение по серийному номеру корабля |
+
+Длинные варианты `leoecslite`, `leoecs` и `staticecs` также принимаются.
 
 `--ships 2048 --legacy-deployment` — намеренно плотный стресс-сценарий, а не стандартная игра.
 

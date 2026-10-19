@@ -88,7 +88,9 @@ NuGet-зависимости объявлены в проектах и восс�
 ## Браузерная Поставка
 
 [WebAssembly-демо](SpaceBattle.Web/README.ru.md) распространяет собранные SKECS,
-SpaceBattle.Core и SpaceBattle.SKECS,
+SpaceBattle.Core, SpaceBattle.Simulations и SpaceBattle.Replay,
+а также закреплённые runtime LeoECS Lite, LeoECS Classic, Morpeh, StaticEcs и StaticPack,
+описанные выше,
 .NET/Blazor 8.0.31 (MIT и исходные уведомления о сторонних компонентах) и Lucide 1.55.0
 (ISC / MIT для иконок на основе Feather). Статический сайт содержит оригинальные
 лицензии, copyright и provenance изображений в
@@ -98,9 +100,15 @@ Production AOT-поставка также сохраняет [лицензию 
 и [список авторов](SpaceBattle.Web/wwwroot/licenses/EMSCRIPTEN-AUTHORS.txt) из
 workload .NET WebAssembly. Бинарные файлы компилятора и toolchain остаются
 локальными инструментами сборки, а не ресурсами сайта.
-В демо не включены четыре сравниваемые ECS-библиотеки, зависимости нативного
+В демо не включены зависимости нативного
 OpenGL и зависимости бенчмарков/тестов. Условия лицензирования сравнительного
 набора исходников выше не меняются.
+
+Собственный [слой совместимости StaticEcs](SKECS.Benchmarks/Vendor/Compatibility/StaticEcsMd5.cs)
+реализует эквивалентный managed MD5 для GUID типов при запуске WebAssembly,
+где платформенный MD5 недоступен. Нативные сборки используют платформенный
+провайдер. Закреплённые исходники upstream не изменены; в тиках симуляции этот
+код не выполняется.
 
 ## Проверка
 

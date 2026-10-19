@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -11,7 +13,8 @@ public static class SpaceBattleReports
     {
         directory = DirectoryUnderDocs(root, directory);
         var manifest = Load(Path.Combine(directory, "manifest.json"));
-        Require(manifest["Format"].L() == 3 && manifest["Completed"]!.GetValue<bool>(), "Current campaign requires completed Format 3");
+        Require(manifest["Format"].L() == 4 && manifest["Completed"]!.GetValue<bool>(), "Current campaign requires completed native-core Format 4");
+        Require(manifest["Implementation"].S() == "independent-native-cores-v1", "Current campaign must use independent native cores");
         Require(manifest["Profile"].S() == "high" && manifest["Profiles"] == null && manifest["PrimaryProfile"] == null, "Current campaign must have only the high profile");
         var frameworks = manifest["FrameworkOrder"].A().Select(n => n.S()).ToArray();
         Require(frameworks.SequenceEqual(new[] { "skecs", "lite", "classic", "morpeh", "static" }) || frameworks.SequenceEqual(new[] { "secs", "lite", "classic", "morpeh", "static" }), "Expected exactly five ECS implementations");
@@ -44,7 +47,13 @@ public static class SpaceBattleReports
             foreach (var (key, value) in new[] { ("Seed", 7331), ("ShipsPerTeam", 96), ("CarriersPerTeam", 3), ("FleetComposition", 1), ("Deployment", 1), ("ChurnMultiplier", 2) }) Require(options[key].L() == value, label + ": wrong " + key);
             Require(options["EndlessReinforcements"]!.GetValue<bool>() && !options["ReplenishCarriers"]!.GetValue<bool>(), label + ": wrong game preset");
             foreach (var (key, value) in new[] { ("Revision", "mounted-armament-v7"), ("TacticalRevision", "layered-squads-v3"), ("PhysicsRevision", "circle-kernel-v1"), ("DamageRevision", "layered-weapon-damage-v1") }) Require(metadata["GameplayRules"]![key].S() == value, label + ": stale gameplay rules");
-            var currentCondition = Select(metadata, "Machine", "Runtime", "Os", "Options", "GameplayRules", "Collision");
+            Require(metadata["Implementation"].S() == "independent-native-cores-v1", label + ": shared-core measurement forbidden");
+            var replay = metadata["ReplayValidation"];
+            Require(replay is JsonObject && replay["Revision"].S() == "native-cores-state-v1" && replay["Reference"].S() == "SKECS" &&
+                replay["ReferenceProcess"].S() == "separate" && replay["ValidatedTicks"].L() == Ticks && replay["InitialStateValidated"]!.GetValue<bool>() &&
+                replay["TimerScope"].S() == "outside Step timer and allocation counter", label + ": incomplete per-tick replay validation");
+            Checksum(replay!["InitialStateHash"].S(), label); Require(IsHash(replay["TraceSha256"].S(), 64), label + ": missing full state trace digest");
+            var currentCondition = Select(metadata, "Machine", "Runtime", "Os", "Options", "GameplayRules", "Collision", "Implementation", "ReplayValidation");
             condition ??= currentCondition; provenance ??= run["Provenance"]!.DeepClone();
             Equal(condition, currentCondition, label + ": mixed campaign conditions"); Equal(provenance, run["Provenance"], label + ": mixed source/binary provenance");
             Require(run["Provenance"]!["Binaries"].O().Count > 0 && run["Provenance"]!["Binaries"].O().All(p => IsHash(p.Value.S(), 64)), label + ": malformed binary provenance");
@@ -97,12 +106,20 @@ public static class SpaceBattleReports
         var samples = new Dictionary<string, List<double>>(StringComparer.Ordinal);
         foreach (var key in new[] { "tickMs", "hudMs" }.Concat(Stages).Concat(Counts.Select(k => k.ToLowerInvariant()))) samples[key] = new List<double>(Ticks);
         var allocation = new List<long>(Ticks); var gc = new List<long[]>(Ticks); using var trace = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var stateTrace = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var stateBytes = new byte[8];
         var index = 0;
         foreach (var row in Csv(directory, stem))
         {
             index++; Require(index <= Ticks && row.Integer("tick") == index, stem + ": missing/duplicate tick"); Close(row.Number("simulationSeconds"), index / 60.0, stem + ": simulation clock");
             var gameplay = new[] { "ships", "projectiles", "debris", "particles", "turrets", "adds", "removes" }.Select(key => row.Integer(key)).ToArray(); Require(gameplay.All(n => n >= 0), stem + ": negative gameplay value");
-            trace.AppendData(Encoding.ASCII.GetBytes(string.Join(",", gameplay) + "\n"));
+            Require(row.TryGetValue("stateHash", out var hashText) && hashText.Length == 16 && hashText.All(c => "0123456789ABCDEF".Contains(c)), stem + ": missing/malformed tick state hash");
+            var hash = ulong.Parse(hashText!, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            BinaryPrimitives.WriteUInt64LittleEndian(stateBytes, hash); stateTrace.AppendData(stateBytes);
+            trace.AppendData(Encoding.ASCII.GetBytes(string.Join(",", gameplay) + "," + hashText + "\n"));
+            if (index == 2000) Require(hashText == run["InitialWindow"]!["Checksum"].S(), stem + ": opening state hash differs from tick trace");
+            if (index % 3600 == 0) Require(hashText == run["Checkpoints"]![index / 3600 - 1]!["Checksum"].S(), stem + ": checkpoint state hash differs from tick trace");
+            if (index == Ticks) Require(hashText == run["Checksum"].S(), stem + ": final state hash differs from tick trace");
             foreach (var pair in samples) pair.Value.Add(row.Number(pair.Key));
             allocation.Add(row.Integer("allocatedBytes")); Require(allocation[^1] >= 0, stem + ": negative allocation");
             var currentGc = Enumerable.Range(0, 3).Select(g => row.Integer("gen" + g)).ToArray(); Require(currentGc.All(v => v >= 0) && (gc.Count == 0 || currentGc.Zip(gc[^1]).All(p => p.First >= p.Second)), stem + ": invalid GC sample"); gc.Add(currentGc);
@@ -120,6 +137,7 @@ public static class SpaceBattleReports
             }
             if (index == 2000) { foreach (var key in Counts) Require(row.Integer(key.ToLowerInvariant()) == run["InitialWindow"]![key].L(), stem + ": initial census mismatch"); }
         }
+        Require(HashEquals(Convert.ToHexString(stateTrace.GetHashAndReset()), run["Metadata"]!["ReplayValidation"]!["TraceSha256"].S()), stem + ": state trace digest mismatch");
         Require(index == Ticks, stem + ": incomplete CSV"); Stats(run["Timing"]!, samples["tickMs"], 0, Ticks, stem); Stats(run["HudTiming"]!, samples["hudMs"], 0, Ticks, stem); StageStats(run, samples, 0, Ticks, stem);
         Require(allocation.Sum() == run["AllocatedBytes"].L(), stem + ": total allocations mismatch");
         Stats(run["InitialWindow"]!["Timing"]!, samples["tickMs"], 0, 2000, stem); StageStats(run["InitialWindow"]!, samples, 0, 2000, stem);
@@ -154,7 +172,7 @@ public static class SpaceBattleReports
         foreach (var ru in new[] { false, true })
         {
             string T(string en, string russian) => ru ? russian : en;
-            var lines = new List<string> { ru ? "[English](REPORT.md) | Русский" : "English | [Русский](REPORT.ru.md)", "", "# " + T("Space Battle benchmarks — real-game high", "Бенчмарки Space Battle — игровой high"), "", $"Preset: `game`; profile: `high`; {manifest["StartedAt"].S()} — {manifest["FinishedAt"].S()}.", "", T("Five ECS implementations, 108,000 measured ticks each and 600 separate warmup ticks. Seed 7331, 96 escorts and 3 carriers per team; gameplay churn multiplier 2; endless reinforcements enabled.", "Пять ECS, по 108 000 измеренных тиков и 600 отдельных тиков прогрева. Seed 7331, 96 эскортов и 3 носителя на сторону; ChurnMultiplier 2; бесконечные подкрепления включены."), "", "## " + T("Validation and method", "Проверка и методика"), "", verified ? T("Validation passed: 540,000 raw ticks, archive/decompressed/input hashes, provenance, timings, stages, allocations, GC intervals, counters, census and per-tick gameplay parity.", "Проверка пройдена: 540 000 исходных тиков, хеши архивов/CSV/входов, происхождение, время, стадии, аллокации, интервалы GC, счётчики, census и потиковая игровая трасса.") : T("Published JSON and input/archive hashes validated. Raw tick samples were not verified in this run.", "Опубликованные JSON и хеши входов/архивов проверены. Потиковые выборки в этом запуске не проверялись."), "", T("Outer tick includes gameplay, physics and ECS commits; HUD and stage timers cover narrower scopes. Rendering, snapshots and report generation are excluded. One run per ECS describes this machine and does not establish a stable ranking or confidence interval. Managed allocation excludes native ECS storage.", "Внешний тик включает игровые системы, физику и ECS commit; HUD и стадии имеют более узкие границы. Рендеринг, snapshots и отчёт исключены. Один прогон описывает эту машину и не устанавливает устойчивый рейтинг или доверительный интервал. Managed allocation не включает нативное хранилище ECS."), "", "## " + T("Framework revisions used", "Ревизии фреймворков"), "" };
+            var lines = new List<string> { ru ? "[English](REPORT.md) | Русский" : "English | [Русский](REPORT.ru.md)", "", "# " + T("Space Battle benchmarks — real-game high", "Бенчмарки Space Battle — игровой high"), "", $"Preset: `game`; profile: `high`; {manifest["StartedAt"].S()} — {manifest["FinishedAt"].S()}.", "", T("Five independent native ECS cores, 108,000 measured ticks each and 600 separate warmup ticks. Seed 7331, 96 escorts and 3 carriers per team; gameplay churn multiplier 2; endless reinforcements enabled.", "Пять независимых нативных ECS-ядер, по 108 000 измеренных тиков и 600 отдельных тиков прогрева. Seed 7331, 96 эскортов и 3 носителя на сторону; ChurnMultiplier 2; бесконечные подкрепления включены."), "", "## " + T("Validation and method", "Проверка и методика"), "", verified ? T("Validation passed: 540,000 raw ticks, archive/decompressed/input hashes, provenance, timings, stages, allocations, GC intervals, counters, census and per-tick state-hash parity against SKECS.", "Проверка пройдена: 540 000 исходных тиков, хеши архивов/CSV/входов, происхождение, время, стадии, аллокации, интервалы GC, счётчики, census и потиковое совпадение хеша состояния с SKECS.") : T("Published JSON and input/archive hashes validated. Raw tick samples were not verified in this run.", "Опубликованные JSON и хеши входов/архивов проверены. Потиковые выборки в этом запуске не проверялись."), "", T("Outer tick includes gameplay, physics and ECS commits; HUD and stage timers cover narrower scopes. Rendering, state capture, replay hashing/comparison and report generation are excluded. Every initial state and tick is compared with a SKECS replay generated in a separate process before the 600-tick warmup; hashes include gameplay component state, pending reinforcements and counters. One run per ECS describes this machine and does not establish a stable ranking or confidence interval. Managed allocation excludes native ECS storage.", "Внешний тик включает игровые системы, физику и ECS commit; HUD и стадии имеют более узкие границы. Рендеринг, захват состояния, хеширование/сравнение replay и отчёт исключены. Начальное состояние и каждый тик сравниваются с повтором SKECS из отдельного процесса до прогрева в 600 тиков; хеши включают игровые компоненты, ожидаемые подкрепления и счётчики. Один прогон описывает эту машину и не устанавливает устойчивый рейтинг или доверительный интервал. Managed allocation не включает нативное хранилище ECS."), "", "## " + T("Framework revisions used", "Ревизии фреймворков"), "" };
             Header(lines, "ECS", T("Source revision", "Ревизия"), T("Version", "Версия"));
             var pins = runs[0]["Provenance"]!["Sources"]!;
             var revisions = new[] { manifest["SourceRevision"].S(), pins["Lite"].S(), pins["Classic"].S(), pins["Morpeh"].S(), pins["StaticEcs"].S() };

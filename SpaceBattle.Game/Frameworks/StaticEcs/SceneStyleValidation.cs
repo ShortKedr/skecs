@@ -1,7 +1,7 @@
 using System.Numerics;
 using System.Text.Json;
 
-namespace SpaceBattle.Game;
+namespace SpaceBattle.Game.StaticEcs;
 
 internal static class SceneStyleValidation
 {

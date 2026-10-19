@@ -2,7 +2,7 @@ English | [Русский](README.ru.md)
 
 # SpaceBattle Web
 
-A browser view of the shared C# fleet simulation running on SKECS. Production uses .NET 8 Mono AOT WebAssembly; Canvas draws the scene. Ships fight autonomously while you control the camera and speed.
+A browser view of five independent C# fleet simulations: SKECS, LeoEcsLite, LeoEcs Classic, Morpeh and StaticEcs. Production uses .NET 8 Mono AOT WebAssembly; Canvas draws the scene. Ships fight autonomously while you control the camera and speed.
 
 [Live demo](https://shortkedr.github.io/skecs/) | [Russian demo](https://shortkedr.github.io/skecs/?lang=ru) | [SpaceBattle overview](../docs/space-battle/README.md) | [Current report](../docs/space-battle/REPORT.md)
 
@@ -28,7 +28,8 @@ Open [localhost:8000](http://localhost:8000/) or [its Russian interface](http://
 | Action | Input |
 | --- | --- |
 | Pause / resume | Space or pause button |
-| Restart | Reset button; changing seed or profile also resets |
+| Restart | Reset button; changing framework, seed or profile also resets |
+| Framework | Framework selector or `?framework=skecs`, `lite`, `classic`, `morpeh`, `static` |
 | Speed | Speed buttons |
 | Pan / zoom | Drag the scene / mouse wheel; touch pan and pinch |
 | Fit arena | Fit button |
@@ -43,7 +44,9 @@ Manual pan/zoom, Fit, deselection and reset cancel follow. Camera tools and coll
 
 The **low**, **nominal**, and **high** profiles set combat activity to 0.5×, 1×, and 2×. The multiplier changes weapon cooldowns, carrier production intervals, and boost duration. It does not directly set the number of ships or double the actual workload: combat outcomes change as the battle runs. Changing profile starts a new battle.
 
-The footer and statistics panel describe this browser session. Render FPS, ticks/s, Step time and memory have different scopes; they are not interchangeable with desktop headless measurements.
+Each framework has its own concrete C# simulation and browser bridge. Selection happens before ticking; Canvas consumes their render buffers. Gameplay changes must be mirrored across all cores and matching frontends.
+
+The footer and statistics panel describe the selected framework in this browser session. Render FPS, ticks/s, Step time and memory have different scopes; they are not interchangeable with desktop headless measurements.
 
 ## Development and Compatibility
 

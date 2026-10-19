@@ -109,17 +109,17 @@ headless-тесты покрывают попадания с убийством 
 Оценка целей учитывает DPS установок с отдельными тепловыми бюджетами. Это
 эвристика, не точный решатель боя с учётом всех кулдаунов и времени поворота.
 Сортировка выстрелов и состояние креплений в checksum сохраняют воспроизводимость
-между ECS-адаптерами, но не обещают равенства float между платформами.
+между отдельными ядрами, но не обещают равенства float между платформами.
 
-Исходники: [каталог](../../SpaceBattle.Core/Components.cs),
-[системы креплений](../../SpaceBattle.Core/ArmamentSystems.cs),
-[бой](../../SpaceBattle.Core/CombatSystems.cs),
+Ссылки на исполняемую логику показывают ядро SKECS; остальные четыре ядра содержат соответствующие реализации. Исходники: [каталог](../../SpaceBattle.Core/Components.cs),
+[системы креплений](../../SpaceBattle.Simulations/Skecs/ArmamentSystems.cs),
+[бой](../../SpaceBattle.Simulations/Skecs/CombatSystems.cs),
 [тесты](../../SpaceBattle.Benchmarks/Measurement/ArmamentValidation.cs),
-[фильтрация столкновений](../../SpaceBattle.Core/PhysicsService.cs),
+[фильтрация столкновений](../../SpaceBattle.Simulations/Skecs/PhysicsService.cs),
 [регрессии владельца](../../SpaceBattle.Benchmarks/Measurement/ProjectileOwnerValidation.cs).
 
 ## Проверки
 
-[Тесты вооружения](../../SpaceBattle.Benchmarks/Measurement/ArmamentValidation.cs) покрывают задержку начального заряда, позднее рождение, первый выстрел, огонь турелей во время заряда, независимые цели/нагрев/кулдауны, вращение креплений, наследование скорости снаряда, наведение корпуса и удаление связанных сущностей. [Проверки владельцев](../../SpaceBattle.Benchmarks/Measurement/ProjectileOwnerValidation.cs) покрывают исключение самопопаданий, устаревшие ключи владельцев и friendly fire во всех пяти хранилищах.
+[Тесты вооружения](../../SpaceBattle.Benchmarks/Measurement/ArmamentValidation.cs) покрывают задержку начального заряда, позднее рождение, первый выстрел, огонь турелей во время заряда, независимые цели/нагрев/кулдауны, вращение креплений, наследование скорости снаряда, наведение корпуса и удаление связанных сущностей. [Проверки владельцев](../../SpaceBattle.Benchmarks/Measurement/ProjectileOwnerValidation.cs) покрывают исключение самопопаданий, устаревшие ключи владельцев и friendly fire во всех пяти сохранённых хранилищах совместимости. [Проверка конкретных ядер](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) отдельно сравнивает каждый тик с SKECS.
 
 [Браузерная проверка вооружения](../../tools/web/check-armament.mjs) проверяет AOT-полёт тяжёлого снаряда и независимый поворот. [Проверка начального темпа](../../tools/web/check-heavy-cadence.mjs) покрывает три AOT-профиля, обычный бой во время заряда, последующий тяжёлый огонь и повторы после reset. Это проверка реализации, а не баланса или производительности.

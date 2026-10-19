@@ -1,9 +1,16 @@
 English | [Русский](README.ru.md)
 
-# SpaceBattle Native Adapters
+# SpaceBattle Compatibility Adapters
 
 [Benchmark report](../docs/space-battle/REPORT.md) |
 [Repository overview](../README.md)
+
+This library is retained for focused adapter and gameplay compatibility tests.
+Production SpaceBattle benchmarks, Silk.NET and web clients run the five concrete
+cores in [`SpaceBattle.Simulations`](../SpaceBattle.Simulations); they do not call
+these stores. External [`SpaceBattle.Replay`](../SpaceBattle.Replay) validates
+concrete-core hashes against SKECS after every measured tick. See the
+[current architecture](../docs/space-battle/ARCHITECTURE.md).
 
 Library project: `SpaceBattle.Adapters.csproj`. Public stores in namespace
 `SpaceBattle`: `LeoEcsLiteStore`, `LeoEcsClassicStore`, `MorpehStore`,
@@ -49,7 +56,7 @@ using var store = new StaticEcsStore(r => r.Register<MyComponent>());
 ```
 
 Diagnostics reports the live entity count. Vendor archetype, chunk and byte
-counters are not measured; the central report shows them as unknown.
+counters are not measured and remain `null` in adapter diagnostics.
 
 ## Build and Validation
 
@@ -81,4 +88,4 @@ the four successful store names. `Validate(IEcsStore, int)` takes ownership of a
 empty store and disposes it after validation. `RunAll` prints each framework name
 before validation to identify failures.
 
-For current campaign parity and provenance see the [current report](../docs/space-battle/REPORT.md).
+Adapter validation does not prove concrete-core replay parity. For current campaign parity and provenance see the [current report](../docs/space-battle/REPORT.md).

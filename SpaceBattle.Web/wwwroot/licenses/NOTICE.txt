@@ -4,9 +4,18 @@ Original project code, documentation, data, and artwork:
 Copyright (c) 2026 Nikolay Nakorkeshko. MIT license: MIT.txt.
 Third-party material retains the separate terms listed below.
 
-This browser application bundles only SKECS, SpaceBattle.Core, SpaceBattle.SKECS,
-.NET/Blazor WebAssembly, and Lucide icons. It does not bundle
-LeoECS, LeoECS Lite, Morpeh, StaticEcs, Silk.NET, or the benchmark/test tooling.
+This browser application bundles SKECS, LeoECS Classic, LeoECS Lite, Morpeh,
+StaticEcs, StaticPack, SpaceBattle.Core, SpaceBattle.Simulations, SpaceBattle.Replay,
+.NET/Blazor WebAssembly, and Lucide icons. It does not bundle Silk.NET or the
+benchmark/test tooling.
+
+LeoECS Classic: Copyright 2012 - 2023 leopotam@yandex.ru. MIT-Red license: LEOECS.txt.
+LeoECS Lite: Copyright 2012-2024 leopotam@yandex.ru. MIT-Red license: LEOECSLITE.txt.
+MIT-Red has additional conditions; consult the complete original license texts.
+Morpeh: Copyright 2025 Oleg Morozov, Igor Boyko, Matvey Reschikov.
+MIT license: MORPEH.txt.
+StaticEcs: Copyright 2026 FFS. MIT license: STATICECS.txt.
+StaticPack: Copyright 2025 FFS. MIT license: STATICPACK.txt.
 
 .NET runtime and ASP.NET Core/Blazor 8.0.31
 Copyright (c) .NET Foundation and Contributors.

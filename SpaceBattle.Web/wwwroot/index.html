@@ -17,7 +17,7 @@
       <canvas id="scene" aria-label="Autonomous space battle"></canvas>
       <header class="toolbar">
         <div class="identity">
-          <strong>SKECS</strong><span data-i18n="title">Space battle</span
+          <strong id="framework-name">SKECS</strong><span data-i18n="title">Space battle</span
           ><span id="live-dot"></span>
         </div>
         <div class="controls">
@@ -27,6 +27,13 @@
           <button id="reset" data-tip="reset" aria-label="Reset">
             <i data-lucide="rotate-ccw"></i>
           </button>
+          <label class="field"><span data-i18n="framework">Framework</span><select id="framework">
+            <option value="skecs">SKECS</option>
+            <option value="lite">LeoEcsLite</option>
+            <option value="classic">LeoEcs</option>
+            <option value="morpeh">Morpeh</option>
+            <option value="static">StaticEcs</option>
+          </select></label>
           <label class="field"
             ><span data-i18n="profile">Profile</span
             ><select id="profile">

@@ -2,7 +2,7 @@
 
 # Тактика Групп По Слоям
 
-Текущая ревизия AI: **layered-squads-v3**. Desktop и Mono AOT используют общий C#.
+Текущая ревизия AI: **layered-squads-v3**. Каждый фреймворк реализует одинаковую тактику в собственном C#-ядре для desktop и Mono AOT; см. [архитектуру](ARCHITECTURE.ru.md).
 [DamageRules](../../SpaceBattle.Core/DamageRules.cs) задаёт профили layered-weapon-damage-v1 для тактической оценки.
 
 ## Состав И Устойчивость
@@ -74,7 +74,7 @@ fallback. Диагностика считает его явно.
 [Тесты групп](../../SpaceBattle.Benchmarks/Measurement/SquadCompositionValidation.cs) покрывают
 состав, совместимость, фиксацию, смерть, укрытие, линии и плотные бюджеты.
 [Тесты оценки](../../SpaceBattle.Benchmarks/Measurement/TacticalScoringValidation.cs) покрывают
-слои/вступление/нагрев. Полные проверки и replay всех портов остаются обязательными.
+слои/вступление/нагрев. Эти точечные проверки выполняют сохранённый код совместимости; [проверка конкретных ядер](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) сравнивает каждый тик с SKECS.
 
 
 Полная native-проверка запускается через [CLI бенчмарков](../../SpaceBattle.Benchmarks/README.ru.md). Производительность текущей нагрузки опубликована в [отчёте](REPORT.ru.md).

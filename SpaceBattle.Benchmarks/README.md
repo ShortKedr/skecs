@@ -4,7 +4,7 @@ English | [Русский](README.ru.md)
 
 [SpaceBattle guide](../docs/space-battle/README.md) | [Current report](../docs/space-battle/REPORT.md) | [Desktop timing](../docs/space-battle/DESKTOP_TIMING.md) | [ECS microbenchmarks](../SKECS.Benchmarks/README.md)
 
-This .NET 8 executable owns SpaceBattle measurement, simulation validation and saved-data analysis. It compares SKECS, LeoECS Lite, LeoECS Classic, Morpeh and StaticEcs on the shared C# simulation. SKECS-only and framework microbenchmarks belong to `SKECS.Benchmarks`.
+This .NET 8 executable owns SpaceBattle measurement, simulation validation and saved-data analysis. It compares SKECS, LeoECS Lite, LeoECS Classic, Morpeh and StaticEcs using five independent native C# cores. SKECS-only and framework microbenchmarks belong to `SKECS.Benchmarks`.
 
 ## Reproduce
 
@@ -15,6 +15,17 @@ dotnet run --project SpaceBattle.Benchmarks -c Release -- validate space-battle
 dotnet run --project SpaceBattle.Benchmarks -c Release -- run space-battle
 dotnet run --project SpaceBattle.Benchmarks -c Release -- report space-battle
 dotnet run --project SpaceBattle.Benchmarks -c Release -- verify space-battle
+```
+
+On Windows, rebuilding a loaded host DLL can fail with MSB3021. Run the campaign
+controller from a fresh ignored directory to keep its files separate from the
+outputs it builds and measures; source and binary certification still apply:
+
+```powershell
+$driver = "artifacts/tooling/space-battle-driver"
+dotnet build SpaceBattle.Benchmarks -c Release
+Copy-Item SpaceBattle.Benchmarks/bin/Release/net8.0 $driver -Recurse
+dotnet "$driver/SpaceBattle.Benchmarks.dll" run space-battle
 ```
 
 The full campaign uses profile `high`, preset `game`, gameplay `ChurnMultiplier=2`, 108000 measured ticks after 600 separate warmup ticks, seed 7331 and 96 escorts per team. It adds no synthetic churn or diagnostic entity pools. The report preserves full Step totals, nine stage means, 600-tick HUD windows and opening phases.
@@ -62,7 +73,7 @@ Hardware capture records portable CPU/OS metadata and the GC available-memory li
 
 [Measurement](Measurement/) contains the headless host and simulation validation. [Analysis](Analysis/) owns full campaign, desktop and entity-composition reports. Composition verifies saved `low.json`, `nominal.json` and `high.json`, census/component conservation and available source hashes; it is local diagnostics outside `run all`. Its output stays under ignored artifacts and is not part of the current benchmark publication.
 
-[Native adapters](../SpaceBattle.Adapters/README.md) use pinned runtime sources owned by the ECS benchmark target. Vendor checks and optional missing-file recovery are available there:
+[Native cores](../SpaceBattle.Simulations/) use pinned runtime sources owned by the ECS benchmark target. Adapters remain only for original-implementation regression checks. Vendor checks and optional missing-file recovery are available there:
 
 ```sh
 dotnet run --project SKECS.Benchmarks -c Release -- verify-vendor
@@ -71,3 +82,10 @@ dotnet test tools/BenchmarkSupport.Tests/BenchmarkSupport.Tests.csproj -c Releas
 ```
 
 Recovery reads pinned remote archives and only writes verified missing local files; it refuses changed local sources. A normal clone includes vendors and needs no recovery. See [third-party notices](../THIRD_PARTY_NOTICES.md) for license conditions.
+
+Each [headless host](Measurement/Headless/) directly calls its concrete core.
+[SpaceBattle.Replay](../SpaceBattle.Replay/) hashes the initial state and every
+tick, including counters; each measured tick is compared with a SKECS
+replay generated in a separate process before warmup. State capture, hashing and comparison are outside Step timing and managed
+allocation. Format 4 retains each tick's `stateHash` and the full trace SHA-256;
+analysis rejects legacy shared-core campaigns and divergent state traces.

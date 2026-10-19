@@ -2,7 +2,7 @@ English | [Русский](TACTICS.ru.md)
 
 # Layered Squad Tactics
 
-Current AI revision: **layered-squads-v3**. Desktop and Mono AOT share C# code.
+Current AI revision: **layered-squads-v3**. Each framework implements the same tactics in its own C# core for desktop and Mono AOT; see the [architecture](ARCHITECTURE.md).
 [DamageRules](../../SpaceBattle.Core/DamageRules.cs) is the source for the layered-weapon-damage-v1 damage profiles used by tactical scoring.
 
 ## Composition And Persistence
@@ -70,7 +70,7 @@ determinism and a win in every scenario are not claimed.
 [Squad tests](../../SpaceBattle.Benchmarks/Measurement/SquadCompositionValidation.cs) cover
 composition, compatibility, leases, death repair, cover, lanes and dense budgets.
 [Scoring tests](../../SpaceBattle.Benchmarks/Measurement/TacticalScoringValidation.cs) cover
-layer/arrival/heat estimates. Full checks and all-port replays remain required.
+layer/arrival/heat estimates. These focused fixtures exercise retained compatibility code; [concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare every tick with SKECS.
 
 
 Run the complete native validation with the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md). Current workload performance is published in the [benchmark report](REPORT.md).

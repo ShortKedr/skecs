@@ -46,7 +46,7 @@ some compositions restore two. These are new ships, not copies of destroyed IDs.
 
 Interactive clients now use the [light-swarm compositions](FLEETS.md): all four
 variants favor small ships, with different bomber/raider/screening weights.
-The original equal/armored mixtures remain available in the Core's Uniform mode.
+The original equal/armored mixtures remain available in the `FleetComposition.Uniform` configuration.
 
 The aperture opens 44 world units inside an arena corner. New ships materialize
 within 28 units of it, facing and moving inward. Up to 32 local candidate positions
@@ -55,7 +55,7 @@ Occupied positions defer arrival instead of spawning overlapping hulls. The wave
 cannot exceed the population cap, even if normal production filled slots meanwhile.
 
 Portals use cyan or red artwork for the receiving team; each arriving ship has a
-separate materialization flash. Shared C# presentation controls opening, pulse,
+separate materialization flash. Matching C# presentation rules in each core control opening, pulse,
 closing and flash fade, while both clients use the same
 [generated warp atlas](../../SpaceBattle.Game/Assets/PROVENANCE.md#warp-atlas).
 Portal particles stay below ships; arrival flashes stay above them. Particle caps
@@ -64,12 +64,12 @@ invulnerability, full-field exposure flash or camera shake.
 
 ## Scope And Checks
 
-`BattleConfig.EndlessReinforcements` is opt-in in the shared Core and enabled by the
+`BattleConfig.EndlessReinforcements` is opt-in in the common configuration contract and enabled by the
 interactive hosts and current `game` benchmark preset. Desktop `--finite` disables this endless rule. Gameplay wave state and warp particles participate in deterministic checksums.
 
 The [headless tests](../../SpaceBattle.Benchmarks/Measurement/WarpReinforcementValidation.cs) cover
 thresholds, timing, survivors, team/corner ownership, varied compositions, caps,
 blocked placement, cooldown, no per-carrier revival in endless mode, normal
-production, effects and deterministic replay across all five ECS ports.
+production, effects and deterministic replay across all five retained compatibility stores. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) separately compare every tick with SKECS.
 The [browser check](../../tools/web/check-warp-reinforcements.mjs) exercises actual
 simulation arrivals, atlas pixels, effect lifetime and fixed brightness budgets.

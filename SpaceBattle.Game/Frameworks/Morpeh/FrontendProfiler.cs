@@ -1,3 +1,4 @@
+// Concrete frontend: keep gameplay-facing changes synchronized across all framework frontends.
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
@@ -5,7 +6,9 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Silk.NET.OpenGL;
 
-namespace SpaceBattle.Game;
+using SimulationBattle = SpaceBattle.Simulations.Morpeh.Battle;
+
+namespace SpaceBattle.Game.Morpeh;
 
 internal sealed class FrontendProfiler : IDisposable
 {
@@ -48,7 +51,7 @@ internal sealed class FrontendProfiler : IDisposable
         this.paced = paced;
         samples = new Sample[count];
         hudSamples = new double[count];
-        stageSamples = Battle<SkecsStore>.StageNames.Select(_ => new double[count]).ToArray();
+        stageSamples = SimulationBattle.StageNames.Select(_ => new double[count]).ToArray();
         Array.Fill(pendingSamples, -2);
         vendor = gl.GetStringS(StringName.Vendor);
         device = gl.GetStringS(StringName.Renderer);
@@ -178,7 +181,7 @@ internal sealed class FrontendProfiler : IDisposable
         return Convert.ToHexString(SHA256.HashData(stream));
     }
 
-    public void Finish(Battle<SkecsStore> battle, int width, int height, float zoom, bool hidden, bool hasAtlas, bool controlsVerified, int replayStartTick)
+    public void Finish(SimulationBattle battle, int width, int height, float zoom, bool hidden, bool hasAtlas, bool controlsVerified, int replayStartTick)
     {
         if (finished || !Complete) throw new InvalidOperationException("Profile finish requires exactly the requested frame count.");
         finished = true;
@@ -207,9 +210,8 @@ internal sealed class FrontendProfiler : IDisposable
             TieredCompilation = Environment.GetEnvironmentVariable("DOTNET_TieredCompilation"),
             GameplayRevision = ArmamentRules.Revision,
             Driver = new { Vendor = vendor, Renderer = device, Version = version },
-            CoreDllSha256 = AssemblyHash(typeof(Battle<>).Assembly), GameDllSha256 = AssemblyHash(typeof(FrontendProfiler).Assembly),
-            SkecsAdapterDllSha256 = AssemblyHash(typeof(SkecsStore).Assembly),
-            SkecsDllSha256 = AssemblyHash(typeof(SKECS.World).Assembly),
+            CoreDllSha256 = AssemblyHash(typeof(BattleConfig).Assembly), GameDllSha256 = AssemblyHash(typeof(FrontendProfiler).Assembly),
+            SimulationDllSha256 = AssemblyHash(typeof(SimulationBattle).Assembly),
             FinalBattleChecksum = battle.Checksum().ToString("X16", CultureInfo.InvariantCulture),
             Counters = JsonSerializer.SerializeToElement(battle.Counters.Copy(), new JsonSerializerOptions { IncludeFields = true }),
             Tactics = JsonSerializer.SerializeToElement(battle.Tactics, new JsonSerializerOptions { IncludeFields = true }),
@@ -231,7 +233,7 @@ internal sealed class FrontendProfiler : IDisposable
             PresentCpuMs = (double?)null, PresentWaitMs = (double?)null,
             SimulationCpuMs = Statistics(samples.Select(s => s.SimulationCpuMs)),
             HudTickMs = Statistics(hudSamples),
-            Stages = Battle<SkecsStore>.StageNames.Select((name, stage) => new { Name = name, Timing = Statistics(stageSamples[stage]) }).ToArray(),
+            Stages = SimulationBattle.StageNames.Select((name, stage) => new { Name = name, Timing = Statistics(stageSamples[stage]) }).ToArray(),
             HudWindows = Enumerable.Range(0, (samples.Length + SimulationStatistics.WindowCapacity - 1) / SimulationStatistics.WindowCapacity)
                 .Select(window =>
                 {
@@ -239,7 +241,7 @@ internal sealed class FrontendProfiler : IDisposable
                     var count = Math.Min(SimulationStatistics.WindowCapacity, samples.Length - begin);
                     return new { StartTick = samples[begin].Tick, EndTick = samples[begin + count - 1].Tick,
                         Timing = Statistics(hudSamples.Skip(begin).Take(count)),
-                        Stages = Battle<SkecsStore>.StageNames.Select((name, stage) => new { Name = name, Timing = Statistics(stageSamples[stage].Skip(begin).Take(count)) }).ToArray() };
+                        Stages = SimulationBattle.StageNames.Select((name, stage) => new { Name = name, Timing = Statistics(stageSamples[stage].Skip(begin).Take(count)) }).ToArray() };
                 }).ToArray(),
             SnapshotCaptureCpuMs = Statistics(samples.Select(s => s.SnapshotCaptureCpuMs)),
             RenderSubmissionCpuMs = Statistics(samples.Select(s => s.RenderSubmissionCpuMs)),
@@ -270,7 +272,7 @@ internal sealed class FrontendProfiler : IDisposable
     {
         Directory.CreateDirectory(Path.GetDirectoryName(csv!)!);
         using var writer = new StreamWriter(csv!);
-        writer.WriteLine("frame,tick,simulation_cpu_ms,snapshot_capture_cpu_ms,render_submission_cpu_ms,total_cpu_frame_ms,wall_frame_interval_ms,replay_wall_fps,wall_16_67ms_miss,cpu_16_67ms_miss,gpu_render_ms,present_cpu_ms,present_wait_ms,ships,projectiles,debris,particles,turrets,hud_ms," + string.Join(',', Battle<SkecsStore>.StageNames));
+        writer.WriteLine("frame,tick,simulation_cpu_ms,snapshot_capture_cpu_ms,render_submission_cpu_ms,total_cpu_frame_ms,wall_frame_interval_ms,replay_wall_fps,wall_16_67ms_miss,cpu_16_67ms_miss,gpu_render_ms,present_cpu_ms,present_wait_ms,ships,projectiles,debris,particles,turrets,hud_ms," + string.Join(',', SimulationBattle.StageNames));
         for (int i = 0; i < samples.Length; i++)
         {
             var s = samples[i];

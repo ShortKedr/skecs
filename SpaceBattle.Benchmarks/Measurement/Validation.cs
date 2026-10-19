@@ -3,35 +3,6 @@ using SpaceBattle;
 
 internal static partial class Validation
 {
-    public static void ComparePorts()
-    {
-        var expected = Replay(static () => new SkecsStore());
-        Check(Replay(static () => new LeoEcsLiteStore()), "Lite");
-        Check(Replay(static () => new LeoEcsClassicStore()), "Classic");
-        Check(Replay(static () => new MorpehStore()), "Morpeh");
-        Check(Replay(static () => new StaticEcsStore()), "Static");
-        void Check(ulong[] actual, string name)
-        {
-            for (var i = 0; i < expected.Length; i++) Require(actual[i] == expected[i], $"{name}: checksum at tick {(i + 1) * 300}: {actual[i]:X16} != {expected[i]:X16}");
-            Console.WriteLine($"PASS: {name} == SKECS at all {actual.Length} checkpoints");
-        }
-    }
-    private static ulong[] Replay<T>(Func<T> factory) where T : IEcsStore
-    {
-        using var battle = new Battle<T>(factory(), new BattleConfig { ShipsPerTeam = 16, Seed = 27 });
-        var hashes = new ulong[10];
-        for (var i = 0; i < 3000; i++)
-        {
-            battle.Step();
-            if ((i + 1) % 300 == 0)
-            {
-                battle.Validate();
-                Require(battle.Counters.SelfHits == 0, $"{battle.Framework}: no projectile self hits at tick {i + 1}");
-                hashes[i / 300] = battle.Checksum();
-            }
-        }
-        Console.WriteLine($"Replay {battle.Framework}: {hashes[^1]:X16}"); return hashes;
-    }
     public static void Run()
     {
         FlatSpatialValidation.Run();

@@ -633,3 +633,36 @@ footer #statistics {
     top: 132px;
   }
 }
+/* Keep all three selectors usable alongside transport controls on narrow screens. */
+@media (max-width: 620px) {
+  .controls {
+    display: grid;
+    grid-template-columns: 30px 30px minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px;
+  }
+  .controls .field {
+    margin: 0;
+    min-width: 0;
+  }
+  .controls .field input,
+  .controls .field select {
+    width: 100%;
+    min-width: 0;
+  }
+  .controls .seed {
+    grid-column: 1 / 3;
+  }
+  .segments {
+    grid-column: 3 / -1;
+    justify-self: end;
+  }
+  .toolbar {
+    min-height: 132px;
+  }
+  .scoreboard {
+    top: 146px;
+  }
+  #load-state {
+    top: 132px;
+  }
+}

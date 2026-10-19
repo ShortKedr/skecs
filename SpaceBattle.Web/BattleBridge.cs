@@ -3,6 +3,7 @@ using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
 using System.Diagnostics;
 using SpaceBattle;
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 
 namespace SpaceBattle.Web;
 
@@ -11,7 +12,7 @@ public static unsafe partial class BattleBridge
 {
     private const int HeaderValues = 80;
     private const int RowValues = 16;
-    private static Battle<SkecsStore>? battle;
+    private static Battle? battle;
     private static readonly BattleFrame frame = new();
     private static double* buffer;
     private static int capacity;
@@ -21,8 +22,24 @@ public static unsafe partial class BattleBridge
     private static int colliderCapacity;
     private static bool colliderDebug;
     private static int profile;
-    private static readonly SimulationStatistics statistics = new(Battle<SkecsStore>.StageNames.Length);
+    private static readonly SimulationStatistics statistics = new(Battle.StageNames.Length);
     private static long nextStatisticsRefresh;
+
+    // Switching frameworks releases the inactive core and its exported buffers.
+    [JSExport]
+    public static void Dispose()
+    {
+        battle?.Dispose();
+        battle = null;
+        NativeMemory.Free(buffer);
+        buffer = null;
+        capacity = 0;
+        NativeMemory.Free(colliderBuffer);
+        colliderBuffer = null;
+        colliderCapacity = 0;
+        colliders.Clear();
+        statistics.Reset();
+    }
 
     [JSExport]
     public static int Reset(string requestedProfile, double seed)
@@ -45,21 +62,18 @@ public static unsafe partial class BattleBridge
         };
         battle?.Dispose();
         battle = null;
-        var store = new SkecsStore();
-        try
+
+        battle = new Battle(new BattleConfig
         {
-            battle = new Battle<SkecsStore>(store, new BattleConfig
-            {
-                Seed = (uint)seed,
-                EndlessReinforcements = true,
-                ReplenishCarriers = false,
-                FleetComposition = FleetComposition.LightSwarm,
-                Deployment = FleetDeployment.Tactical,
-                Physics = new PhysicsSettings { CollectTimings = collectTimings },
-                ChurnMultiplier = requested == 0 ? 0.5f : requested == 1 ? 1f : 2f
-            });
-        }
-        catch { store.Dispose(); throw; }
+            Seed = (uint)seed,
+            EndlessReinforcements = true,
+            ReplenishCarriers = false,
+            FleetComposition = FleetComposition.LightSwarm,
+            Deployment = FleetDeployment.Tactical,
+            Physics = new PhysicsSettings { CollectTimings = collectTimings },
+            ChurnMultiplier = requested == 0 ? 0.5f : requested == 1 ? 1f : 2f
+        });
+
         profile = requested;
         statistics.Reset();
         nextStatisticsRefresh = 0;
@@ -364,9 +378,9 @@ public static unsafe partial class BattleBridge
         return checked((int)(nint)buffer);
     }
 
-    private static Battle<SkecsStore> Current => battle ?? throw new InvalidOperationException("Reset the battle first.");
+    private static Battle Current => battle ?? throw new InvalidOperationException("Reset the battle first.");
 
-    private static void CaptureColliders(Battle<SkecsStore> current)
+    private static void CaptureColliders(Battle current)
     {
         current.CaptureColliders(colliders, refreshEntities: false);
         if (colliderBuffer == null || colliders.Count > colliderCapacity)

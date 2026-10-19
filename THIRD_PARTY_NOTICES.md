@@ -85,7 +85,9 @@ their own licenses and notices listed here and in their original files.
 ## Browser Distribution
 
 The [WebAssembly demo](SpaceBattle.Web/README.md) distributes compiled SKECS,
-SpaceBattle.Core and SpaceBattle.SKECS,
+SpaceBattle.Core, SpaceBattle.Simulations and SpaceBattle.Replay,
+along with the pinned LeoECS Lite, LeoECS Classic, Morpeh, StaticEcs and StaticPack
+runtimes described above,
 .NET/Blazor 8.0.31 (MIT and upstream third-party notices), and Lucide 1.55.0
 (ISC / MIT for Feather-derived icons). The static site ships the original license
 texts, copyright notices and artwork provenance in its
@@ -95,9 +97,14 @@ Production AOT output also retains the [Emscripten 3.1.34 license](SpaceBattle.W
 and [author list](SpaceBattle.Web/wwwroot/licenses/EMSCRIPTEN-AUTHORS.txt) from the
 .NET WebAssembly workload. Compiler/toolchain binaries remain local build tools,
 not site assets.
-The demo does not bundle the four comparison ECS libraries, native OpenGL
-dependencies, or benchmark/test dependencies. The broader source comparison
+The demo does not bundle native OpenGL dependencies or benchmark/test dependencies. The broader source comparison
 licensing conditions above remain unchanged.
+
+The project-owned [StaticEcs compatibility source](SKECS.Benchmarks/Vendor/Compatibility/StaticEcsMd5.cs)
+provides equivalent managed MD5 for startup type GUID generation in WebAssembly,
+where the platform MD5 provider is unavailable. Native builds retain the platform
+provider. The pinned upstream sources are unmodified; the shim does not run in
+simulation ticks.
 
 ## Verification
 

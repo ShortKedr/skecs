@@ -54,7 +54,8 @@ public sealed class BattleCampaignRunner(Workspace workspace)
         if (ticks < 1 || warmup < 0) throw new ArgumentException("Ticks must be positive and warmup nonnegative.");
         string[] frameworks = ["skecs", "lite", "classic", "morpeh", "static"];
         var manifest = BattleManifest(ticks, warmup);
-        manifest["Format"] = 3;
+        manifest["Format"] = 4;
+        manifest["Implementation"] = "independent-native-cores-v1";
         manifest["FrameworkOrder"] = new JsonArray(frameworks.Select(f => (JsonNode?)JsonValue.Create(f)).ToArray());
         manifest["Preset"] = "game"; manifest["Profile"] = "high";
         manifest["Workload"] = new JsonObject { ["Preset"] = "game", ["Seed"] = 7331, ["ShipsPerTeam"] = 96, ["GameplayChurnMultiplier"] = 2 };
@@ -68,7 +69,10 @@ public sealed class BattleCampaignRunner(Workspace workspace)
             var result = Workspace.Read(output);
             var signature = new JsonObject();
             foreach (var key in new[] { "Checkpoints", "Checksum", "Counters", "Tactics" }) signature[key] = Clone(result[key]);
-            if (baseline is not null && !JsonNode.DeepEquals(baseline, signature)) throw new InvalidDataException("Cross-framework gameplay divergence: " + framework);
+            var validation = result["Metadata"]!["ReplayValidation"]!;
+            signature["ReplayValidation"] = Clone(validation);
+            // Include every-tick validation evidence in the cross-framework signature.
+            if (baseline is not null && !JsonNode.DeepEquals(baseline, signature)) throw new InvalidDataException("Cross-framework replay validation divergence: " + framework);
             baseline = signature;
         }
         context.AssertStable();
@@ -91,6 +95,7 @@ public sealed class BattleCampaignRunner(Workspace workspace)
     {
         const int ticks = 1200;
         var manifest = BattleManifest(ticks, 600);
+        manifest["Implementation"] = "independent-native-cores-v1";
         manifest["Workload"] = new JsonObject { ["Preset"] = "game", ["Profile"] = "nominal", ["Seed"] = 7331, ["ShipsPerTeam"] = 96, ["GameplayChurnMultiplier"] = 1 };
         Workspace.Write(Path.Combine(directory, "manifest.json"), manifest);
         (string Name, string? Tiering, bool Desktop, bool Paced)[] cases =

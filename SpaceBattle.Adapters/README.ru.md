@@ -1,9 +1,16 @@
 [English](README.md) | Русский
 
-# Нативные Адаптеры SpaceBattle
+# Адаптеры совместимости SpaceBattle
 
 [Отчёт о бенчмарках](../docs/space-battle/REPORT.ru.md) |
 [Обзор репозитория](../README.ru.md)
+
+Библиотека сохранена для точечных проверок адаптеров и совместимости игрового поведения.
+Production-бенчмарки SpaceBattle, Silk.NET и web-клиенты выполняют пять конкретных
+ядер [`SpaceBattle.Simulations`](../SpaceBattle.Simulations), а не эти хранилища.
+Внешний [`SpaceBattle.Replay`](../SpaceBattle.Replay) проверяет хеши конкретных
+ядер против SKECS после каждого измеренного тика. См.
+[текущую архитектуру](../docs/space-battle/ARCHITECTURE.ru.md).
 
 Библиотечный проект: `SpaceBattle.Adapters.csproj`. Публичные хранилища в
 пространстве имён `SpaceBattle`: `LeoEcsLiteStore`, `LeoEcsClassicStore`,
@@ -51,7 +58,7 @@ using var store = new StaticEcsStore(r => r.Register<MyComponent>());
 ```
 
 Диагностика сообщает число живых сущностей. Показатели архетипов, чанков и байтов
-поставщиков не измеряются; центральный отчёт показывает их как неизвестные.
+поставщиков не измеряются и остаются `null` в диагностике адаптеров.
 
 ## Сборка и Проверка
 
@@ -88,4 +95,5 @@ dotnet build SpaceBattle.Adapters/SpaceBattle.Adapters.csproj -c Release --no-re
 dotnet SpaceBattle.Benchmarks/bin/Release/net8.0/SpaceBattle.Benchmarks.dll measure --validate-adapters
 ```
 
+Проверка адаптеров не доказывает совпадение повторов конкретных ядер.
 Текущие parity и provenance см. в [отчёте](../docs/space-battle/REPORT.ru.md).

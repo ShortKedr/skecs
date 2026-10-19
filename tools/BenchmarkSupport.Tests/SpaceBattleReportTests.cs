@@ -154,4 +154,67 @@ public sealed class SpaceBattleReportTests
         }
         finally { Directory.Delete(directory, true); }
     }
+    [Fact]
+    public void SharedCoreCampaignCannotBePublishedAsNativeCoreResults()
+    {
+        var root = Root();
+        var directory = Path.Combine(root, "artifacts", "benchmark-tools-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "manifest.json"), "{\"Format\":3,\"Completed\":true}");
+            Assert.Throws<InvalidDataException>(() => SpaceBattleReports.Run(root, directory, false, false));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
+    [Fact]
+    public void RehashedTickStateCorruptionAndPartialCoverageAreRejectedWhenInputsPresent()
+    {
+        if (Input("space-battle") is not string input) return;
+        var root = Root();
+        var directory = Path.Combine(root, "artifacts", "benchmark-tools-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(input))
+                if (file.EndsWith(".json", StringComparison.Ordinal) || file.EndsWith(".gz", StringComparison.Ordinal))
+                    File.Copy(file, Path.Combine(directory, Path.GetFileName(file)));
+            var manifestPath = Path.Combine(directory, "manifest.json");
+            var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!;
+            var runPath = Path.Combine(directory, "high-lite.json");
+            var original = File.ReadAllText(runPath);
+            var run = JsonNode.Parse(original)!;
+            run["Metadata"]!["ReplayValidation"]!["ValidatedTicks"] = 107999;
+            File.WriteAllText(runPath, run.ToJsonString());
+            manifest["Files"]!["high-lite.json"] = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(runPath)));
+            File.WriteAllText(manifestPath, manifest.ToJsonString());
+            Assert.Throws<InvalidDataException>(() => SpaceBattleReports.Run(root, directory, false, false));
+            File.WriteAllText(runPath, original);
+            manifest["Files"]!["high-lite.json"] = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(runPath)));
+            var archive = Path.Combine(directory, "high-lite.ticks.csv.gz");
+            string csv;
+            using (var file = File.OpenRead(archive))
+            using (var gzip = new GZipStream(file, CompressionMode.Decompress))
+            using (var reader = new StreamReader(gzip)) csv = reader.ReadToEnd();
+            var rows = csv.Split('\n');
+            var header = rows[0].TrimEnd('\r').Split(',');
+            var values = rows[17].TrimEnd('\r').Split(',');
+            var column = Array.IndexOf(header, "stateHash");
+            Assert.True(column >= 0);
+            values[column] = values[column] == "0000000000000000" ? "0000000000000001" : "0000000000000000";
+            rows[17] = string.Join(',', values);
+            using (var file = File.Create(archive))
+            using (var gzip = new GZipStream(file, CompressionLevel.Optimal))
+            using (var writer = new StreamWriter(gzip)) writer.Write(string.Join('\n', rows));
+            manifest["Files"]!["high-lite.ticks.csv.gz"] = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(archive)));
+            using (var file = File.OpenRead(archive))
+            using (var gzip = new GZipStream(file, CompressionMode.Decompress))
+                manifest["TickCsvHashes"]!["high-lite.ticks.csv"] = Convert.ToHexString(SHA256.HashData(gzip));
+            File.WriteAllText(manifestPath, manifest.ToJsonString());
+            Assert.Throws<InvalidDataException>(() => SpaceBattleReports.Run(root, directory, true, false));
+        }
+        finally { Directory.Delete(directory, true); }
+    }
+
 }

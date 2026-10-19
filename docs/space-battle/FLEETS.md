@@ -34,7 +34,7 @@ and five-tick nominal cooldown. Fighters retain their cannon: small hull does
 not imply identical weapons. No damage, shield, armor, heat or cooldown value
 is changed. Carrier guns still use the separately documented armament tuning.
 
-The [shared roster](../../SpaceBattle.Core/FleetCompositionRules.cs) caches a
+The [roster definition](../../SpaceBattle.Core/FleetCompositionRules.cs) caches a
 48-ship smooth weighted round-robin cycle. Rare escorts are interleaved with
 small ships, with no additional RNG consumption or per-spawn roster allocations.
 Other population sizes take a prefix/repetition of this cycle; tiny fleets
@@ -62,11 +62,11 @@ placement checks, strength thresholds, cooldown and caps are unchanged.
 
 ## Scope And Validation
 
-Shared Core defaults to `FleetComposition.Uniform`. Interactive clients and the current `game` benchmark preset select LightSwarm. Desktop `--finite` disables waves while retaining its initial fleet and production roster.
+The common configuration contract defaults to `FleetComposition.Uniform`. Interactive clients and the current `game` benchmark preset select LightSwarm. Desktop `--finite` disables waves while retaining its initial fleet and production roster.
 
 The [headless checks](../../SpaceBattle.Benchmarks/Measurement/FleetCompositionValidation.cs)
 cover weighted cycles, initial counts, production, varied reinforcements, caps
-and deterministic replay across ECS adapters. The [browser checks](../../tools/web/check-web.mjs)
+and deterministic replay across retained compatibility stores. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare every tick with SKECS. The [browser checks](../../tools/web/check-web.mjs)
 verify the real AOT initial roster, combat, resets and controls. This is initial
 spectacle-oriented tuning, not proof of matchup balance or browser frame budgets:
 more rapid-fire ships can create more projectiles even at the same ship cap.

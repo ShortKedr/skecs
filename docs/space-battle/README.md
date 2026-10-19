@@ -4,7 +4,7 @@ English | [Русский](README.ru.md)
 
 # SpaceBattle
 
-SpaceBattle is an AI fleet battle and a realistic ECS comparison workload. Desktop and browser clients share the C# simulation; the headless runner can use SKECS, LeoECS Lite, LeoECS Classic, Morpeh or StaticEcs.
+SpaceBattle is an AI fleet battle and a realistic ECS comparison workload. SKECS, LeoECS Lite, LeoECS Classic, Morpeh and StaticEcs each have an independent C# simulation core, desktop frontend, browser bridge/scene and headless runner. Hosts select the framework before running its implementation.
 
 ## Start Here
 
@@ -14,7 +14,7 @@ SpaceBattle is an AI fleet battle and a realistic ECS comparison workload. Deskt
 | Run desktop and learn its controls | [Desktop client](../../SpaceBattle.Game/README.md) |
 | Read the single high game workload comparison | [Current benchmark report](REPORT.md) |
 | Understand the current stages, components and mutation boundaries | [Current architecture](ARCHITECTURE.md) |
-| Understand the ECS adapter contract | [Native adapters](../../SpaceBattle.Adapters/README.md) |
+| Inspect retained compatibility-store fixtures | [Legacy adapters](../../SpaceBattle.Adapters/README.md) |
 | Find and record real combat moments | [Scene search and capture](../../tools/space-battle/scenes/README.md) |
 
 ## Current Gameplay
@@ -35,7 +35,7 @@ Tuning values are implementation choices, not proof of balanced matchups. A perf
 
 ## Benchmark Reproduction
 
-Run from the repository root with the .NET 8 runtime and an SDK supporting C# 13 (9.0 or newer). The [portable .NET CLI](../../SpaceBattle.Benchmarks/README.md) builds Release, validates adapters, measures sequentially and creates bilingual Markdown/SVG reports. Python and PowerShell are unnecessary; builds restore the measured projects' NuGet dependencies.
+Run from the repository root with the .NET 8 runtime and an SDK supporting C# 13 (9.0 or newer). The [portable .NET CLI](../../SpaceBattle.Benchmarks/README.md) builds Release, checks concrete-core replay against SKECS, measures sequentially and creates bilingual Markdown/SVG reports. Python and PowerShell are unnecessary; builds restore the measured projects' NuGet dependencies.
 
 ```sh
 dotnet run --project SKECS.Benchmarks -c Release -- verify-vendor
@@ -45,7 +45,7 @@ dotnet run --project SpaceBattle.Benchmarks -c Release -- report space-battle
 dotnet run --project SpaceBattle.Benchmarks -c Release -- verify space-battle
 ```
 
-The current suite measures five ECS implementations on one real game workload: profile `high`, preset `game`, gameplay `ChurnMultiplier=2`, and 108000 measured ticks after 600 separate warmup ticks. It adds no synthetic churn or diagnostic entity pools. The report records full Step totals, nine stage means, 600-tick HUD windows and short opening phases.
+The current suite measures five ECS implementations on one real game workload: profile `high`, preset `game`, gameplay `ChurnMultiplier=2`, and 108000 measured ticks after 600 separate warmup ticks. It adds no synthetic churn or diagnostic entity pools. The report records full Step totals, nine stage means, 600-tick HUD windows and short opening phases. Each runner compares tick zero and every measured tick with a separate SKECS reference replay. External state export, hashing and comparison run after the Step timer and per-tick allocation counter stop. See the [architecture](ARCHITECTURE.md) for the simulation and validation boundaries.
 
 Raw JSON, tick CSV/gzip, metadata and hashes remain local in ignored `artifacts/benchmarks/current/space-battle`. Published Markdown reports and SVG charts live under `docs/space-battle`. `report` and `verify` validate archives and recompute complete tick evidence using .NET. A fresh clone can read publications; regenerating them requires retained local raw inputs.
 

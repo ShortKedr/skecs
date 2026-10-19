@@ -14,15 +14,29 @@ each ship/gun atlas are baked as PNG during the build; no runtime pixel readback
 or color filter is added. Alpha, pivots, recoil, projectiles and warp artwork
 are preserved. Orange overheat indicators remain distinct.
 
-This is a real .NET 8 Blazor WebAssembly host for the unchanged
-[SpaceBattle.Core](../SpaceBattle.Core), [SpaceBattle.SKECS](../SpaceBattle.SKECS)
-and [SKECS](../SKECS) simulation with the shared [circle physics kernel](../docs/space-battle/PHYSICS.md).
+This .NET 8 Blazor WebAssembly host uses five independent concrete cores in
+[SpaceBattle.Simulations](../SpaceBattle.Simulations). `BattleBridge` serves SKECS;
+`LeoEcsLiteBattleBridge`, `LeoEcsClassicBattleBridge`, `MorpehBattleBridge` and
+`StaticEcsBattleBridge` each construct, tick, inspect and export their own core.
+The framework selector (or `?framework=` URL value) selects the exported bridge
+before ticking. The bridges share no generic simulation or store abstraction.
+Canvas and the binary DTO format remain shared presentation code. Hashing and
+validation are supplied by [SpaceBattle.Replay](../SpaceBattle.Replay), outside
+simulation cores. Keep every gameplay change synchronized across all five cores
+and matching frontend implementations.
 Aether is no longer a production dependency. C# runs the simulation in
 the browser; production uses AOT-compiled WebAssembly. JavaScript Canvas is a thin
 renderer, not a JavaScript rewrite of the battle. Direct JS exports expose a
 reused render buffer in WASM memory, without JSON snapshots or per-frame full
 checksums. Debug/test checksums are computed only on explicit request.
 Web host and renderer sources are in this directory.
+
+StaticEcs uses the native filtered batch-destruction API in the browser because
+.NET 8 Mono AOT cannot dispatch its single-entity deletion function pointer
+correctly. Desktop keeps the normal native destruction call. Stable StaticEcs
+type identifiers use a managed MD5 implementation in the browser; desktop uses
+the BCL implementation. These compatibility paths preserve simulation rules
+and pinned upstream source bytes.
 
 Current gameplay adds [mounted armament `mounted-armament-v7`](../docs/space-battle/ARMAMENT.md):
 independent turret entities and slow heavy hull cannons on large ships, rendered
@@ -41,6 +55,14 @@ The shared artwork has a controlled contrast lift, verified against
 [fixed effect-only brightness budgets](../SpaceBattle.Game/Assets/PROVENANCE.md#contrast-checks).
 Images replace primitive strokes/circles and texture squares without changing the
 binary frame, physics, damage or gameplay revision.
+
+The concrete framework bridges can be checked against SKECS at every browser tick (all profiles), including render/collider exports and mobile controls, using the already-installed `tools/web` dependencies:
+
+```powershell
+node SpaceBattle.Web/check-frameworks.mjs --url http://localhost:8000/ --ticks 120
+```
+
+This check compares frameworks within one browser runtime; it does not establish cross-platform hash equality.
 
 ## GitHub Pages
 
@@ -98,7 +120,7 @@ mean Core Step divided by that budget. It excludes rendering/export and does not
 promise the requested speed. Backlog/discarded ticks expose the browser catch-up
 limit; discarded time is not skipped gameplay state or an executed tick.
 
-This demo runs SKECS only; it is not the full five-framework comparison.
+This demo can run each of the five frameworks; changing the framework releases the previous core and resets the battle.
 Browser timings describe the current browser, WebAssembly runtime, device and
 execution conditions. Rendering, interop, warmup and tab scheduling can affect
 the experience; browser readings are not interchangeable with the measured

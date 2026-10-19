@@ -2,7 +2,7 @@ English | [Русский](DEPLOYMENT.ru.md)
 
 # Initial Fleet Deployment
 
-Revision: `dispersed-front-v2`. Desktop and web use the same C# startup plan.
+Revision: `dispersed-front-v2`. Each concrete core uses the same C# deployment rules in desktop and web.
 
 The old start sampled every escort in a strip only 32 units deep and 130 units
 wide, without clearance checks. The new start uses a broader front with separate
@@ -28,7 +28,7 @@ positions intentionally change trajectories and checksums, not weapon balance.
 
 ## Reproduction And Limits
 
-`BattleConfig.Deployment` defaults to `LegacyRandom` in the shared Core. Interactive hosts and the current `game` benchmark preset select `Tactical`. Desktop `--legacy-deployment` selects sequential random placement; deliberately dense stress runs can use `--ships 2048 --legacy-deployment`.
+`BattleConfig.Deployment` defaults to `LegacyRandom` in the common configuration contract. Interactive hosts and the current `game` benchmark preset select `Tactical`. Desktop `--legacy-deployment` selects sequential random placement; deliberately dense stress runs can use `--ships 2048 --legacy-deployment`.
 
 The startup planner allocates temporary arrays, not per-tick buffers. It first
 reserves carrier clearance and assigns nearest slots in stable cell order on a
@@ -42,7 +42,7 @@ geometry or spawning overlaps. Increasing arena size helps up to the planning
 cap; extreme dense scenes remain available through the legacy configuration.
 
 `dotnet run --project SpaceBattle.Benchmarks -- measure --validate-deployment` checks placement and repeated replay
-on all five ECS adapters. `tools/web/check-deployment.mjs` verifies the production
+on all five retained compatibility stores. `measure --validate-ports` checks the concrete cores against SKECS at every tick. `tools/web/check-deployment.mjs` verifies the production
 browser deployment, live engagement, reset/replay and desktop/mobile captures.
 
-Native validation covers geometry, irregularity and deterministic adapter replays. Browser checks cover initial attributes, real combat, reset and self-hit exclusion on desktop and mobile viewports. Native/WASM bit-identical replay is not asserted.
+Native validation covers geometry, irregularity and deterministic compatibility-store replays. Browser checks cover initial attributes, real combat, reset and self-hit exclusion on desktop and mobile viewports. Native/WASM bit-identical replay is not asserted.

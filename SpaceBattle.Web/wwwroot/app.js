@@ -6,6 +6,18 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   "use strict";
   const $ = (id) => document.getElementById(id);
   const query = new URLSearchParams(location.search);
+  const frameworks = Object.freeze({
+    skecs: { label: "SKECS", exportName: "BattleBridge" },
+    lite: { label: "LeoEcsLite", exportName: "LeoEcsLiteBattleBridge" },
+    classic: { label: "LeoEcs", exportName: "LeoEcsClassicBattleBridge" },
+    morpeh: { label: "Morpeh", exportName: "MorpehBattleBridge" },
+    static: { label: "StaticEcs", exportName: "StaticEcsBattleBridge" },
+  });
+  const frameworkAliases = { leoecslite: "lite", leoecs: "classic", leoecsclassic: "classic", staticecs: "static" };
+  const frameworkQuery = (query.get("framework") || "skecs").toLowerCase();
+  const requestedFramework = frameworkAliases[frameworkQuery] || frameworkQuery;
+  let framework = Object.hasOwn(frameworks, requestedFramework) ? requestedFramework : "skecs", bridgeExports;
+  $("framework").value = framework;
   const testMode = query.get("test") === "1";
   const diagnosticMode = ["simulation", "render", "minimal", "normal"].includes(query.get("diagnostics")) ? query.get("diagnostics") : null;
   const imageLess = diagnosticMode === "simulation" || diagnosticMode === "minimal";
@@ -15,6 +27,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   const strings = {
     en: {
       title: "Space battle",
+      framework: "Framework",
       profile: "Profile",
       seed: "Seed",
       low: "Low",
@@ -97,6 +110,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     },
     ru: {
       title: "Космический бой",
+      framework: "Фреймворк",
       profile: "Профиль",
       seed: "Сид",
       low: "Низкий",
@@ -382,6 +396,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     snapshot.profile = profiles[header[4]];
     snapshot.stepMs = header[5];
     snapshot.runtimeMode = runtimeMode;
+    snapshot.framework = framework;
     Object.assign(snapshot.binary, { version: header[0], headerValues, rowValues: 16, totalRows, byteLength });
     snapshot.counts.ships = header[6];
     snapshot.counts.projectiles = header[7];
@@ -459,7 +474,20 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     $("seed").setCustomValidity("");
     try {
       stopFollowing();
+      const requested = $("framework").value;
+      if (bridge !== bridgeExports[frameworks[requested].exportName]) {
+        bridge.Dispose();
+        bridge = bridgeExports[frameworks[requested].exportName];
+        revisions = null;
+        heapBuffer = null;
+        framePointer = -1;
+        header = null;
+        colliderRows = null;
+      }
+      framework = requested;
+      $("framework-name").textContent = frameworks[framework].label;
       const pointer = bridge.Reset($("profile").value, seed);
+      if (colliderDebug) bridge.DebugColliders(true);
       revisions ||= { revision: bridge.Revision(), fleetRevision: bridge.FleetRevision(), deploymentRevision: bridge.DeploymentRevision(),
         physicsRevision: bridge.PhysicsRevision(), damageRevision: bridge.DamageRevision(), tacticalRevision: bridge.TacticalRevision() };
       accept(pointer);
@@ -915,7 +943,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       $("stage-" + key).textContent = number(m.stages[i], 3);
     });
     $("stats-runtime").textContent =
-      `SKECS · ${runtimeMode} · ${snapshot.revision}`;
+      `${frameworks[framework].label} · ${runtimeMode} · ${snapshot.revision}`;
   }
   function showStatistics(value) {
     $("simulation-stats").hidden = !value;
@@ -952,7 +980,8 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       }
       runtime = getDotnetRuntime(0);
       const exports = await runtime.getAssemblyExports("SpaceBattle.Web.dll");
-      bridge = exports.SpaceBattle.Web.BattleBridge;
+      bridgeExports = exports.SpaceBattle.Web;
+      bridge = bridgeExports[frameworks[framework].exportName];
       runtimeMode = bridge.Mode();
       if (
         runtimeMode !== "aot-binary" &&
@@ -1115,6 +1144,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   );
   $("pause").onclick = () => setPaused(!paused);
   $("reset").onclick = reset;
+  $("framework").onchange = reset;
   $("profile").onchange = reset;
   $("seed").onchange = reset;
   $("seed").oninput = () => $("seed").setCustomValidity("");
@@ -1294,6 +1324,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     return JSON.stringify({
       ready,
       paused,
+      framework,
       profile: snapshot?.profile || $("profile").value,
       seed: snapshot?.seed ?? Number($("seed").value),
       tick: snapshot?.tick || 0,
@@ -1402,6 +1433,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   };
   icons();
   localize();
+  if (!Object.hasOwn(frameworks, requestedFramework)) { fail(new Error("Unknown framework: " + requestedFramework), "framework"); return; }
   if (query.has("diagnostics") && !diagnosticMode) { fail(new Error("Unknown paused diagnostic mode"), "diagnostics"); return; }
   if (!ctx) { fail(contextError || new Error("Canvas 2D context is unavailable"), "context"); return; }
   resize();

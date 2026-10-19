@@ -11,6 +11,9 @@
     <Version>2.2.9</Version>
   </PropertyGroup>
   <ItemGroup>
+    <!-- StaticEcs derives type GUIDs with MD5, unavailable in the browser runtime.
+         Preserve pinned sources; substitute only that startup hash factory. -->
+    <Compile Include="Compatibility/StaticEcsMd5.cs" />
     <Compile Include="Sources/StaticEcs/Src/**/*.cs" />
     <Compile Include="Sources/StaticPack/Src/**/*.cs" />
   </ItemGroup>

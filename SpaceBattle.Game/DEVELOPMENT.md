@@ -4,6 +4,17 @@ English | [Русский](DEVELOPMENT.ru.md)
 
 [Launch and controls](README.md) | [SpaceBattle](../docs/space-battle/README.md)
 
+`--framework skecs|lite|classic|morpeh|static` selects a concrete desktop
+implementation before the window is created. Each directory under `Frameworks/`
+contains its own `BattleApp`, scene renderer, scene regression fixture and profiler,
+calling its concrete `SpaceBattle.Simulations` core directly. There is no generic
+battle/store or runtime simulation interface in the desktop loop. OpenGL primitives,
+atlases, camera math and render DTO definitions remain reusable assets/helpers.
+State hashing is supplied by `SpaceBattle.Replay`, outside the simulation cores.
+When simulation logic or presentation data changes, update all five cores and
+all five matching desktop frontends and scene checks together. Run the capture,
+controls, live-statistics and scene-style checks with each framework selector.
+
 Both clients share a [generated gun atlas](Assets/PROVENANCE.md#gun-atlas), with
 fixed mounts, crop-relative bearing pivots and independently rotating/recoiling heads.
 Mount bases and weapon heads use the same parent-hull RGB paint, including the
@@ -102,7 +113,7 @@ directory. Tick fast-forward runs before rendering
 and is not charged to the wall-time accumulator. The PNG is read from the actual
 OpenGL framebuffer; its adjacent JSON contains entity counts and nonblank pixel
 statistics. Capture metadata also records the battle checkpoint checksum as a
-16-digit hex string and SHA-256 hashes of the loaded Core, Game and SKECS adapter assemblies
+16-digit hex string and SHA-256 hashes of the loaded simulation and Game assemblies, with the selected framework name
 for provenance. Repeat with ticks 0, 900 and 3600. `--ships-per-team`, `--seed`,
 `--width` and `--height` customize a run. `--zoom` sets the initial runtime/capture
 zoom (finite values from 0.25 through 24, default 1); Home/Fit still fits the arena.

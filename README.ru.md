@@ -50,9 +50,10 @@ dotnet test SKECS.Tests/SKECS.Tests.csproj -c Release
 **[Читать отчёт о бенчмарках](docs/space-battle/REPORT.ru.md)**
 
 Автономные флоты используют управление через AI, стрельбу с упреждением,
-турели, щиты, производство, стыковку и ремонт на авианосцах. Desktop- и
-Web-клиенты работают на SKECS; headless-хост также сравнивает LeoECS Lite,
-LeoECS Classic, Morpeh и StaticEcs через адаптеры нативного хранения и запросов.
+турели, щиты, производство, стыковку и ремонт на авианосцах. У SKECS, LeoECS Lite, LeoECS Classic, Morpeh и StaticEcs
+отдельные ядра симуляции и соответствующие desktop-, browser- и headless-реализации.
+Headless-замеры проверяют каждый тик против отдельного эталона SKECS вне таймера
+симуляции; см. [архитектуру](docs/space-battle/ARCHITECTURE.ru.md).
 
 [![Геймплей Space Battle](docs/space-battle/cover.png)](docs/space-battle/README.ru.md)
 

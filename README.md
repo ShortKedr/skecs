@@ -50,9 +50,10 @@ references, structural changes, and chunk iteration.
 **[Read the benchmark report](docs/space-battle/REPORT.md)**
 
 Autonomous fleets use AI steering, intercept aiming, turrets, shields, carrier
-production, docking, and repair. The desktop and browser frontends use SKECS;
-the headless host also compares LeoECS Lite, LeoECS Classic, Morpeh, and StaticEcs
-through native storage and query adapters.
+production, docking, and repair. SKECS, LeoECS Lite, LeoECS Classic, Morpeh and StaticEcs each have an independent
+simulation core and matching desktop, browser and headless implementations.
+Headless measurements validate every tick against a separate SKECS reference
+outside the simulation timer; see the [architecture](docs/space-battle/ARCHITECTURE.md).
 
 [![Space Battle gameplay](docs/space-battle/cover.png)](docs/space-battle/README.md)
 

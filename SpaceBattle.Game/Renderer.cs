@@ -234,7 +234,7 @@ internal sealed unsafe class Renderer : IDisposable
         gl.Enable(EnableCap.Blend); gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
     }
     private int width, height;
-    public void Begin(int w, int h) { width = w; height = h; vertices.Clear(); gl.Viewport(0, 0, (uint)w, (uint)h); var background = BattleSceneRenderer.Background; gl.ClearColor(background.X, background.Y, background.Z, 1); gl.Clear(ClearBufferMask.ColorBufferBit); }
+    public void Begin(int w, int h) { width = w; height = h; vertices.Clear(); gl.Viewport(0, 0, (uint)w, (uint)h); var background = ScenePalette.Background; gl.ClearColor(background.X, background.Y, background.Z, 1); gl.Clear(ClearBufferMask.ColorBufferBit); }
     private void Add(Vector2 p, Vector4 c, Vector2 uv) => vertices.Add(new(new(p.X / width * 2 - 1, 1 - p.Y / height * 2), uv, c));
     public void Triangle(Vector2 a, Vector2 b, Vector2 c, Vector4 color) { var uv = new Vector2(-1); Add(a, color, uv); Add(b, color, uv); Add(c, color, uv); }
     public void Line(Vector2 a, Vector2 b, float thickness, Vector4 color, bool preserveSmallSegments = false)

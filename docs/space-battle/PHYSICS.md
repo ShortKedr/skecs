@@ -4,11 +4,11 @@ English | [Русский](PHYSICS.ru.md)
 
 [Desktop](../../SpaceBattle.Game/README.md) | [Web](../../SpaceBattle.Web/README.md)
 
-The shared C# simulation uses circle-kernel-v1 in desktop and production Mono AOT WASM. Current-source measurements are in the [benchmark report](REPORT.md).
+Each independent C# core implements circle-kernel-v1 in desktop and production Mono AOT WASM. Source links below show the SKECS implementation; corresponding implementations live in all five [core directories](ARCHITECTURE.md). Current-source measurements are in the [benchmark report](REPORT.md).
 
 ## Dynamics
 
-[PhysicsService](../../SpaceBattle.Core/PhysicsService.cs) stores one homogeneous
+[PhysicsService](../../SpaceBattle.Simulations/Skecs/PhysicsService.cs) stores one homogeneous
 disk per ship: position, angle, linear/angular velocity, radius, mass and inertia
 `I = 0.5 * mass * radius^2`. Normal circle impulses are radial and deliberately
 do not create spin. Configurable Coulomb tangential friction uses a shared contact
@@ -44,7 +44,7 @@ do not get ship bodies.
 
 ## Broadphase And CCD
 
-[The grid](../../SpaceBattle.Core/SpatialBoundsIndex.cs) inserts whole swept AABBs,
+[The grid](../../SpaceBattle.Simulations/Skecs/SpatialBoundsIndex.cs) inserts whole swept AABBs,
 not just centers. It includes different radii, negative coordinates and cell
 boundaries; query stamps deduplicate IDs. Large bounds use a bounded-membership
 fallback, and long queries scan occupied cells rather than billions of empty ones.
@@ -57,7 +57,7 @@ cell is therefore not lost. The recorded path is piecewise linear between solver
 outputs, including positional projection; it is not a reconstruction of an exact
 continuous rigid-body trajectory through an instantaneous correction.
 
-[Analytic tests](../../SpaceBattle.Core/CircleSweepMath.cs) replace five offset rays:
+[Analytic tests](../../SpaceBattle.Simulations/Skecs/CircleSweepMath.cs) replace five offset rays:
 disks solve relative segment vs the sum of radii; MachineGun/Cannon rounds use a
 fixed-orientation rectangle with half-length `2 * Radius` and half-width `Radius`.
 The rectangle-circle sum is exactly a rounded rectangle (side strips and corner
@@ -97,8 +97,7 @@ elastic momentum/energy, angular integration, friction torque/angular momentum,
 contact lifecycle, docking, correction without explosions, dense stability and
 reserved allocation. [Geometry tests](../../SpaceBattle.Benchmarks/Measurement/AnalyticSweepValidation.cs)
 include 12,000 independent distance-oracle sweeps and 3,000 brute-force bounds
-queries. Existing mechanics, owner immunity, warp, armament and all-ECS replay
-checks run against the new model. Validation uses the current physics model and configuration.
+queries. Focused fixtures exercise the retained compatibility model. [Native replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare the five concrete cores against SKECS at every tick; validation and hashing run outside measured Step timers.
 
 Run the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md) with `validate space-battle` to execute the current checks. Measurements and raw evidence use the same CLI and remain separate from validation.
 

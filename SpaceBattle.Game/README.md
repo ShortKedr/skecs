@@ -2,7 +2,7 @@ English | [Русский](README.ru.md)
 
 # SpaceBattle Desktop
 
-Watch an autonomous fleet battle in the Silk.NET/OpenGL client. It runs the shared C# simulation with SKECS. You control the view and simulation speed; the AI controls the ships.
+Watch an autonomous fleet battle in the Silk.NET/OpenGL client. Choose SKECS, LeoECS Lite, LeoECS Classic, Morpeh or StaticEcs; each runs its own C# simulation and desktop frontend. You control the view and simulation speed; the AI controls the ships.
 
 [SpaceBattle overview](../docs/space-battle/README.md) | [Current benchmark report](../docs/space-battle/REPORT.md) | [Engineering guide](DEVELOPMENT.md)
 
@@ -21,6 +21,7 @@ Useful launch options:
 
 | Option | Meaning |
 | --- | --- |
+| `--framework skecs` | Choose `skecs` (default), `lite`, `classic`, `morpeh` or `static` |
 | `--seed 7331` | Repeat a seeded starting scenario |
 | `--ships-per-team 96` (also `--ships`) | Initial escorts per team, excluding carriers |
 | `--finite` | Disable endless warp reinforcement waves |
@@ -28,6 +29,8 @@ Useful launch options:
 | `--statistics` | Open the detailed statistics panel |
 | `--colliders` | Start with collision outlines visible |
 | `--follow-ship 22` | Start following a ship by serial |
+
+The long framework aliases `leoecslite`, `leoecs` and `staticecs` remain accepted.
 
 `--ships 2048 --legacy-deployment` is a deliberately dense stress scenario, not the default experience.
 
