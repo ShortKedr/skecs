@@ -1,20 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <ProjectReference Include="..\SKECS\SKECS.csproj" />
-    <ProjectReference Include="../benchmarks/SKECS.Benchmarks.Workloads/SKECS.Benchmarks.Workloads.csproj" />
-  </ItemGroup>
-
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <NoWarn>$(NoWarn);CS8600;CS8601;CS8602;CS8603;CS8604;CS8618;CS8619;CS8625;CS8765</NoWarn>
   </PropertyGroup>
-
   <ItemGroup>
+    <ProjectReference Include="../SKECS/SKECS.csproj" />
+    <ProjectReference Include="../tools/BenchmarkSupport/BenchmarkSupport.csproj" />
+    <ProjectReference Include="Vendor/StaticLibrary.csproj" />
+    <ProjectReference Include="Vendor/MorpehLibrary.csproj" />
     <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <Compile Include="Program.cs;EcsCampaignRunner.cs" />
+    <Compile Include="Comparison/**/*.cs;Workloads/**/*.cs;Suites/**/*.cs;Analysis/**/*.cs" />
+    <Compile Include="Vendor/Sources/ecs/src/**/*.cs;Vendor/Sources/ecslite/src/**/*.cs" />
   </ItemGroup>
-
 </Project>

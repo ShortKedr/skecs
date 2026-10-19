@@ -15,8 +15,8 @@
 Из корня репозитория:
 
 ```powershell
-npm ci --prefix tools/web --cache Benchmarks.Local/tmp/npm-cache
-$publish = "Benchmarks.Local/tmp/web-local-" + [guid]::NewGuid().ToString("N")
+npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
+$publish = "artifacts/tooling/tmp/web-local-" + [guid]::NewGuid().ToString("N")
 ./tools/build-space-battle-web.ps1 -OutputDirectory $publish -ArtifactsDirectory ($publish + "-build") -BasePath /
 python -m http.server 8000 --directory "$publish/wwwroot"
 ```
@@ -47,6 +47,6 @@ python -m http.server 8000 --directory "$publish/wwwroot"
 
 ## Разработка и совместимость
 
-[Техническое руководство](DEVELOPMENT.ru.md) описывает bridge/render buffer, определения статистики, браузерные проверки, профилирование и существующий Pages workflow. Исследования [компилятора](../tools/web/MONO_COMPILER_STUDY.ru.md) и [локальности](../tools/HardwareStudy/LOCALITY_OPTIMIZATION.ru.md) сохраняют собственные датированные конфигурации и результаты.
+[Техническое руководство](DEVELOPMENT.ru.md) описывает bridge/render buffer, определения статистики, браузерные проверки, профилирование и Pages workflow. [Руководство по Web-инструментам](../tools/web/README.ru.md) описывает браузерную диагностику и анализ компилятора Mono.
 
-[Исследование iOS](../docs/space-battle/IOS_WEB.ru.md) ещё не проверено на настоящем iPhone. Desktop WebKit smoke — отдельная ограниченная проверка.
+Desktop WebKit smoke не подтверждает совместимость с настоящим iPhone; требуется проверка на устройстве.

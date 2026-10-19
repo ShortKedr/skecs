@@ -10,12 +10,12 @@ const argument = (name, fallback) => {
   return index < 0 ? fallback : process.argv[index + 1];
 };
 const site = path.resolve(
-  argument("--site", "Benchmarks.Local/tmp/web-publish/wwwroot"),
+  argument("--site", "artifacts/tooling/tmp/web-publish/wwwroot"),
 );
 const base = argument("--base", "/");
 const remote = argument("--url", null);
 const evidence = path.resolve(
-  argument("--output", "Benchmarks.Local/tmp/web-checks"),
+  argument("--output", "artifacts/tooling/tmp/web-checks"),
 );
 await fs.mkdir(evidence, { recursive: true });
 const errors = [],

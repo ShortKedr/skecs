@@ -97,7 +97,7 @@ async function main() {
   const output = await projectPath(options.get("--output"), false), base = options.get("--base") || "/";
   assert.ok(/^\/(?:[a-zA-Z0-9_-]+\/)*$/.test(base), "Invalid local base path");
   const settings = validateSettings(JSON.parse((await fs.readFile(settingsPath, "utf8")).replace(/^\uFEFF/, "")));
-  const tmp = path.join(root, "Benchmarks.Local/tmp");
+  const tmp = path.join(root, "artifacts/tooling/tmp");
   assert.ok(output.startsWith(tmp + path.sep), "Capture must be staged in ignored project output");
   await fs.mkdir(tmp, { recursive: true }); await fs.mkdir(path.dirname(output), { recursive: true });
   process.env.TEMP = process.env.TMP = process.env.TMPDIR = tmp;

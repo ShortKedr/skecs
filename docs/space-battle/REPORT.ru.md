@@ -252,10 +252,10 @@ Base commit: `9063e9d780526dc937d949a6709b33241b47a092`. Source and loaded DLL h
 
 
 ```sh
-dotnet run --project tools/BenchmarkTools -- report space-battle --data artifacts/benchmarks/current/space-battle --output docs/space-battle/current
+dotnet run --project SpaceBattle.Benchmarks -- report space-battle --data artifacts/benchmarks/current/space-battle --output docs/space-battle/current
 ```
 
-[Desktop timing](DESKTOP_TIMING.ru.md) · [Architecture](ARCHITECTURE.ru.md) · [Historical finite battle](REPORT_2026-10-14_FINITE.ru.md)
+[Desktop timing](DESKTOP_TIMING.ru.md) · [Architecture](ARCHITECTURE.ru.md)
 
 Локальные входы измерения: `artifacts/benchmarks/current/space-battle`.
 Базовый commit: `9063e9d780526dc937d949a6709b33241b47a092`.

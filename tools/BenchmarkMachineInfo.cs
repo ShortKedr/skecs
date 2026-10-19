@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
 
-internal static class BenchmarkMachineInfo
+public static class BenchmarkMachineInfo
 {
     public static string CpuName
     {

@@ -13,9 +13,9 @@
 ## Зависимости
 
 Classic и Lite компилируют существующие исходники поставщиков как связанные
-файлы, по аналогии с `Benchmarks.Local/Comparison.csproj`, без ссылки на его
+файлы, по аналогии с `SKECS.Benchmarks/SKECS.Benchmarks.csproj`, без ссылки на его
 исполняемый проект. Morpeh ссылается на существующий проект поставщика.
-StaticEcs ссылается на `Benchmarks.Local/StaticLibrary.csproj` (2.2.9).
+StaticEcs ссылается на `SKECS.Benchmarks/Vendor/StaticLibrary.csproj` (2.2.9).
 StaticPack 1.2.6 компилируется из закреплённого снимка исходников.
 
 ## Контракт
@@ -59,8 +59,8 @@ using var store = new StaticEcsStore(r => r.Register<MyComponent>());
 restore уже выполняется:
 
 ```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
+$env:DOTNET_CLI_HOME = "$PWD/artifacts/tooling/dotnet-home"
+$env:NUGET_PACKAGES = "$PWD/artifacts/tooling/nuget-packages"
 dotnet restore SpaceBattle.Adapters/SpaceBattle.Adapters.csproj
 dotnet build SpaceBattle.Adapters/SpaceBattle.Adapters.csproj -c Release --no-restore -m:1
 ```
@@ -85,7 +85,7 @@ dotnet build SpaceBattle.Adapters/SpaceBattle.Adapters.csproj -c Release --no-re
 После сборки headless-host запускайте проверку из корня проекта, вне замеров:
 
 ```powershell
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate-adapters
+dotnet SpaceBattle.Benchmarks/bin/Release/net8.0/SpaceBattle.Benchmarks.dll measure --validate-adapters
 ```
 
 Текущие parity и provenance см. в [отчёте](../docs/space-battle/REPORT.ru.md).

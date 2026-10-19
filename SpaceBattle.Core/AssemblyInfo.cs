@@ -1,3 +1,3 @@
 using System.Runtime.CompilerServices;
 
-[assembly: InternalsVisibleTo("SpaceBattle.Headless")]
+[assembly: InternalsVisibleTo("SpaceBattle.Benchmarks")]

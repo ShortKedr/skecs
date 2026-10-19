@@ -2,7 +2,7 @@ English | [Русский](README.ru.md)
 
 # Scene Search And Video Capture
 
-[SpaceBattle overview](../../../docs/space-battle/README.md) | [Research index](../../../docs/space-battle/RESEARCH.md)
+[SpaceBattle overview](../../../docs/space-battle/README.md)
 
 Reusable tools for three real SpaceBattle moments: coordinated squad kills,
 lethal HeavyCannon hits, and corner warp arrivals followed by a dense two-sided
@@ -18,15 +18,15 @@ Chromium 151.0.7922.34. No SDK or browser is installed automatically.
 For a fresh dependency setup, keep caches inside the project:
 
 ```powershell
-npm ci --prefix tools/web --cache Benchmarks.Local/tmp/npm-cache
-$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD 'Benchmarks.Local/tmp/playwright-browsers'
+npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD 'artifacts/tooling/tmp/playwright-browsers'
 npm exec --prefix tools/web -- playwright install chromium
 ```
 
 Search:
 
 ```powershell
-./tools/space-battle/find-scenes.ps1 -WorkDirectory Benchmarks.Local/tmp/scene-tools -Profiles nominal,high -Seeds 7331 -Ticks 4200
+./tools/space-battle/find-scenes.ps1 -WorkDirectory artifacts/tooling/tmp/scene-tools -Profiles nominal,high -Seeds 7331 -Ticks 4200
 ```
 
 The first call prepares an isolated production/probe Mono AOT pair using
@@ -34,7 +34,7 @@ The first call prepares an isolated production/probe Mono AOT pair using
 source and build hashes. An existing interrupted directory or changed source
 requires a new `-WorkDirectory`; completed builds are never overwritten.
 Use `-DotnetExecutable` to select an existing SDK. The project-local
-`Benchmarks.Local/tmp/dotnet-aot/dotnet.exe` is preferred when present.
+`artifacts/tooling/tmp/dotnet-aot/dotnet.exe` is preferred when present.
 
 The command prints the fresh `search.json` path. It contains ranked episodes,
 exact causal evidence, resolved game configuration, source/build identity,
@@ -45,7 +45,7 @@ profiles, one seed, 4200 ticks, three candidates per category.
 Capture the first ranked heavy episode from that file:
 
 ```powershell
-./tools/space-battle/capture-scene.ps1 -Search Benchmarks.Local/tmp/scene-tools/search-example/search.json -Type heavy -Rank 1 -OutputDirectory Benchmarks.Local/tmp/scene-tools/video-heavy
+./tools/space-battle/capture-scene.ps1 -Search artifacts/tooling/tmp/scene-tools/search-example/search.json -Type heavy -Rank 1 -OutputDirectory artifacts/tooling/tmp/scene-tools/video-heavy
 ```
 
 Replace `search-example` with the printed directory. `-Type group` and `-Type warp`
@@ -120,8 +120,7 @@ checks can be less cinematic or miss valid collaborations.
 
 Own ephemeral localhost servers and browsers are closed; existing preview
 processes are not touched. Outputs, temporary browser profiles and build caches
-stay under ignored `Benchmarks.Local`. Historical reports and measurements are
-not regenerated. For custom criteria use the Node entry points
+stay under ignored `artifacts/tooling`. For custom criteria use the Node entry points
 [find-scenes.mjs](find-scenes.mjs), [capture-scene.mjs](capture-scene.mjs) and the
 pure [candidate detector](scene-candidates.mjs), not changes to the simulation.
 

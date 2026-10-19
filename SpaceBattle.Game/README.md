@@ -48,10 +48,10 @@ Useful launch options:
 
 Following frames the watched ship and its live target. Death switches to a known surviving fatal projectile owner, otherwise a nearby survivor. Manual camera movement, selection elsewhere, Fit or restart cancels follow. Camera actions do not affect combat.
 
-The statistics panel separates simulation timing, entity populations, combat counters and storage. Mean uses the last 600 simulation ticks (10 seconds at 60 Hz), including physics and commits. Capture and rendering sit outside this timer. Compare it with the [game preset and HUD-window report](../docs/space-battle/GAME_REPORT.md); a full-run mean for a finite battle averages a different workload and period.
+The statistics panel separates simulation timing, entity populations, combat counters and storage. Mean uses the last 600 simulation ticks (10 seconds at 60 Hz), including physics and commits. Capture and rendering sit outside this timer. Compare it with the [game preset and HUD-window report](../docs/space-battle/REPORT.md); a full-run mean for a finite battle averages a different workload and period.
 
 ## Capture and Diagnostics
 
 Use the [engineering guide](DEVELOPMENT.md) for framebuffer captures, visual checks, live-statistics validation and CPU/GPU profiling. [Asset provenance](Assets/PROVENANCE.md) records the sprite contracts. [Scene tools](../tools/space-battle/scenes/README.md) find and record real combat episodes.
 
-Keep new captures and profiles in a fresh `Benchmarks.Local/tmp` directory. Finish rendering, builds and validation before starting benchmark timing.
+Keep new captures and profiles in a fresh `artifacts/tooling/tmp` directory. Finish rendering, builds and validation before starting benchmark timing.

@@ -18,8 +18,8 @@ const localUrl = value => {
 };
 const url = localUrl(arg("--url", "http://127.0.0.1:8046/"));
 const baselineUrl = arg("--baseline-url", null);
-const output = path.resolve(arg("--output", "Benchmarks.Local/tmp/web-heavy-impact"));
-const temporaryRoot = path.resolve("Benchmarks.Local/tmp") + path.sep;
+const output = path.resolve(arg("--output", "artifacts/tooling/tmp/web-heavy-impact"));
+const temporaryRoot = path.resolve("artifacts/tooling/tmp") + path.sep;
 assert.ok(output.startsWith(temporaryRoot), "Evidence stays inside the project's ignored temporary directory");
 const manifest = JSON.parse(await fs.readFile("SpaceBattle.Game/Assets/effects-atlas.json", "utf8"));
 const sprite = manifest.sprites.find(s => s.family === "particle" && s.kind === 3);

@@ -2,7 +2,7 @@ English | [Русский](SKECS_OPTIMIZATION.ru.md)
 
 # SKECS Runtime Optimizations
 
-[Library guide](skecs/README.md) · [Documentation map](README.md) · [Current ECS campaign](benchmarks/current/REPORT.md) · [Current API and storage measurements](benchmarks/current/SUPPLEMENT.md) · [Historical 2026-10-11 before/after experiment](benchmarks/optimization-methodology.md)
+[Library guide](skecs/README.md) · [Documentation map](README.md) · [Current ECS campaign](benchmarks/current/REPORT.md) · [Current API and storage measurements](benchmarks/current/SUPPLEMENT.md)
 
 Status: implemented in the current [CPU runtime](../SKECS/World.cs). This guide describes APIs and their costs. Measured speedups belong to the linked benchmark reports.
 
@@ -75,11 +75,4 @@ bytes. `NativeBytes` excludes managed entity/version arrays, metadata, and nativ
 allocator overhead. `AccessorBufferBytes` excludes managed array headers. These
 are diagnostic counters, not a complete process-memory measurement.
 
-The [2026-10-11 methodology](benchmarks/optimization-methodology.md) documents
-a historical before/after experiment against that experiment's binaries and
-accessor limitations. Its speedup ratios describe only that comparison. For
-current results, see the [five-ECS campaign](benchmarks/current/REPORT.md) and
-the [new API and storage measurements](benchmarks/current/SUPPLEMENT.md); do not
-carry historical ratios over to the current API. Historical five-framework
-charts remain historical and are not relabelled as measurements of the
-optimized runtime.
+See the [five-ECS campaign](benchmarks/current/REPORT.md) and [API and storage measurements](benchmarks/current/SUPPLEMENT.md) for current results.

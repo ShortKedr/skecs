@@ -1,5 +1,5 @@
 param(
-    [string]$WorkDirectory = 'Benchmarks.Local/tmp/scene-tools',
+    [string]$WorkDirectory = 'artifacts/tooling/tmp/scene-tools',
     [string]$DotnetExecutable = '',
     [string]$NodeExecutable = 'node'
 )
@@ -13,7 +13,7 @@ try {
     if ($state.reused) { Write-Output "Reusing verified builds: $($state.prepared)"; return }
     $work = $state.work
     if (-not $DotnetExecutable) {
-        $local = Join-Path $root 'Benchmarks.Local/tmp/dotnet-aot/dotnet.exe'
+        $local = Join-Path $root 'artifacts/tooling/tmp/dotnet-aot/dotnet.exe'
         $DotnetExecutable = if (Test-Path -LiteralPath $local) { $local } else { (Get-Command dotnet -ErrorAction Stop).Source }
     }
     $DotnetExecutable = (Get-Command $DotnetExecutable -ErrorAction Stop).Source
@@ -21,7 +21,7 @@ try {
     $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
     $env:PATH = $env:DOTNET_ROOT + [IO.Path]::PathSeparator + $env:PATH
     $env:DOTNET_CLI_HOME = Join-Path $work 'cache/dotnet-home'
-    $env:NUGET_PACKAGES = Join-Path $root 'Benchmarks.Local/nuget-packages'
+    $env:NUGET_PACKAGES = Join-Path $root 'artifacts/tooling/nuget-packages'
     $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
     $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
     $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'

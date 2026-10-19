@@ -1,8 +1,8 @@
 param(
-    [string]$OutputDirectory = "Benchmarks.Local/tmp/web-publish",
+    [string]$OutputDirectory = "artifacts/tooling/tmp/web-publish",
     [string]$BasePath = "/skecs/",
     [switch]$Interpreter,
-    [string]$ArtifactsDirectory = "Benchmarks.Local/tmp/web-build",
+    [string]$ArtifactsDirectory = "artifacts/tooling/tmp/web-build",
     [string]$NodeExecutable = "node"
 )
 $ErrorActionPreference = "Stop"
@@ -22,8 +22,8 @@ if ($BasePath -notmatch '^/([a-zA-Z0-9_-]+/)*$') { throw "BasePath must be an ab
 if (Test-Path -LiteralPath (Join-Path $output "wwwroot/build-identity.json")) {
     throw "OutputDirectory already contains a finalized site. Choose a fresh directory to preserve earlier builds."
 }
-$env:DOTNET_CLI_HOME = Join-Path $root "Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = Join-Path $root "Benchmarks.Local/nuget-packages"
+$env:DOTNET_CLI_HOME = Join-Path $root "artifacts/tooling/dotnet-home"
+$env:NUGET_PACKAGES = Join-Path $root "artifacts/tooling/nuget-packages"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = "false"

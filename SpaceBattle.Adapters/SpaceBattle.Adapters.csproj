@@ -9,12 +9,12 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Author's microbenchmark reference is preserved here; the generated,
-         compiled integration lives in Benchmarks.Local/StaticAdapters.cs. -->
+         compiled integration lives in SKECS.Benchmarks/Comparison/StaticAdapters.cs. -->
     <Compile Remove="StaticAdapters.cs" />
     <ProjectReference Include="../SpaceBattle.Core/SpaceBattle.Core.csproj" />
-    <ProjectReference Include="../Benchmarks.Local/StaticLibrary.csproj" />
-    <ProjectReference Include="../Benchmarks.Local/MorpehLibrary.csproj" />
-    <Compile Include="../Benchmarks.Local/vendor/ecs/src/**/*.cs" Link="Vendor/Classic/%(RecursiveDir)%(Filename)%(Extension)" />
-    <Compile Include="../Benchmarks.Local/vendor/ecslite/src/**/*.cs" Link="Vendor/Lite/%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="../SKECS.Benchmarks/Vendor/StaticLibrary.csproj" />
+    <ProjectReference Include="../SKECS.Benchmarks/Vendor/MorpehLibrary.csproj" />
+    <Compile Include="../SKECS.Benchmarks/Vendor/Sources/ecs/src/**/*.cs" Link="Vendor/Classic/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../SKECS.Benchmarks/Vendor/Sources/ecslite/src/**/*.cs" Link="Vendor/Lite/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

@@ -9,7 +9,7 @@ const arg = (name, fallback) => {
 };
 const url = arg("--url", "http://127.0.0.1:8039/");
 const baselineUrl = arg("--baseline-url", null);
-const output = path.resolve(arg("--output", "Benchmarks.Local/tmp/web-effects"));
+const output = path.resolve(arg("--output", "artifacts/tooling/tmp/web-effects"));
 const manifest = JSON.parse(await fs.readFile("SpaceBattle.Game/Assets/effects-atlas.json", "utf8"));
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });

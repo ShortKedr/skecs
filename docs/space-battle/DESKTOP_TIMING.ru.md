@@ -68,7 +68,7 @@ HUD Mean усредняет последние min(600, число тиков) �
 
 
 ```sh
-dotnet run --project tools/BenchmarkTools -- report desktop --data artifacts/benchmarks/current/desktop --output docs/space-battle/desktop-current
+dotnet run --project SpaceBattle.Benchmarks -- report desktop --data artifacts/benchmarks/current/desktop --output docs/space-battle/desktop-current
 ```
 
 Checksum: `4876EB52A0D4AFC3`. Локальные входы измерения: `artifacts/benchmarks/current/desktop`.

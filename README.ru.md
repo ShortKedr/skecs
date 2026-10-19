@@ -21,13 +21,10 @@
 | --- | --- |
 | Использовать библиотеку | [Быстрый старт](#быстрый-старт) · [Установка пакета](docs/skecs/INSTALL.ru.md) · [API и правила времени жизни](docs/skecs/README.ru.md) · [Исходник примера](SKECS.Sample/Program.cs) |
 | Развивать SKECS | [Реализованные оптимизации](docs/SKECS_OPTIMIZATION.ru.md) · [Тесты](SKECS.Tests) |
-| Прочитать или воспроизвести измерения | [Микробенчмарки](SKECS.Benchmarks/README.ru.md) · [Сравнение пяти фреймворков](Benchmarks.Local/README.ru.md) · [Отчёт Space Battle](docs/space-battle/REPORT.ru.md) |
+| Прочитать или воспроизвести измерения | [Бенчмарки ECS](SKECS.Benchmarks/README.ru.md) · [Бенчмарки SpaceBattle](SpaceBattle.Benchmarks/README.ru.md) · [Отчёт Space Battle](docs/space-battle/REPORT.ru.md) |
 | Запустить игру | [Desktop](SpaceBattle.Game/README.ru.md) · [Web](SpaceBattle.Web/README.ru.md) |
 
-`Benchmarks.Local/` — публичный стенд сравнения пяти ECS: исходники, скрипты
-воспроизведения и результаты замеров. `Local` описывает запуск раннера, а не
-доступность папки. Каталоги сборки и кешей игнорируются; внутренние планы
-хранятся в `skecs-private/`.
+`SKECS.Benchmarks/` объединяет бенчмарки SKECS, сравнение пяти ECS и анализ результатов. `SpaceBattle.Benchmarks/` объединяет замеры и анализ игровой нагрузки. Сырые данные и кеши находятся в игнорируемом `artifacts/`; публикуются итоговые отчёты и графики.
 
 ## Быстрый старт
 
@@ -35,8 +32,8 @@
 настройки PowerShell сохраняют кеши инструментов и пакетов внутри проекта:
 
 ```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
+$env:DOTNET_CLI_HOME = "$PWD/artifacts/tooling/dotnet-home"
+$env:NUGET_PACKAGES = "$PWD/artifacts/tooling/nuget-packages"
 
 dotnet run --project SKECS.Sample/SKECS.Sample.csproj -c Release
 dotnet test SKECS.Tests/SKECS.Tests.csproj -c Release

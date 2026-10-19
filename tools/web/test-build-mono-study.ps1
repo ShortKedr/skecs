@@ -14,7 +14,7 @@ function CheckGuard($argsTable, $expected) {
 }
 CheckGuard @{ OutputDirectory = "../outside" } "OutputDirectory must remain"
 CheckGuard @{ ArtifactsDirectory = "../outside" } "ArtifactsDirectory must remain"
-CheckGuard @{ OutputDirectory = "Benchmarks.Local/tmp/same"; ArtifactsDirectory = "Benchmarks.Local/tmp/same" } "must be separate"
-CheckGuard @{ OutputDirectory = "Benchmarks.Local/tmp/same"; ArtifactsDirectory = "Benchmarks.Local/tmp/same/build" } "must be separate"
+CheckGuard @{ OutputDirectory = "artifacts/tooling/tmp/same"; ArtifactsDirectory = "artifacts/tooling/tmp/same" } "must be separate"
+CheckGuard @{ OutputDirectory = "artifacts/tooling/tmp/same"; ArtifactsDirectory = "artifacts/tooling/tmp/same/build" } "must be separate"
 CheckGuard @{ BasePath = "not-absolute" } "BasePath must be"
 Write-Output "3 PowerShell scripts parse; 5 pre-build path/base guards pass (no build launched)."

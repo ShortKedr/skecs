@@ -7,7 +7,7 @@ const arg = (name, fallback) => {
   const index = process.argv.indexOf(name);
   return index < 0 ? fallback : process.argv[index + 1];
 };
-const output = path.resolve(arg("--output", "Benchmarks.Local/tmp/heavy-cadence-checks"));
+const output = path.resolve(arg("--output", "artifacts/tooling/tmp/heavy-cadence-checks"));
 const url = arg("--url", "http://127.0.0.1:8040/");
 const baselineUrl = arg("--baseline-url", null);
 await fs.mkdir(output, { recursive: true });

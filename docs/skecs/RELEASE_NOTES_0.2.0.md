@@ -1,3 +1,5 @@
+English | [Русский](RELEASE_NOTES_0.2.0.ru.md)
+
 # SKECS 0.2.0 — Branch
 
 SKECS 0.2.0 introduces the breaking product and public API identity change

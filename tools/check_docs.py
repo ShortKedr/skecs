@@ -11,35 +11,47 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCUMENTS = [
-    "README.md", "SKECS.Benchmarks/README.md", "SpaceBattle.Game/README.md",
-    "SpaceBattle.Web/README.md",
-    "SpaceBattle.Game/Assets/PROVENANCE.md", "SpaceBattle.Adapters/README.md",
-    "docs/SKECS_OPTIMIZATION.md", "docs/benchmarks/optimization-methodology.md",
-    "docs/space-battle/README.md",
-    "docs/space-battle/SYSTEMS.md", "docs/space-battle/TACTICS.md", "docs/space-battle/ARMAMENT.md", "docs/space-battle/REINFORCEMENTS.md", "docs/space-battle/COVER.md", "docs/space-battle/PERFORMANCE_INVESTIGATION.md", "docs/space-battle/REPORT.md",
-    "docs/space-battle/SPATIAL_OPTIMIZATION.md", "docs/space-battle/FLEETS.md", "docs/space-battle/PHYSICS.md",
-    "tools/physics/README.md", "tools/performance/README.md", "tools/HardwareStudy/README.md",
-    "docs/space-battle/HARDWARE_OPTIMIZATION.md",
-    "tools/web/MONO_COMPILER_STUDY.md",
-    "tools/HardwareStudy/LOCALITY_OPTIMIZATION.md",
-    "docs/space-battle/DAMAGE.md",
-    "docs/space-battle/TACTICS_V3.md",
-    "docs/space-battle/IOS_WEB.md",
-    "docs/space-battle/DEPLOYMENT.md",
-    "tools/space-battle/scenes/README.md",
-    "docs/promo/space-battle/README.md",
-    "Benchmarks.Local/README.md", "THIRD_PARTY_NOTICES.md",
-    "docs/README.md", "docs/skecs/README.md", "docs/skecs/INSTALL.md",
-    "SpaceBattle.Game/DEVELOPMENT.md", "SpaceBattle.Web/DEVELOPMENT.md",
-    "docs/space-battle/RESEARCH.md",
-    "docs/space-battle/REPORT_2026-10-11.md", "docs/benchmarks/current/REPORT.md",
-    "docs/space-battle/ARCHITECTURE.md",
-    "docs/benchmarks/COLORS.md",
-    "docs/benchmarks/current/SUPPLEMENT.md",
-    "docs/space-battle/GAME_REPORT.md", "docs/space-battle/DESKTOP_TIMING.md",
-    "tools/BenchmarkTools/README.md", "Benchmarks.Local/CodeGen/README.md",
-    "docs/space-battle/composition/COMPOSITION.md",
-    "tools/README.md",
+    'README.md',
+    'SKECS.Benchmarks/CodeGen/README.md',
+    'SKECS.Benchmarks/README.md',
+    'SpaceBattle.Adapters/README.md',
+    'SpaceBattle.Benchmarks/README.md',
+    'SpaceBattle.Game/Assets/PROVENANCE.md',
+    'SpaceBattle.Game/DEVELOPMENT.md',
+    'SpaceBattle.Game/README.md',
+    'SpaceBattle.Web/DEVELOPMENT.md',
+    'SpaceBattle.Web/README.md',
+    'THIRD_PARTY_NOTICES.md',
+    'docs/README.md',
+    'docs/SKECS_OPTIMIZATION.md',
+    'docs/benchmarks/COLORS.md',
+    'docs/benchmarks/current/REPORT.md',
+    'docs/benchmarks/current/SUPPLEMENT.md',
+    'docs/promo/space-battle/README.md',
+    'docs/skecs/INSTALL.md',
+    'docs/skecs/README.md',
+    'docs/skecs/RELEASE_NOTES_0.2.0.md',
+    'docs/space-battle/ARCHITECTURE.md',
+    'docs/space-battle/ARMAMENT.md',
+    'docs/space-battle/COVER.md',
+    'docs/space-battle/DAMAGE.md',
+    'docs/space-battle/DEPLOYMENT.md',
+    'docs/space-battle/DESKTOP_TIMING.md',
+    'docs/space-battle/FLEETS.md',
+    'docs/space-battle/PHYSICS.md',
+    'docs/space-battle/README.md',
+    'docs/space-battle/REINFORCEMENTS.md',
+    'docs/space-battle/REPORT.md',
+    'docs/space-battle/TACTICS.md',
+    'tools/BenchmarkSupport/README.md',
+    'tools/README.md',
+    'tools/space-battle/scenes/README.md',
+    'tools/web/README.md',
+]
+SINGLE_DOCUMENTS = [
+    'AGENTS.md',
+    'SKECS/PACKAGE_README.md',
+    'tools/release-consumers/README.md',
 ]
 
 
@@ -196,14 +208,14 @@ def check(root=ROOT):
                     if destination.endswith(".md") and not destination.endswith(".ru.md"):
                         parsed = urlsplit(destination)
                         target = (path.parent / destination).resolve()
-                        original_license = target.name == "LICENSE.md" and target.is_relative_to(ROOT / "Benchmarks.Local/vendor")
-                        raw_evidence = target.name.endswith("-report-github.md") and target.parent.name == "results" and target.is_relative_to(ROOT / "Benchmarks.Local")
-                        if not parsed.scheme and target != english and not original_license and not raw_evidence:
+                        original_license = target.name == "LICENSE.md" and target.is_relative_to(ROOT / "SKECS.Benchmarks/Vendor/Sources")
+                        if not parsed.scheme and target != english and not original_license:
                             raise ValueError("Russian navigation leaves its locale: " + str(path.relative_to(ROOT)) + ": " + destination)
     # Check remaining single-language public guides without imposing a bilingual
     # template on them.
     paired = {p for en in paths for p in (en, russian_path(en))}
-    single_paths = sorted(p for p in (ROOT / "docs/skecs").rglob("*.md") if p not in paired)
+    single_paths = sorted({ROOT / name for name in SINGLE_DOCUMENTS} |
+                          {p for p in (ROOT / "docs/skecs").rglob("*.md") if p not in paired})
     for path in single_paths:
         clean, _ = without_fences(path.read_text(encoding="utf-8-sig"))
         html = HtmlLinks()

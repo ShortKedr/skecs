@@ -91,7 +91,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    args.output.resolve().relative_to(root / "Benchmarks.Local" / "tmp")
+    args.output.resolve().relative_to(root / "artifacts" / "tooling" / "tmp")
     if args.output.exists():
         raise ValueError("Refusing to overwrite audit")
     result = audit(args.variant.resolve())

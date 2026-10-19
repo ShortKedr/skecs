@@ -6,8 +6,8 @@ import { chromium, webkit } from "playwright";
 const option = (key, fallback) => { const index = process.argv.indexOf(key); return index < 0 ? fallback : process.argv[index + 1]; };
 const url = new URL(option("--url", "http://127.0.0.1:8062/"));
 url.searchParams.set("test", "1"); url.searchParams.delete("diagnostics");
-const output = path.resolve(option("--output", "Benchmarks.Local/tmp/ios-web-fix-20261012/render-faults.json"));
-if (!["localhost", "127.0.0.1"].includes(url.hostname) || !output.startsWith(path.resolve("Benchmarks.Local/tmp") + path.sep))
+const output = path.resolve(option("--output", "artifacts/tooling/tmp/ios-web-fix-20261012/render-faults.json"));
+if (!["localhost", "127.0.0.1"].includes(url.hostname) || !output.startsWith(path.resolve("artifacts/tooling/tmp") + path.sep))
   throw new Error("Local preview and ignored output only");
 const engine = option("--browser", "chromium");
 if (!["chromium", "webkit"].includes(engine)) throw new Error("Unknown browser");

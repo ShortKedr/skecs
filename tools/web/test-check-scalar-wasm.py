@@ -11,7 +11,7 @@ module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 
 class ScalarCheckTests(unittest.TestCase):
     def test_decoder_accepts_newer_runtime_patch_from_installed_workload(self):
-        scratch = Path(__file__).resolve().parents[2] / "Benchmarks.Local/tmp"
+        scratch = Path(__file__).resolve().parents[2] / "artifacts/tooling/tmp"
         scratch.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=scratch) as directory:
             root = Path(directory)

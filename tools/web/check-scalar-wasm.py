@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     module = args.module.resolve(); module.relative_to(ROOT)
-    output = args.output.resolve(); output.relative_to(ROOT / "Benchmarks.Local/tmp")
+    output = args.output.resolve(); output.relative_to(ROOT / "artifacts/tooling/tmp")
     if output.exists():
         raise ValueError("Use a fresh diagnostic output")
     before = hashlib.sha256(module.read_bytes()).hexdigest()

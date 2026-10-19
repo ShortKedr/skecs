@@ -8,17 +8,6 @@ English | [Русский](COVER.ru.md)
 in headless Chromium. Only Canvas is captured; HTML controls and telemetry are
 hidden without changing the viewport or camera. It is
 not the frozen measured run, a benchmark, or evidence of realtime performance.
-Historical `action.png` and `action.png.json`, their hash inventory, parity
-records and all measurement files remain unchanged.
-
-The saved pair was refreshed on 2026-10-14 from a clean local checkout of
-`43316769acfcfa00a5307dd79490ef07e2f07ee6` using Chromium `151.0.7922.34`.
-The capture recorded `SourceDirty=false`, tick 180, 180 on-screen ships and
-722 projectiles; battle checksum `79B277702009BA08`. The validator checked
-the loaded files against the served AOT build, including the build identity,
-atlas manifest and six generated textures. This verifies the local capture;
-it does not verify a remote workflow or deployment.
-
 ## Configuration And Local Capture
 
 The authoritative parameters live in [cover-settings.json](cover-settings.json),
@@ -44,12 +33,12 @@ From the repository root (on Linux, run the PowerShell helper through `pwsh`):
 python -m pip install -r tools/space-battle/cover-requirements.txt
 (cd tools/web && npm ci && npx playwright install chromium)
 pwsh -File tools/build-space-battle-web.ps1 \
-  -OutputDirectory Benchmarks.Local/tmp/cover-web -BasePath /
+  -OutputDirectory artifacts/tooling/tmp/cover-web -BasePath /
 python tools/space-battle/cover.py capture \
-  --site Benchmarks.Local/tmp/cover-web/wwwroot \
+  --site artifacts/tooling/tmp/cover-web/wwwroot \
   --source-commit "$(git rev-parse HEAD)"
 python tools/space-battle/cover.py validate \
-  --directory Benchmarks.Local/tmp/space-battle-cover --allow-dirty
+  --directory artifacts/tooling/tmp/space-battle-cover --allow-dirty
 ```
 
 On Windows PowerShell, run the build helper directly, run the npm commands from
@@ -57,7 +46,7 @@ On Windows PowerShell, run the build helper directly, run the npm commands from
 Use `PLAYWRIGHT_BROWSERS_PATH` consistently for browser installation and capture
 when using a project-local browser cache. Uncommitted local previews are marked `SourceDirty`;
 `--allow-dirty` is for local validation only and is never used by Actions.
-Capture writes into `Benchmarks.Local/tmp/space-battle-cover`, not the documents.
+Capture writes into `artifacts/tooling/tmp/space-battle-cover`, not the documents.
 
 ## Cover Provenance
 

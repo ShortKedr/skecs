@@ -1,11 +1,11 @@
-param([string]$Study = "Benchmarks.Local/tmp/mono-study-20261012")
+param([string]$Study = "artifacts/tooling/tmp/mono-study-20261012")
 $ErrorActionPreference = "Stop"
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
 $studyPath = [IO.Path]::GetFullPath((Join-Path $root $Study))
-if (-not $studyPath.StartsWith((Join-Path $root "Benchmarks.Local/tmp") + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "Project-local ignored study required" }
+if (-not $studyPath.StartsWith((Join-Path $root "artifacts/tooling/tmp") + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "Project-local ignored study required" }
 $cache = Join-Path $studyPath "D-private-cache"
 if (Test-Path -LiteralPath $cache) { throw "Refusing to reuse cache" }
-$packs = Join-Path $root "Benchmarks.Local/tmp/dotnet-aot/packs"
+$packs = Join-Path $root "artifacts/tooling/tmp/dotnet-aot/packs"
 $sdk = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Sdk.win-x64/8.0.31/tools"
 $python = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Python.win-x64/8.0.31/tools"
 $node = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Node.win-x64/8.0.31/tools/bin/node.exe"

@@ -2,9 +2,9 @@ English | [Русский](ARCHITECTURE.ru.md)
 
 # Current SpaceBattle Architecture
 
-[Overview](README.md) | [Current report](REPORT.md) | [Historical systems catalogue](SYSTEMS.md)
+[Overview](README.md) | [Current report](REPORT.md)
 
-This is a map of the current implementation, checked against source on 2026-10-13. Core owns combat rules and the tick sequence; stores own ECS components and query membership; hosts decide how to advance, observe and present the battle.
+This is a map of the current implementation. Core owns combat rules and the tick sequence; stores own ECS components and query membership; hosts decide how to advance, observe and present the battle.
 
 ## Projects and Data Flow
 
@@ -22,7 +22,7 @@ flowchart LR
 
 [Core](../../SpaceBattle.Core/Battle.cs) contains configuration, ship catalogue, AI, weapons, damage, physics and lifecycle. [SKECS integration](../../SpaceBattle.SKECS/SkecsStore.cs) and [native adapters](../../SpaceBattle.Adapters/README.md) implement the same [store contract](../../SpaceBattle.Core/EcsContract.cs) using each framework's native storage and queries. `EntityKey` carries a store-local ID and generation; gameplay serials provide stable ordering independently of native entity IDs.
 
-[Headless](../../SpaceBattle.Headless/Program.cs) runs `Step`, records timing/counters/checkpoints and serializes results after measurement. [Game](../../SpaceBattle.Game/README.md) and [Web](../../SpaceBattle.Web/README.md) use SKECS. They call shared simulation and presentation APIs; the web bridge prepares a reused binary render buffer for Canvas. `Capture` builds a presentation view with separate ship/turret lists and omits docked ships from visible ship rows. Rendered, ship and total ECS counts therefore describe different populations.
+[Headless](../../SpaceBattle.Benchmarks/Measurement/MeasurementProgram.cs) runs `Step`, records timing/counters/checkpoints and serializes results after measurement. [Game](../../SpaceBattle.Game/README.md) and [Web](../../SpaceBattle.Web/README.md) use SKECS. They call shared simulation and presentation APIs; the web bridge prepares a reused binary render buffer for Canvas. `Capture` builds a presentation view with separate ship/turret lists and omits docked ships from visible ship rows. Rendered, ship and total ECS counts therefore describe different populations.
 
 Host configuration matters: interactive clients explicitly choose LightSwarm, dispersed deployment and endless reinforcements. The default `BattleConfig` uses Uniform and legacy deployment, enables carrier replacement and leaves endless warp reinforcements off. Read the [current report](REPORT.md) for the measured headless configuration.
 
@@ -69,4 +69,4 @@ Turrets are separate ECS entities bound to a parent hull, with their own targeti
 
 Tactical snapshots and sorted views are temporary read structures; they do not replace ECS storage. Physics keeps body/contact/query state synchronized with ship components. Presentation, statistics and explicit checksum requests have separate scopes. Matching recorded checksums is bounded replay evidence, not a complete snapshot or proof of cross-platform determinism.
 
-For rule details see [tactics v3](TACTICS_V3.md), [physics](PHYSICS.md), [armament](ARMAMENT.md), [damage](DAMAGE.md) and [reinforcements](REINFORCEMENTS.md). For capture/profiling scopes use the client engineering guides: [desktop](../../SpaceBattle.Game/DEVELOPMENT.md), [web](../../SpaceBattle.Web/DEVELOPMENT.md).
+For rule details see [tactics v3](TACTICS.md), [physics](PHYSICS.md), [armament](ARMAMENT.md), [damage](DAMAGE.md) and [reinforcements](REINFORCEMENTS.md). For capture/profiling scopes use the client engineering guides: [desktop](../../SpaceBattle.Game/DEVELOPMENT.md), [web](../../SpaceBattle.Web/DEVELOPMENT.md).

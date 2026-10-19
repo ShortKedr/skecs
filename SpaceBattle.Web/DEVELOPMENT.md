@@ -60,8 +60,8 @@ same-browser reset parity, combat counters, camera/selection controls, touch,
 responsive layout and error recovery. Run the same checks locally:
 
 ```powershell
-$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/Benchmarks.Local/tmp/playwright-browsers"
-npm ci --prefix tools/web --cache Benchmarks.Local/tmp/npm-cache
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/artifacts/tooling/tmp/playwright-browsers"
+npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
 ./tools/build-space-battle-web.ps1
 node tools/web/node_modules/playwright/cli.js install chromium webkit
 node tools/web/check-web.mjs --base /skecs/
@@ -110,7 +110,7 @@ render-buffer preparation, full frontend frames and realtime tick throughput.
 With the local server above running, use:
 
 ```powershell
-node tools/web/profile-web.mjs --url http://localhost:8000/ --warmup-ticks 600 --output Benchmarks.Local/tmp/web-performance.json
+node tools/web/profile-web.mjs --url http://localhost:8000/ --warmup-ticks 600 --output artifacts/tooling/tmp/web-performance.json
 ```
 
 It uses nominal seed 7331 in a 1440x900 Chromium viewport. Change `--warmup-ticks`
@@ -121,5 +121,5 @@ browser and battle phase, without other browser checks running concurrently.
 For the measured comparison and its limitations, read the
 [report](../docs/space-battle/REPORT.md). To reproduce the desktop campaign,
 follow the [benchmark methodology](../docs/space-battle/README.md) and
-[implementation/build inventory](../Benchmarks.Local/README.md).
+[implementation/build inventory](../SKECS.Benchmarks/README.md).
 Publishing or running this demo does not regenerate or replace those measurements.

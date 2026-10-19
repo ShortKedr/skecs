@@ -252,10 +252,10 @@ Local lossless gzip archives retain the full tick CSV; archive and decompressed 
 
 
 ```sh
-dotnet run --project tools/BenchmarkTools -- report space-battle --data artifacts/benchmarks/current/space-battle --output docs/space-battle/current
+dotnet run --project SpaceBattle.Benchmarks -- report space-battle --data artifacts/benchmarks/current/space-battle --output docs/space-battle/current
 ```
 
-[Desktop timing](DESKTOP_TIMING.md) · [Architecture](ARCHITECTURE.md) · [Historical finite battle](REPORT_2026-10-14_FINITE.md)
+[Desktop timing](DESKTOP_TIMING.md) · [Architecture](ARCHITECTURE.md)
 
 Local measurement inputs: `artifacts/benchmarks/current/space-battle`.
 Base commit: `9063e9d780526dc937d949a6709b33241b47a092`.

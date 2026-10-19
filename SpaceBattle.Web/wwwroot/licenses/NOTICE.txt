@@ -8,12 +8,6 @@ This browser application bundles only SKECS, SpaceBattle.Core, SpaceBattle.SKECS
 .NET/Blazor WebAssembly, and Lucide icons. It does not bundle
 LeoECS, LeoECS Lite, Morpeh, StaticEcs, Silk.NET, or the benchmark/test tooling.
 
-Historical Aether.Physics2D 2.2.0 reference (not bundled by the current simulation)
-Copyright (c) Kastellanos Nikolaos 2015-2024
-Microsoft Permissive License (MS-PL). Original license: AETHER.txt.
-https://github.com/nkast/Aether.Physics2D
-Source commit: 8f522b5b6d2c1edd427de2692bc627c6d38411c3
-
 .NET runtime and ASP.NET Core/Blazor 8.0.31
 Copyright (c) .NET Foundation and Contributors.
 MIT license: DOTNET.txt and ASPNETCORE.txt.

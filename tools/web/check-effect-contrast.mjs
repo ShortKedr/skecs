@@ -10,7 +10,7 @@ const options = new Map();
 for (let i = 2; i < process.argv.length; i += 2) {
   const key = process.argv[i], value = process.argv[i + 1];
   if (!["--url", "--baseline-url", "--output"].includes(key) || !value || options.has(key))
-    throw new Error("Usage: node tools/web/check-effect-contrast.mjs --url NEW_AOT_URL [--baseline-url http://127.0.0.1:8044/] [--output Benchmarks.Local/tmp/effect-contrast]");
+    throw new Error("Usage: node tools/web/check-effect-contrast.mjs --url NEW_AOT_URL [--baseline-url http://127.0.0.1:8044/] [--output artifacts/tooling/tmp/effect-contrast]");
   options.set(key, value);
 }
 if (!options.has("--url")) throw new Error("--url is required; no candidate site is assumed");
@@ -25,9 +25,9 @@ function localUrl(value) {
 const urls = { baseline: localUrl(options.get("--baseline-url") || "http://127.0.0.1:8044/"),
   candidate: localUrl(options.get("--url")) };
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const tmp = path.resolve(root, "Benchmarks.Local/tmp");
-const output = path.resolve(root, options.get("--output") || "Benchmarks.Local/tmp/effect-contrast");
-assert.ok(output.startsWith(tmp + path.sep), "Output must be a subdirectory of project-ignored Benchmarks.Local/tmp");
+const tmp = path.resolve(root, "artifacts/tooling/tmp");
+const output = path.resolve(root, options.get("--output") || "artifacts/tooling/tmp/effect-contrast");
+assert.ok(output.startsWith(tmp + path.sep), "Output must be a subdirectory of project-ignored artifacts/tooling/tmp");
 // Reject junction/symlink escapes before creating or writing evidence.
 let ancestor = output;
 while (true) {

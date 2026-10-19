@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const tmpRoot = path.join(projectRoot, "Benchmarks.Local/tmp");
+const tmpRoot = path.join(projectRoot, "artifacts/tooling/tmp");
 export const categories = ["managed-own-simulation", "managed-library-compute", "mono-interpreter", "dispatch-runtime-helpers", "gc", "interop", "other-js-renderer", "unknown"];
 const wasmIndex = name => /^\$?wasm-function\[(\d+)\](?::0x[\da-f]+)?$/i.exec(name)?.[1];
 const isWasm = frame => wasmIndex(frame.functionName ?? "") !== undefined || /^(?:wasm:)|\.wasm(?:[?#]|$)/i.test(frame.url ?? "");
@@ -152,7 +152,7 @@ export function parseArgs(args) {
 
 export function checkOutputPath(output) {
   const result = path.resolve(output), relative = path.relative(tmpRoot, result);
-  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("Output must be a fresh directory inside Benchmarks.Local/tmp");
+  if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("Output must be a fresh directory inside artifacts/tooling/tmp");
   return result;
 }
 
@@ -240,7 +240,7 @@ export async function captureWindow(page, cdp, options) {
 export async function main(args = process.argv.slice(2)) {
   const options = parseArgs(args);
   if (options.help) {
-    console.log("Usage: node tools/web/profile-mono-cpu.mjs --site <published-wwwroot> [--symbol-map <final-dotnet.native.js.symbols>] [--output <fresh-Benchmarks.Local/tmp/dir>] [--start-tick 0] [--ticks 1200] [--warmup-ticks 1200] [--profile nominal] [--seed 7331] [--interval-us 1000] [--channel chrome|chromium] [--top 40]\nNo builds. CPU profile only, synchronous Advance(1), not throughput. Warmup/reset/seek are outside capture. Writes profile.cpuprofile and summary.json into a fresh ignored directory.");
+    console.log("Usage: node tools/web/profile-mono-cpu.mjs --site <published-wwwroot> [--symbol-map <final-dotnet.native.js.symbols>] [--output <fresh-artifacts/tooling/tmp/dir>] [--start-tick 0] [--ticks 1200] [--warmup-ticks 1200] [--profile nominal] [--seed 7331] [--interval-us 1000] [--channel chrome|chromium] [--top 40]\nNo builds. CPU profile only, synchronous Advance(1), not throughput. Warmup/reset/seek are outside capture. Writes profile.cpuprofile and summary.json into a fresh ignored directory.");
     return;
   }
   const site = await fs.realpath(path.resolve(options.site));

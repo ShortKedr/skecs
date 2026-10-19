@@ -17,10 +17,10 @@ test('paths cannot escape project or write outside ignored outputs', async () =>
   assert.equal(inside(projectRoot, path.resolve(projectRoot, '../ecs2')), false);
   await assert.rejects(projectPath('../outside', { output: true }));
   await assert.rejects(projectPath('docs/new-scenes', { output: true, ignored: true }));
-  assert.ok((await projectPath('Benchmarks.Local/tmp/new-scenes', { output: true, ignored: true })).endsWith('new-scenes'));
+  assert.ok((await projectPath('artifacts/tooling/tmp/new-scenes', { output: true, ignored: true })).endsWith('new-scenes'));
 });
 test('an ignored-looking junction cannot redirect generated files into project docs', async () => {
-  const root = path.join(projectRoot, 'Benchmarks.Local/tmp');
+  const root = path.join(projectRoot, 'artifacts/tooling/tmp');
   await fs.mkdir(root, { recursive: true });
   const temp = await fs.mkdtemp(path.join(root, 'scene-path-test-')), link = path.join(temp, 'alias');
   try {

@@ -62,12 +62,9 @@ placement checks, strength thresholds, cooldown and caps are unchanged.
 
 ## Scope And Validation
 
-Shared Core defaults to `FleetComposition.Uniform`. Headless benchmarks and
-historical measurements keep their equal-class workload. Desktop `--finite`
-disables waves, not its new initial/production roster. Current gameplay hashes
-identify the non-default composition; legacy finite hashes remain unchanged.
+Shared Core defaults to `FleetComposition.Uniform`. Interactive clients and the current `game` benchmark preset select LightSwarm. Desktop `--finite` disables waves while retaining its initial fleet and production roster.
 
-The [headless checks](../../SpaceBattle.Headless/FleetCompositionValidation.cs)
+The [headless checks](../../SpaceBattle.Benchmarks/Measurement/FleetCompositionValidation.cs)
 cover weighted cycles, initial counts, production, varied reinforcements, caps
 and deterministic replay across ECS adapters. The [browser checks](../../tools/web/check-web.mjs)
 verify the real AOT initial roster, combat, resets and controls. This is initial

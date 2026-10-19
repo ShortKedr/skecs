@@ -53,8 +53,7 @@ The `netstandard2.0` asset used by .NET Framework 4.8 depends on
 `System.Memory`; NuGet.org supplies that dependency unless it is also available
 in an offline package source.
 
-The historical SECS 0.1.0 consumer checks below do not validate SKECS 0.2.0.
-Run consumer checks against the SKECS package before relying on a target runtime.
+Run the [consumer checks](../../tools/release-consumers) against the built SKECS package before relying on a target runtime.
 
 ## Unity
 
@@ -69,8 +68,7 @@ API requires no `unsafe` setting in the consuming project. Direct chunk-pointer
 iteration requires an `unsafe` context and project/compiler support for unsafe
 code. Dispose every `World` to release its native buffers.
 
-The historical SECS 0.1.0 checks ran an imported-DLL smoke test in Editor and
-Windows players using Mono and IL2CPP. WebGL and mobile exports were not tested.
+Use the release-consumer harness to check Editor and Windows players with Mono and IL2CPP separately. WebGL and mobile exports require their own validation.
 
 ## Godot C#
 
@@ -91,8 +89,8 @@ dotnet restore YourGodotProject.csproj --configfile NuGet.Config
 ```
 
 Use `SKECS` from a C# node or other managed class. The local
-[Godot consumer fixture](../../tools/release-consumers/Godot) imported and ran
-the package-backed scene. Godot C# Web and mobile exports were not tested.
+[Godot consumer fixture](../../tools/release-consumers/Godot) checks a package-backed
+scene. Godot C# Web and mobile exports require separate validation.
 
 ## Minimal API check
 
@@ -121,26 +119,3 @@ struct Increment : IQueryProcessor<Position>
 SKECS components must be unmanaged structs. A `World` is not thread-safe;
 structural changes and world disposal invalidate component references and chunk
 pointers. See the [API and lifetime guide](README.md) before using those APIs.
-
-## Historical SECS verification record
-
-The following results describe the SECS 0.1.0 (`ShortKedr.SECS`) candidate checked on 2026-10-15 before the rename. The published `secs-v0.1.0` Cone release retains that package, Unity ZIP, checksums, and verification JSON. These local Windows checks remain a separate pre-publication audit record and do not verify SKECS 0.2.0.
-
-### Results
-
-On 2026-10-15, the local candidate `.nupkg` passed the independent
-`CreateEntity → Query → Get → Dispose` consumer smoke on Windows x64:
-
-| Consumer | Local result |
-| --- | --- |
-| .NET 8 (`net8.0`, SDK 8.0.426) | Passed; package restored from a local feed and run. |
-| .NET 10 (`net10.0`, SDK 10.0.204) | Passed; app targeted and ran on .NET 10, selecting the compatible package asset. |
-| .NET Framework 4.8 (`net48`, SDK 8.0.426) | Passed; Windows executable ran with the package and cached transitive dependencies supplied from an offline feed. |
-| Godot 4.5 stable .NET, Windows x64 | Passed; official editor `4.5.stable.mono.official.876b29033` imported and ran the package-backed C# scene. |
-| Unity 2022.3.60f1 | Editor, Windows Mono Player, and Windows IL2CPP Player passed from isolated copies of the fixture. |
-| Unity 6000.3.19f1 | Editor, Windows Mono Player, and Windows IL2CPP Player passed from isolated copies of the fixture. |
-
-The scripts in [release-consumers](../../tools/release-consumers) verified that
-the restored SECS package matched its local candidate by SHA-256. Those runs
-used a local candidate from a working tree; the release's verification JSON and
-`SHA256SUMS.txt` document the published assets.

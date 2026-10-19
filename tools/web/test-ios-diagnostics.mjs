@@ -5,7 +5,7 @@ import { MODES, parseArgs, parseModes, localUrl, diagnosticUrl, windowSizes, sta
   validateSample, summarizeRun, summarizePages, compareStates, validateOutputPath,
   validateAssets, warmupMode, sampleRequest, scenePreparation } from "./ios-diagnostics.mjs";
 
-const args = ["--url", "http://127.0.0.1:8123/", "--output", "Benchmarks.Local/tmp/ios/report.json"];
+const args = ["--url", "http://127.0.0.1:8123/", "--output", "artifacts/tooling/tmp/ios/report.json"];
 const memory = { wasmLinearBytes: 65536, managedBytes: 100, jsHeapBytes: null,
   canvasBackingBytes: 4096, atlasDecodedBytes: 8192 };
 const before = { tick: 0, checksum: "initial", counts: {}, counters: {} };
@@ -144,6 +144,6 @@ test("pure output path validation cannot escape project or use a non-JSON path",
   assert.throws(() => validateOutputPath(path.resolve(root, "..", "escape.json"), root));
   assert.throws(() => validateOutputPath(path.resolve(root, "report.txt"), root));
   assert.throws(() => validateOutputPath(path.resolve(root, "tools/web/ios-diagnostics.mjs"), root));
-  assert.equal(validateOutputPath(path.resolve(root, "Benchmarks.Local/tmp/ios/report.json"), root),
-    path.join("Benchmarks.Local", "tmp", "ios", "report.json"));
+  assert.equal(validateOutputPath(path.resolve(root, "artifacts/tooling/tmp/ios/report.json"), root),
+    path.join("artifacts", "tooling", "tmp", "ios", "report.json"));
 });

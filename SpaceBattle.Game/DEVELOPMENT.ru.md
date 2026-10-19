@@ -8,7 +8,7 @@
 с неподвижными основаниями, измеренными точками вращения и независимым поворотом/отдачей головок.
 Основания и стволы используют ту же RGB-покраску, что и корпус родителя, включая
 главную тяжёлую пушку. Оранжевые индикаторы перегрева не зависят от цвета команды.
-`--validate-gun-tints --gun-tints-capture Benchmarks.Local/tmp/gun-tints.png
+`--validate-gun-tints --gun-tints-capture artifacts/tooling/tmp/gun-tints.png
 --width 1920 --height 1400` проверяет PNG-пиксели, обе команды, прозрачность,
 отдачу и нагрев в скрытом GL-окне.
 Снаряды и частицы используют общий [сгенерированный атлас эффектов](Assets/PROVENANCE.ru.md#атлас-эффектов):
@@ -18,7 +18,7 @@
 Контраст цветных ядер эффектов усилен умеренно;
 [регрессия контраста](Assets/PROVENANCE.ru.md#проверка-контраста) проверяет читаемость
 и фиксированные бюджеты общей/локальной яркости, без bloom каждый кадр.
-`--validate-effects --effects-capture Benchmarks.Local/tmp/particles.png` запускает
+`--validate-effects --effects-capture artifacts/tooling/tmp/particles.png` запускает
 скрытую проверку GL framebuffer всех четырёх видов при полной/четвертной альфе,
 сохраняет галерею и завершается. Проверка независима от снимков геймплея;
 запускайте отдельно от профилирования и проверки текущей статистики.
@@ -36,7 +36,7 @@ Desktop-сцена следует веб-визуалу (`web-scene-v1`): ней
 под него область камеры остаются нативными. Края текстур OpenGL и сглаживание
 Canvas не обязаны совпадать попиксельно.
 
-`--validate-scene-style --scene-style-capture Benchmarks.Local/tmp/desktop-web-visuals/native-gallery.png`
+`--validate-scene-style --scene-style-capture artifacts/tooling/tmp/desktop-web-visuals/native-gallery.png`
 проверяет цвет/радиус мусора в реальном framebuffer и отсутствие аллокаций
 композиции, затем записывает диагностическую сцену (по умолчанию 1440 x 900).
 Запустите `node tools/web/check-desktop-scene.mjs --url http://127.0.0.1:8054/`
@@ -97,7 +97,7 @@ atlas-эффекты, описанные выше; прежние кольца �
 Автоматические снимки используют скрытое окно OpenGL, если не передан `--visible`:
 
 ```powershell
-SpaceBattle.Game.exe --capture Benchmarks.Local/tmp/desktop-capture/tick-900.png --capture-tick 900 --exit-after-capture --validate-render --visible
+SpaceBattle.Game.exe --capture artifacts/tooling/tmp/desktop-capture/tick-900.png --capture-tick 900 --exit-after-capture --validate-render --visible
 ```
 
 Запускайте из корня репозитория; пути снимков должны оставаться внутри этого
@@ -129,7 +129,7 @@ OpenGL; соседний JSON содержит количество сущнос
 После сборки запускайте из корня репозитория:
 
 ```powershell
-SpaceBattle.Game/bin/Release/net8.0/SpaceBattle.Game.exe --profile-frames 3600 --profile-warmup 120 --capture-tick 900 --ships-per-team 96 --profile-output Benchmarks.Local/tmp/desktop-profile/frontend.json --profile-csv Benchmarks.Local/tmp/desktop-profile/frontend.csv --hidden
+SpaceBattle.Game/bin/Release/net8.0/SpaceBattle.Game.exe --profile-frames 3600 --profile-warmup 120 --capture-tick 900 --ships-per-team 96 --profile-output artifacts/tooling/tmp/desktop-profile/frontend.json --profile-csv artifacts/tooling/tmp/desktop-profile/frontend.csv --hidden
 ```
 
 Это **детерминированное фиксированное воспроизведение без ограничения частоты**,
@@ -152,12 +152,12 @@ SpaceBattle.Game/bin/Release/net8.0/SpaceBattle.Game.exe --profile-frames 3600 -
 Для сравнения HUD и headless есть [исследование desktop-таймингов](../docs/space-battle/DESKTOP_TIMING.ru.md): пять свежих процессов с одинаковыми сборками, конфигурацией и итоговой checksum. Из корня репозитория:
 
 ```sh
-dotnet run --project tools/BenchmarkTools -c Release -- run desktop
-dotnet run --project tools/BenchmarkTools -c Release -- report desktop
-dotnet run --project tools/BenchmarkTools -c Release -- verify desktop
+dotnet run --project SpaceBattle.Benchmarks -c Release -- run desktop
+dotnet run --project SpaceBattle.Benchmarks -c Release -- report desktop
+dotnet run --project SpaceBattle.Benchmarks -c Release -- verify desktop
 ```
 
-[Переносимый .NET CLI](../tools/BenchmarkTools/README.ru.md) выполняет сборку, проверки и последовательные замеры; Python и PowerShell не нужны. Desktop требует рабочего графического устройства. Сырые JSON/CSV/gzip сохраняются в игнорируемом `artifacts/benchmarks/current/desktop`, Markdown/SVG — в `docs/space-battle`. Для отдельного прогона задайте `run desktop --output artifacts/benchmarks/repro/desktop`, затем используйте этот путь с `report desktop --data` или `verify desktop --data`; каталог `report --output` может быть любым внутри проекта. Обычный `run all` выполняет headless-наборы; `run all --include-desktop` явно добавляет это исследование. Завершите другие замеры и сборки перед запуском.
+[Переносимый .NET CLI](../SpaceBattle.Benchmarks/README.ru.md) выполняет сборку, проверки и последовательные замеры; Python и PowerShell не нужны. Desktop требует рабочего графического устройства. Сырые JSON/CSV/gzip сохраняются в игнорируемом `artifacts/benchmarks/current/desktop`, Markdown/SVG — в `docs/space-battle`. Для отдельного прогона задайте `run desktop --output artifacts/benchmarks/repro/desktop`, затем используйте этот путь с `report desktop --data` или `verify desktop --data`; каталог `report --output` может быть любым внутри проекта. Обычный `run all` выполняет headless-наборы; `run all --include-desktop` явно добавляет это исследование. Завершите другие замеры и сборки перед запуском.
 
 `--profile-paced` ограничивает replay до 60 отрисованных кадров/с: один Step на кадр, VSync выключен. `--profile-warmup 0` записывает холодный старт с тика 1; обычный прогрев продвигает тот же бой. JSON и необязательный CSV сохраняют внутренний HUD-таймер Step и все девять стадий отдельно от wrapper/snapshot/render/total CPU.
 

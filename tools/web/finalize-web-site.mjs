@@ -139,8 +139,8 @@ function checkIgnored(target, directory = false) {
 export async function validateSiteDirectory(siteDirectory) {
   assert.ok(typeof siteDirectory === "string" && siteDirectory.trim(), "--site is required");
   const site = path.resolve(projectRoot, siteDirectory);
-  assert.ok(inside(path.join(projectRoot, "Benchmarks.Local", "tmp"), site) && path.basename(site) === "wwwroot",
-    "Site must be an existing wwwroot inside this project's ignored Benchmarks.Local/tmp");
+  assert.ok(inside(path.join(projectRoot, "artifacts", "tooling", "tmp"), site) && path.basename(site) === "wwwroot",
+    "Site must be an existing wwwroot inside this project's ignored artifacts/tooling/tmp");
   await checkDirectory(projectRoot);
   let directory = projectRoot;
   for (const component of path.relative(projectRoot, site).split(path.sep)) {

@@ -15,8 +15,8 @@ Requirements: Node.js, Python for the static server, the .NET 8.0.4xx SDK select
 From the repository root:
 
 ```powershell
-npm ci --prefix tools/web --cache Benchmarks.Local/tmp/npm-cache
-$publish = "Benchmarks.Local/tmp/web-local-" + [guid]::NewGuid().ToString("N")
+npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
+$publish = "artifacts/tooling/tmp/web-local-" + [guid]::NewGuid().ToString("N")
 ./tools/build-space-battle-web.ps1 -OutputDirectory $publish -ArtifactsDirectory ($publish + "-build") -BasePath /
 python -m http.server 8000 --directory "$publish/wwwroot"
 ```
@@ -47,6 +47,6 @@ The footer and statistics panel describe this browser session. Render FPS, ticks
 
 ## Development and Compatibility
 
-The [engineering guide](DEVELOPMENT.md) covers the bridge/render buffer, statistics definitions, browser checks, profiling and existing Pages workflow. [Compiler](../tools/web/MONO_COMPILER_STUDY.md) and [locality](../tools/HardwareStudy/LOCALITY_OPTIMIZATION.md) studies retain their own dated configurations and results.
+The [engineering guide](DEVELOPMENT.md) covers the bridge/render buffer, statistics definitions, browser checks, profiling and the Pages workflow. The [Web tooling guide](../tools/web/README.md) describes browser diagnostics and Mono compiler analysis.
 
-The [iOS investigation](../docs/space-battle/IOS_WEB.md) remains unverified on an actual iPhone. Desktop WebKit smoke checks are a separate, bounded check.
+Desktop WebKit smoke checks do not establish compatibility with an actual iPhone; device verification remains required.

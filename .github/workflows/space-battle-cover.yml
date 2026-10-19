@@ -60,7 +60,7 @@ jobs:
     timeout-minutes: 40
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
-      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/Benchmarks.Local/tmp/playwright-browsers
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/artifacts/tooling/tmp/playwright-browsers
     steps:
       - uses: actions/checkout@v7
         with:
@@ -92,20 +92,20 @@ jobs:
         run: dotnet workload install wasm-tools
       - name: Build the real production web frontend
         shell: pwsh
-        run: ./tools/build-space-battle-web.ps1 -OutputDirectory Benchmarks.Local/tmp/cover-web -BasePath /
+        run: ./tools/build-space-battle-web.ps1 -OutputDirectory artifacts/tooling/tmp/cover-web -BasePath /
       - name: Simulate to the fixed battle tick and capture Chromium Canvas
         run: |
           python tools/space-battle/cover.py capture \
-            --site Benchmarks.Local/tmp/cover-web/wwwroot \
+            --site artifacts/tooling/tmp/cover-web/wwwroot \
             --source-commit "$GITHUB_SHA"
           python tools/space-battle/cover.py validate \
-            --directory Benchmarks.Local/tmp/space-battle-cover --source-commit "$GITHUB_SHA"
+            --directory artifacts/tooling/tmp/space-battle-cover --source-commit "$GITHUB_SHA"
       - name: Retain browser capture and provenance even if publication fails
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: space-battle-cover
-          path: Benchmarks.Local/tmp/space-battle-cover/
+          path: artifacts/tooling/tmp/space-battle-cover/
           if-no-files-found: warn
           retention-days: 14
 
@@ -127,11 +127,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: space-battle-cover
-          path: Benchmarks.Local/tmp/space-battle-cover
+          path: artifacts/tooling/tmp/space-battle-cover
       - name: Validate the downloaded image against this source commit
         run: |
           python tools/space-battle/cover.py validate \
-            --directory Benchmarks.Local/tmp/space-battle-cover --source-commit "$GITHUB_SHA"
+            --directory artifacts/tooling/tmp/space-battle-cover --source-commit "$GITHUB_SHA"
       - name: Update only the documentation cover if main is still current
         run: |
           git fetch --no-tags origin main
@@ -139,8 +139,8 @@ jobs:
             echo "main advanced; leaving the newer source and cover untouched." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          cp Benchmarks.Local/tmp/space-battle-cover/cover.png docs/space-battle/cover.png
-          cp Benchmarks.Local/tmp/space-battle-cover/cover.png.json docs/space-battle/cover.png.json
+          cp artifacts/tooling/tmp/space-battle-cover/cover.png docs/space-battle/cover.png
+          cp artifacts/tooling/tmp/space-battle-cover/cover.png.json docs/space-battle/cover.png.json
           git add -- docs/space-battle/cover.png docs/space-battle/cover.png.json
           if git diff --cached --quiet; then
             echo "Cover is already current." >> "$GITHUB_STEP_SUMMARY"

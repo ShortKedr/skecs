@@ -8,19 +8,7 @@
 Chromium. Захватывается только Canvas; HTML-панели управления и телеметрия
 скрываются без изменения viewport и камеры. Это не
 зафиксированный измеренный прогон, не бенчмарк и не доказательство
-производительности в реальном времени. Исторические `action.png` и
-`action.png.json`, их перечень хешей, записи parity и все файлы измерений
-остаются неизменными.
-
-Сохранённая пара обновлена 2026-10-14 из чистого локального checkout
-`43316769acfcfa00a5307dd79490ef07e2f07ee6` через Chromium `151.0.7922.34`.
-Захват записал `SourceDirty=false`, тик 180, 180 кораблей на экране и
-722 снаряда; checksum боя — `79B277702009BA08`. Валидатор сверил
-загруженные файлы с обслуживаемой AOT-сборкой, включая build identity,
-манифест атласов и шесть сгенерированных текстур. Это подтверждает локальный
-захват; удалённый workflow и развёртывание этим не проверены.
-
-## Конфигурация и локальный захват
+производительности в реальном времени. ## Конфигурация и локальный захват
 
 Источник параметров: [cover-settings.json](cover-settings.json), который читает
 [cover.py](../../tools/space-battle/cover.py) и
@@ -46,12 +34,12 @@ PNG между графическими драйверами не обещает
 python -m pip install -r tools/space-battle/cover-requirements.txt
 (cd tools/web && npm ci && npx playwright install chromium)
 pwsh -File tools/build-space-battle-web.ps1 \
-  -OutputDirectory Benchmarks.Local/tmp/cover-web -BasePath /
+  -OutputDirectory artifacts/tooling/tmp/cover-web -BasePath /
 python tools/space-battle/cover.py capture \
-  --site Benchmarks.Local/tmp/cover-web/wwwroot \
+  --site artifacts/tooling/tmp/cover-web/wwwroot \
   --source-commit "$(git rev-parse HEAD)"
 python tools/space-battle/cover.py validate \
-  --directory Benchmarks.Local/tmp/space-battle-cover --allow-dirty
+  --directory artifacts/tooling/tmp/space-battle-cover --allow-dirty
 ```
 
 В Windows PowerShell запускайте build-helper напрямую, npm-команды из
@@ -59,7 +47,7 @@ python tools/space-battle/cover.py validate \
 При проектном кеше браузера задавайте одинаковый `PLAYWRIGHT_BROWSERS_PATH`
 для установки и захвата. Незакоммиченные локальные кадры помечаются `SourceDirty`;
 `--allow-dirty` используется только при локальной проверке, никогда в Actions.
-Захват пишет в `Benchmarks.Local/tmp/space-battle-cover`, а не в документы.
+Захват пишет в `artifacts/tooling/tmp/space-battle-cover`, а не в документы.
 
 ## Происхождение обложки
 

@@ -10,7 +10,7 @@ const options = new Map();
 for (let i = 2; i < process.argv.length; i += 2) {
   const key = process.argv[i], value = process.argv[i + 1];
   assert.ok(["--url", "--output"].includes(key) && value && !options.has(key),
-    "Usage: node tools/web/check-warp-reinforcements.mjs --url http://localhost:8047/ --output Benchmarks.Local/tmp/warp-RUN");
+    "Usage: node tools/web/check-warp-reinforcements.mjs --url http://localhost:8047/ --output artifacts/tooling/tmp/warp-RUN");
   options.set(key, value);
 }
 assert.ok(options.has("--url"), "--url is required; run only after main publishes the warp artwork");
@@ -20,13 +20,13 @@ assert.ok(isLocal(url) && !url.username && !url.password, "Only credential-free 
 url.search = "?test=1"; url.hash = "";
 if (!url.pathname.endsWith("/")) url.pathname += "/";
 const root = await fs.realpath(fileURLToPath(new URL("../../", import.meta.url)));
-const tmp = path.join(root, "Benchmarks.Local/tmp");
-const output = path.resolve(root, options.get("--output") || "Benchmarks.Local/tmp/warp-reinforcements");
+const tmp = path.join(root, "artifacts/tooling/tmp");
+const output = path.resolve(root, options.get("--output") || "artifacts/tooling/tmp/warp-reinforcements");
 const within = (parent, child) => {
   const relative = path.relative(parent, child);
   return relative && relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
 };
-assert.ok(within(tmp, output), "Output must be below this project's Benchmarks.Local/tmp");
+assert.ok(within(tmp, output), "Output must be below this project's artifacts/tooling/tmp");
 // Validate every ancestor before creating anything, including junctions above tmp.
 let cursor = root;
 for (const part of path.relative(root, output).split(path.sep)) {

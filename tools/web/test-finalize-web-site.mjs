@@ -106,13 +106,13 @@ test("missing base files or imported modules and unsafe import traversal are rej
 });
 
 test("CLI accepts exactly --site with a value", () => {
-  assert.deepEqual(parseArguments(["--site", "Benchmarks.Local/tmp/build/wwwroot"]), { site: "Benchmarks.Local/tmp/build/wwwroot" });
+  assert.deepEqual(parseArguments(["--site", "artifacts/tooling/tmp/build/wwwroot"]), { site: "artifacts/tooling/tmp/build/wwwroot" });
   for (const args of [[], ["--site"], ["--site", ""], ["--site", "--site"], ["--output", "value"],
     ["--site", "a", "--site", "b"]]) assert.throws(() => parseArguments(args), /Usage/);
 });
 
 async function withFixture(run) {
-  const temporary = path.join(projectRoot, "Benchmarks.Local", "tmp");
+  const temporary = path.join(projectRoot, "artifacts", "tooling", "tmp");
   execFileSync("git", ["check-ignore", "--quiet", "--", `${temporary}/`], { cwd: projectRoot, stdio: "pipe" });
   // Validate existing ancestors before creating any missing fixture directory.
   for (const directory of [projectRoot, path.dirname(temporary), temporary]) {

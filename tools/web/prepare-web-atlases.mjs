@@ -163,8 +163,8 @@ function checkIgnored(target, directory = false) {
 export async function validateOutputDirectory(inputDirectory, outputDirectory) {
   assert.ok(typeof outputDirectory === "string" && outputDirectory.trim(), "--output is required");
   const output = path.resolve(projectRoot, outputDirectory), input = await fs.realpath(inputDirectory);
-  assert.ok(inside(path.join(projectRoot, "Benchmarks.Local", "tmp"), output),
-    "Output must be inside this project's ignored Benchmarks.Local/tmp (not its root)");
+  assert.ok(inside(path.join(projectRoot, "artifacts", "tooling", "tmp"), output),
+    "Output must be inside this project's ignored artifacts/tooling/tmp (not its root)");
   assert.ok(output !== input && !inside(input, output) && !inside(output, input), "Output must not overlap source assets");
   await checkDirectory(projectRoot);
   let directory = projectRoot;

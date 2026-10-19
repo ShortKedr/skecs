@@ -1,5 +1,5 @@
 param(
-    [string]$WorkDirectory = 'Benchmarks.Local/tmp/scene-tools',
+    [string]$WorkDirectory = 'artifacts/tooling/tmp/scene-tools',
     [string]$OutputDirectory = '',
     [ValidateSet('low', 'nominal', 'high')][string[]]$Profiles = @('nominal', 'high'),
     [uint32[]]$Seeds = @(7331),

@@ -65,11 +65,9 @@ invulnerability, full-field exposure flash or camera shake.
 ## Scope And Checks
 
 `BattleConfig.EndlessReinforcements` is opt-in in the shared Core and enabled by the
-interactive hosts. Desktop `--finite` disables this endless rule. Headless benchmark
-configuration and historical measurements are not silently changed. Gameplay wave
-state and warp particles participate in deterministic checksums.
+interactive hosts and current `game` benchmark preset. Desktop `--finite` disables this endless rule. Gameplay wave state and warp particles participate in deterministic checksums.
 
-The [headless tests](../../SpaceBattle.Headless/WarpReinforcementValidation.cs) cover
+The [headless tests](../../SpaceBattle.Benchmarks/Measurement/WarpReinforcementValidation.cs) cover
 thresholds, timing, survivors, team/corner ownership, varied compositions, caps,
 blocked placement, cooldown, no per-carrier revival in endless mode, normal
 production, effects and deterministic replay across all five ECS ports.

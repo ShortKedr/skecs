@@ -12,7 +12,7 @@ if (!Number.isInteger(warmupTicks) || warmupTicks < 0 || warmupTicks > 3600) {
   throw new Error("Warmup ticks must be an integer from 0 to 3600");
 }
 const output = path.resolve(
-  arg("--output", "Benchmarks.Local/tmp/web-performance.json"),
+  arg("--output", "artifacts/tooling/tmp/web-performance.json"),
 );
 const browser = await chromium.launch({ headless: true });
 try {

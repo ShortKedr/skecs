@@ -33,7 +33,7 @@ _framework/blazor.webassembly.js""".split()
 
 class CoverTests(unittest.TestCase):
     def setUp(self):
-        temporary_root = cover.ROOT / "Benchmarks.Local/tmp"
+        temporary_root = cover.ROOT / "artifacts/tooling/tmp"
         temporary_root.mkdir(parents=True, exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(dir=temporary_root)
         self.addCleanup(self.temporary.cleanup)
@@ -419,7 +419,7 @@ class CoverTests(unittest.TestCase):
         self.assertNotRegex(workflow, r"--force(?:-with-lease)?|git push[^\n]*\s-f(?:\s|$)|secrets\.")
         guard = workflow.index('if [ "$(git rev-parse FETCH_HEAD)" != "$GITHUB_SHA" ]; then')
         self.assertLess(workflow.index("Validate the downloaded image"), guard)
-        self.assertLess(guard, workflow.index("cp Benchmarks.Local/tmp/space-battle-cover/cover.png "))
+        self.assertLess(guard, workflow.index("cp artifacts/tooling/tmp/space-battle-cover/cover.png "))
 
     def test_cover_rejects_missing_files_and_unsafe_build_paths(self):
         for files in ({}, {**self.capture["BuildFiles"], "../secret.txt": "A" * 64},

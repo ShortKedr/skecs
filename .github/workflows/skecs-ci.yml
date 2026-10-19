@@ -33,11 +33,13 @@ jobs:
             8.0.x
             10.0.x
       - name: Test native generation and report validation
-        run: dotnet test tools/BenchmarkTools.Tests/BenchmarkTools.Tests.csproj -c Release
+        run: dotnet test tools/BenchmarkSupport.Tests/BenchmarkSupport.Tests.csproj -c Release
       - name: Check generated sources
-        run: dotnet run --project tools/BenchmarkTools -c Release --no-build -- generate --check
+        run: dotnet run --project SKECS.Benchmarks -c Release --no-build -- generate --check
       - name: Validate all headless benchmark contracts without timing
-        run: dotnet run --project tools/BenchmarkTools -c Release --no-build -- validate all
+        run: dotnet run --project SKECS.Benchmarks -c Release --no-build -- validate all
+      - name: Validate SpaceBattle benchmark contracts without timing
+        run: dotnet run --project SpaceBattle.Benchmarks -c Release --no-build -- validate all
 
   package:
     name: Build, test, pack, .NET 8 and 10

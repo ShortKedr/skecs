@@ -235,7 +235,7 @@ def main():
     capture = commands.add_parser("capture")
     capture.add_argument("--site", required=True)
     capture.add_argument("--base", default="/")
-    capture.add_argument("--output", default="Benchmarks.Local/tmp/space-battle-cover")
+    capture.add_argument("--output", default="artifacts/tooling/tmp/space-battle-cover")
     capture.add_argument("--source-commit", required=True)
     validate = commands.add_parser("validate")
     validate.add_argument("--directory", default="docs/space-battle")

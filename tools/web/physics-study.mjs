@@ -75,13 +75,13 @@ async function measure(validationOnly = false) {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const run = value("--run", `web-${validationOnly ? "capture-" : ""}${new Date().toISOString().replace(/[^0-9TZ]/g, "")}-${randomUUID().slice(0, 8)}`);
   if (!/^[a-zA-Z0-9_-]+$/.test(run)) throw new Error("Run must be a simple ASCII identifier");
-  const output = path.join(root, "Benchmarks.Local/tmp/physics-study", run);
+  const output = path.join(root, "artifacts/tooling/tmp/physics-study", run);
   await fs.mkdir(path.dirname(output), { recursive: true });
   await fs.mkdir(output); // Never overwrite an existing run.
   const temp = path.join(output, "browser-tmp");
   await fs.mkdir(temp);
   process.env.TMPDIR = process.env.TMP = process.env.TEMP = temp;
-  const localBrowsers = path.join(root, "Benchmarks.Local/tmp/playwright-browsers");
+  const localBrowsers = path.join(root, "artifacts/tooling/tmp/playwright-browsers");
   if (!process.env.PLAYWRIGHT_BROWSERS_PATH && await fs.stat(localBrowsers).then(s => s.isDirectory()).catch(() => false))
     process.env.PLAYWRIGHT_BROWSERS_PATH = localBrowsers;
   const { chromium } = await import("playwright");

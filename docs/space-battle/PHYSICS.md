@@ -2,38 +2,9 @@ English | [Русский](PHYSICS.ru.md)
 
 # SpaceBattle physics
 
-<!-- research-colors:start -->
-### Colour scale
+[Desktop](../../SpaceBattle.Game/README.md) | [Web](../../SpaceBattle.Web/README.md)
 
-![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") up to 5% · ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg "Lag between 5% and 30%") 15% · ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") from 30% · ![Neutral or insufficient separation](../benchmarks/heatmap/equal.svg "Neutral or insufficient separation") neutral.
-
-Colour shows lag from the best value in a comparable group: green → yellow → red. Groups entirely within 5% are grey. Colour describes effect size, not statistical significance. [Comparison rules](../benchmarks/COLORS.md).
-
-
-Only selected metrics within one scenario/window/environment are compared. Measured comparisons stay grey when neither the table nor its linked summary supplies independent-repeat envelopes. Stage shares and gameplay counters are not colored.
-<!-- research-colors:end -->
-
-[Desktop](../../SpaceBattle.Game/README.md) | [Web](../../SpaceBattle.Web/README.md) | [Local comparison tool](../../tools/physics/README.md)
-
-The shared C# simulation now uses `circle-kernel-v1`, not Aether. It is the same
-implementation in desktop and production Mono AOT WASM. AI, guns, artwork and
-the preceding LightSwarm changes are retained. The [2026-10-11 benchmark](REPORT_2026-10-11.md) and its captures describe the
-original Aether workload. For current-source measurements see the [current report](REPORT.md).
-
-## Observed Baseline
-
-The preserved [Aether wrapper](../../tools/physics/AetherReference.cs) used game
-units scaled by 0.1. Interceptor/Fighter had one circle; the other classes had
-4-6 overlapping fixtures: a fuselage rectangle, two wing rectangles, a round
-core, and optional bow/stern circles. Fixture densities summed to the requested
-mass; overlapping areas counted in that sum. Friction was zero, restitution 0.1,
-with no engine linear/angular damping.
-
-Steering already changes the persistent `Motion.AngularVelocity` using a bounded
-turn acceleration. Physics integrates the angle and returns collision-adjusted
-linear/angular velocities. Off-center compound-shape normal impulses could add
-rotation even with zero friction. Gun muzzle velocities also include the parent
-ship's rotational point velocity. None of those AI or gun calculations is removed.
+The shared C# simulation uses circle-kernel-v1 in desktop and production Mono AOT WASM. Current-source measurements are in the [benchmark report](REPORT.md).
 
 ## Dynamics
 
@@ -121,124 +92,14 @@ runtime; native/WASM bitwise determinism is not claimed.
 
 ## Verification And Measurements
 
-[Kernel tests](../../SpaceBattle.Headless/PhysicsKernelValidation.cs) cover masses,
+[Kernel tests](../../SpaceBattle.Benchmarks/Measurement/PhysicsKernelValidation.cs) cover masses,
 elastic momentum/energy, angular integration, friction torque/angular momentum,
 contact lifecycle, docking, correction without explosions, dense stability and
-reserved allocation. [Geometry tests](../../SpaceBattle.Headless/AnalyticSweepValidation.cs)
+reserved allocation. [Geometry tests](../../SpaceBattle.Benchmarks/Measurement/AnalyticSweepValidation.cs)
 include 12,000 independent distance-oracle sweeps and 3,000 brute-force bounds
 queries. Existing mechanics, owner immunity, warp, armament and all-ECS replay
-checks run against the new model. Old Aether checksums are intentionally not a
-golden reference for changed physics.
+checks run against the new model. Validation uses the current physics model and configuration.
 
-Reproducible native and AOT comparison commands, timing scopes, independent
-repeats and known instrumentation overhead are in the [study tool](../../tools/physics/README.md).
-Raw results go only into ignored `Benchmarks.Local/tmp/physics-study/`; this
-experiment does not overwrite the published benchmark tables.
+Run the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md) with `validate space-battle` to execute the current checks. Measurements and raw evidence use the same CLI and remain separate from validation.
 
-## Measured Experiment (2026-10-12)
-
-The `artifacts/benchmarks/history/docs/space-battle/physics-experiment-summary.json` retains every
-independent run mean, ranges, input/raw/binary hashes, workload counts and
-checksums. Machine: Ryzen 9 9900X, 24 logical CPUs, Windows build 26200.
-Builds and other QA runs were finished before each timing window; background
-workloads were not controlled. This is local evidence, not an
-isolated laboratory or a statistical significance claim. Values below are
-milliseconds, median of three independent run means, not the best tick/run.
-
-### Native Prescribed Scenes
-
-.NET 8.0.31 x64, tiered compilation disabled, seed 7331, 120 warmup ticks in a
-separate world, 120 measured ticks per fresh world, 1,024 sweeps per tick.
-Outer passes disable the replacement's internal timing. Total includes prescribed
-state resets; Step and Hits are narrower scopes. Each slash means Aether / circles.
-
-| Scene | Aether Total | Circle Total | Step A / C | Hits A / C |
-|---|---:|---:|---:|---:|
-| 198-dense-round | ![Neutral or insufficient separation](../benchmarks/heatmap/equal.svg "Neutral or insufficient separation") 2.859 | ![Neutral or insufficient separation](../benchmarks/heatmap/equal.svg "Neutral or insufficient separation") 2.723 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.276 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 2.268 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 2.557 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.453 |
-| 198-legacy-compound | 1.308 | 0.239 | 0.052 / 0.030 | 1.160 / 0.204 |
-| 198-mixed-round | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.849 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.241 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.020 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.031 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.809 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.206 |
-| 198-moving-target-round | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.856 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.448 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.025 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.190 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.819 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.256 |
-| 198-sparse-round | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.828 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.224 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.020 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.029 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.788 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.191 |
-| 774-dense-round | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 5.864 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 15.688 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 1.491 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 15.016 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 4.233 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.653 |
-| 774-legacy-compound | 3.154 | 0.402 | 0.191 / 0.120 | 2.558 / 0.268 |
-| 774-mixed-round | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 1.595 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.429 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.083 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.130 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 1.427 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.283 |
-| 774-moving-target-round | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 2.305 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 1.052 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.111 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.728 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 2.128 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.318 |
-| 774-sparse-round | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 1.668 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.407 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.080 / ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.119 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 1.498 / ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.271 |
-
-Round scenes share collider geometry and prescribed inputs, not solver settings:
-Aether retains zero friction/default iterations; circles use the settings above.
-Compound rows intentionally change geometry. Moving-target rows preserve paths
-and intentionally find additional crossing hits. Solver outputs do not become
-the next tick's inputs. None of these rows is a historical gameplay replay.
-
-The 774-body dense scene is an explicit regression: total is 2.68 times slower,
-despite cheaper hits. Independent total means span 5.661-6.860 ms for Aether and
-15.387-15.774 ms for circles. Repeated grid rebuilds/contact discovery and coupled
-constraint passes dominate. The same density with 198 bodies has only a 4.7%
-lower total, while its Step is still much more expensive. Spatial partitioning does not
-remove true dense-pair complexity.
-
-Separate instrumented passes for the 774-body dense scene:
-
-| Phase | Aether | Circles |
-|---|---:|---:|
-| Contact search | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.181 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 9.552 |
-| Solver | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 1.365 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 5.329 |
-| Hit candidate rejection/search | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.262 | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 0.450 |
-| Hit narrow path | ![Lag from 30%](../benchmarks/heatmap/worst.svg "Lag from 30%") 4.093 | ![Lag up to 5%](../benchmarks/heatmap/best.svg "Lag up to 5%") 0.208 |
-
-Aether's search/solver are its actual exported internal labels. Its hit narrow
-path includes tree searches and five rays, not pure geometric arithmetic.
-The pinned assembly's built-in diagnostics are constant-on, including outer
-passes. The phase table is not an exhaustive/disjoint decomposition of total.
-All three uninstrumented repeats in all ten circle scenes report zero managed
-bytes inside the measured frame; setup/spawning is excluded.
-
-### Production Mono AOT WASM
-
-Chromium 151.0.7922.34; same seed 7331, LightSwarm initial fleet, three churn
-profiles. Each fresh browser context uses 120 warmup ticks in a discarded battle,
-then 600 measured ticks from zero. Rendering is paused during the synchronous
-C# Advance loop; this is simulation timing, not FPS. Ranges in parentheses are
-the minimum/maximum of independent run means.
-
-| Profile | Aether Tick (range) | Circle Tick (range) | Physics stage A / C | Hits stage A / C | Ships at 600 A / C |
-|---|---:|---:|---:|---:|---:|
-| low | 5.620 (5.541-5.769) | 5.699 (5.575-5.875) | 1.050 / 1.963 | 1.564 / 0.724 | 75 / 78 |
-| nominal | 6.616 (6.595-6.897) | 5.825 (5.505-5.872) | 1.151 / 1.615 | 1.951 / 0.969 | 88 / 48 |
-| high | 8.529 (8.444-8.632) | 7.432 (7.239-7.814) | 1.346 / 1.648 | 2.737 / 1.502 | 145 / 130 |
-
-Nominal/high observed total reductions are about 12%/13%; low is practically
-unchanged with overlapping repeat ranges. New contact search is more expensive,
-while hit processing is cheaper. Survivorship, shots and wave production differ
-because geometry/CCD/friction changed. These are full-workload results, not an
-isolated equal-state solver/compiler speedup, and only cover the first 600 ticks.
-
-The old bridge exposes combined stages but no inner phases. New inner timings
-come from additional independent instrumented contexts, never invented old zeros:
-
-| Profile | Contact search | Solver | Hit candidates | Hit narrow | Instrumented tick |
-|---|---:|---:|---:|---:|---:|
-| low | 1.400 | 0.023 | 0.302 | 0.077 | 5.994 |
-| nominal | 0.909 | 0.015 | 0.434 | 0.136 | 6.292 |
-| high | 0.634 | 0.011 | 0.664 | 0.222 | 8.045 |
-
-Physics/Hits gameplay stages also contain state transfers, damage, effects and
-other work outside those inner timers. Instrumented totals include overhead;
-use the outer table for throughput. Browser timer quantization limits tiny phases.
-Within each runtime/profile all three outer repeats have identical checksums;
-native/WASM or Aether/circle checksum equivalence is not asserted.
-
-The exact loaded uncompressed native WASM resource shrank from 18,035,000 to
-9,721,086 bytes (46.1%). This is not total transfer size or proof of speed; both
-sides still use Mono AOT. Production deps/boot manifests contain no Aether.
-Aether 2.2.0 remains in the isolated comparison project and the existing
-historical composition-replay tool, with its license. Those are not runtime dependencies.
-
-Local raw evidence: `Benchmarks.Local/tmp/physics-study/circle-native-final-02`
-and `circle-web-final-02`. Failed/intermediate runs are retained as diagnostics,
-not selected as the final result. Historical measured files and published tables
-remain unchanged.
-
-Solver background: [Erin Catto, Modeling and Solving Constraints](https://box2d.org/files/ErinCatto_ModelingAndSolvingConstraints_GDC2009.pdf).
-The implementation is project-authored C#, not copied Box2D source.
+Solver background: [Erin Catto, Modeling and Solving Constraints](https://box2d.org/files/ErinCatto_ModelingAndSolvingConstraints_GDC2009.pdf). The implementation is project-authored C#.

@@ -11,7 +11,7 @@ export const HELP = `Mono compiler study (no builds, downloads, or remote writes
 node tools/web/mono-compiler-study.mjs --sites <A-wwwroot> <B-wwwroot> <C-wwwroot> <D-wwwroot> --labels A B C D
   --repeats 3 --ticks 1200 --phase-ticks 300 --warmup-ticks 1200
   --start-tick 0 --frontend-start-tick 300 --frontend-ticks 300
-  --output Benchmarks.Local/tmp/<new-study> [--source-roots <A> <B> <C> <D>]
+  --output artifacts/tooling/tmp/<new-study> [--source-roots <A> <B> <C> <D>]
   [--browser-path <existing-Chromium-executable>] [--timeout-ms 180000]
 Lists accept spaces or commas. All three profiles and both replay modes always run.
 --repeats is exact (>=3); rotating orders have position counts differing by at most
@@ -32,10 +32,10 @@ export function inside(root, target) {
 
 export function outputPath(root, value) {
   const output = path.resolve(root, value);
-  const base = path.join(root, "Benchmarks.Local", "tmp");
+  const base = path.join(root, "artifacts", "tooling", "tmp");
   const relative = path.relative(base, output);
   if (path.dirname(output) !== base || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(relative))
-    throw new Error("Output must be a NEW direct child of project Benchmarks.Local/tmp/<study>");
+    throw new Error("Output must be a NEW direct child of project artifacts/tooling/tmp/<study>");
   return output;
 }
 
@@ -77,7 +77,7 @@ export function parseArgs(argv, root = PROJECT_ROOT) {
     frontendTicks: number("frontend-ticks", 300, 1), seed: number("seed", 7331, 0, 0xffffffff),
     timeoutMs: number("timeout-ms", 180000, 1000, 3_600_000),
     browserPath: values["browser-path"] ? path.resolve(root, values["browser-path"]) : null,
-    output: outputPath(root, values.output ?? `Benchmarks.Local/tmp/mono-study-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`),
+    output: outputPath(root, values.output ?? `artifacts/tooling/tmp/mono-study-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`),
   };
 }
 
@@ -252,8 +252,8 @@ export async function assertNoLinks(root, target, lstat = fs.lstat) {
 export async function reserveOutput(root, output) {
   outputPath(root, output);
   // Never follow a junction to a directory outside the project, or reuse a study.
-  await assertNoLinks(root, path.join(root, "Benchmarks.Local"));
-  const tmp = path.join(root, "Benchmarks.Local", "tmp");
+  await assertNoLinks(root, path.join(root, "artifacts", "tooling"));
+  const tmp = path.join(root, "artifacts", "tooling", "tmp");
   await fs.mkdir(tmp).catch(error => { if (error.code !== "EEXIST") throw error; });
   await assertNoLinks(root, tmp);
   await fs.mkdir(output); // Exclusive directory creation: EEXIST is fatal.
@@ -429,7 +429,7 @@ export async function runStudy(config) {
   const executablePath = config.browserPath ?? chromium.executablePath();
   const executableBytes = await fs.readFile(executablePath); // No install/download fallback.
   const references = {};
-  for (const relative of ["tools/web/mono-compiler-study.mjs", "tools/web/test-mono-compiler-study.mjs", "tools/web/profile-revisions.mjs", "tools/web/profile-render.mjs", "SpaceBattle.Web/BattleBridge.cs", "SpaceBattle.Web/wwwroot/app.js"])
+  for (const relative of ["tools/web/mono-compiler-study.mjs", "tools/web/test-mono-compiler-study.mjs", "SpaceBattle.Web/BattleBridge.cs", "SpaceBattle.Web/wwwroot/app.js"])
     references[relative] = sha256(await fs.readFile(path.join(config.root, relative)));
   await reserveOutput(config.root, config.output);
   const write = (name, data) => fs.writeFile(path.join(config.output, name), JSON.stringify(data, null, 2) + "\n", { flag: "wx" });

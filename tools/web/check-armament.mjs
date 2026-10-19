@@ -7,7 +7,7 @@ const arg = (name, fallback) => {
   const i = process.argv.indexOf(name);
   return i < 0 ? fallback : process.argv[i + 1];
 };
-const output = path.resolve(arg("--output", "Benchmarks.Local/tmp/web-armament"));
+const output = path.resolve(arg("--output", "artifacts/tooling/tmp/web-armament"));
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const errors = [];

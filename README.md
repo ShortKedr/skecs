@@ -21,13 +21,10 @@ autonomous Space Battle sample.
 | --- | --- |
 | Use the library | [Quickstart](#quickstart) · [Package installation](docs/skecs/INSTALL.md) · [API and lifetime rules](docs/skecs/README.md) · [Sample source](SKECS.Sample/Program.cs) |
 | Work on SKECS | [Implemented optimizations](docs/SKECS_OPTIMIZATION.md) · [Tests](SKECS.Tests) |
-| Read or reproduce measurements | [Microbenchmarks](SKECS.Benchmarks/README.md) · [Five-framework comparison](Benchmarks.Local/README.md) · [Space Battle report](docs/space-battle/REPORT.md) |
+| Read or reproduce measurements | [ECS benchmarks](SKECS.Benchmarks/README.md) · [SpaceBattle benchmarks](SpaceBattle.Benchmarks/README.md) · [Space Battle report](docs/space-battle/REPORT.md) |
 | Run the game | [Desktop](SpaceBattle.Game/README.md) · [Web](SpaceBattle.Web/README.md) |
 
-`Benchmarks.Local/` is the public five-framework comparison harness: source code,
-reproduction scripts, and measured results. "Local" describes how the runner is
-used, not the repository's visibility. Its build and cache directories are ignored;
-internal plans are kept in `skecs-private/`.
+`SKECS.Benchmarks/` owns SKECS benchmarks, five-framework comparisons and result analysis. `SpaceBattle.Benchmarks/` owns game workload measurements and analysis. Raw data and caches stay in ignored `artifacts/`; final reports and charts are published.
 
 ## Quickstart
 
@@ -35,8 +32,8 @@ Use a .NET SDK that supports .NET 8 and run from the repository root. These
 PowerShell settings keep tool and package caches inside the project:
 
 ```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
+$env:DOTNET_CLI_HOME = "$PWD/artifacts/tooling/dotnet-home"
+$env:NUGET_PACKAGES = "$PWD/artifacts/tooling/nuget-packages"
 
 dotnet run --project SKECS.Sample/SKECS.Sample.csproj -c Release
 dotnet test SKECS.Tests/SKECS.Tests.csproj -c Release

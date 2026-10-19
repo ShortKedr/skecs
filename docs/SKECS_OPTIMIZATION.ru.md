@@ -2,7 +2,7 @@
 
 # Оптимизации среды выполнения SKECS
 
-[Руководство библиотеки](skecs/README.ru.md) · [Карта документации](README.ru.md) · [Текущая кампания ECS](benchmarks/current/REPORT.ru.md) · [Текущие замеры API и хранилища](benchmarks/current/SUPPLEMENT.ru.md) · [Исторический эксперимент до/после от 2026-10-11](benchmarks/optimization-methodology.ru.md)
+[Руководство библиотеки](skecs/README.ru.md) · [Карта документации](README.ru.md) · [Текущая кампания ECS](benchmarks/current/REPORT.ru.md) · [Текущие замеры API и хранилища](benchmarks/current/SUPPLEMENT.ru.md)
 
 Статус: реализовано в текущем [CPU runtime](../SKECS/World.cs). Этот документ описывает API и его стоимость. Измеренные ускорения относятся к связанным отчётам о бенчмарках.
 
@@ -77,11 +77,4 @@ factory.CreateBatch(entities, new Position { X = 5 }, new Velocity { X = 6 });
 `AccessorBufferBytes` не включает заголовки управляемых массивов. Это диагностические
 счётчики, а не полное измерение памяти процесса.
 
-В [методике от 2026-10-11](benchmarks/optimization-methodology.ru.md) описан
-исторический эксперимент до/после на тогдашних бинарниках с ограничениями замера
-accessor. Его коэффициенты ускорения относятся только к тому сравнению. Текущие
-результаты приведены в [кампании пяти ECS](benchmarks/current/REPORT.ru.md) и
-[замерах нового API и хранилища](benchmarks/current/SUPPLEMENT.ru.md); переносить
-исторические коэффициенты на текущий API нельзя. Исторические графики пяти
-фреймворков остаются историческими и не переименовываются в замеры оптимизированной
-среды выполнения.
+Текущие результаты приведены в [кампании пяти ECS](benchmarks/current/REPORT.ru.md) и [замерах API и хранилища](benchmarks/current/SUPPLEMENT.ru.md).

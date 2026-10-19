@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
-process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(projectRoot, 'Benchmarks.Local/tmp/playwright-browsers');
+process.env.PLAYWRIGHT_BROWSERS_PATH ||= path.join(projectRoot, 'artifacts/tooling/tmp/playwright-browsers');
 export const dependencies = createRequire(path.join(projectRoot, "tools/web/package.json"));
 export const sha256 = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 export const inside = (root, target) => {
@@ -19,8 +19,8 @@ export async function projectPath(value, { output = false, ignored = false } = {
   assert.ok(typeof value === "string" && value.trim(), "A project path is required");
   const target = path.resolve(value);
   assert.ok(inside(projectRoot, target) && target !== projectRoot, "Path must remain inside this project");
-  if (ignored) assert.ok(inside(path.join(projectRoot, "Benchmarks.Local/tmp"), target) &&
-    target !== path.join(projectRoot, "Benchmarks.Local/tmp"), "Output must be below Benchmarks.Local/tmp");
+  if (ignored) assert.ok(inside(path.join(projectRoot, "artifacts/tooling/tmp"), target) &&
+    target !== path.join(projectRoot, "artifacts/tooling/tmp"), "Output must be below artifacts/tooling/tmp");
   let ancestor = target;
   for (;;) {
     try { await fs.lstat(ancestor); break; }
@@ -29,9 +29,9 @@ export async function projectPath(value, { output = false, ignored = false } = {
   const realRoot = await fs.realpath(projectRoot), realAncestor = await fs.realpath(ancestor);
   assert.ok(inside(realRoot, realAncestor), "Symlink escape outside project");
   if (ignored) {
-    const ignoredRoot = path.join(projectRoot, 'Benchmarks.Local/tmp');
+    const ignoredRoot = path.join(projectRoot, 'artifacts/tooling/tmp');
     if (inside(ignoredRoot, ancestor))
-      assert.ok(inside(path.join(realRoot, 'Benchmarks.Local/tmp'), realAncestor), 'Symlink escape outside ignored output');
+      assert.ok(inside(path.join(realRoot, 'artifacts/tooling/tmp'), realAncestor), 'Symlink escape outside ignored output');
     else assert.equal(realAncestor.toLowerCase(), path.resolve(realRoot, path.relative(projectRoot, ancestor)).toLowerCase(), 'Aliased output ancestor');
   }
   return target;
@@ -81,7 +81,7 @@ export async function openSite(value, { width = 1920, height = 1188 } = {}) {
   const html = await fs.readFile(path.join(site, "index.html"), "utf8");
   const base = html.match(/<base href="([^\"]+)"/)?.[1];
   assert.ok(/^\/(?:[a-zA-Z0-9_-]+\/)*$/.test(base), "Unsupported local base URL");
-  const tmp = path.join(projectRoot, "Benchmarks.Local/tmp");
+  const tmp = path.join(projectRoot, "artifacts/tooling/tmp");
   await fs.mkdir(tmp, { recursive: true });
   process.env.TEMP = process.env.TMP = process.env.TMPDIR = tmp;
   const server = http.createServer(async (request, response) => {

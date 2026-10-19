@@ -2,7 +2,7 @@
 
 # Сторонние Исходники и Лицензии
 
-[Репозиторий](README.ru.md) | [Все реализации и тесты](Benchmarks.Local/README.ru.md) | [Отчёт о бенчмарках](docs/space-battle/REPORT.ru.md)
+[Репозиторий](README.ru.md) | [Все реализации и тесты](SKECS.Benchmarks/README.ru.md) | [Отчёт о бенчмарках](docs/space-battle/REPORT.ru.md)
 
 Репозиторий сравнивает пять реализаций ECS на общих нагрузках. Сторонний код
 остаётся работой соответствующих авторов. Сравнение, исследование или упоминание
@@ -19,15 +19,15 @@
 
 | Компонент | Авторы / copyright в лицензии | Условия | Включённые исходники | Точная лицензия |
 | --- | --- | --- | --- | --- |
-| LeoECS Classic | 2012 - 2023 leopotam@yandex.ru | MIT-Red либо отдельно согласованная собственническая/коммерческая лицензия | [ecs/src](Benchmarks.Local/vendor/ecs/src/) | [Оригинал](Benchmarks.Local/vendor/ecs/LICENSE.md), [закреплённый upstream](https://github.com/Leopotam/ecs/blob/1213c31c9ef8325d48e74a52b345c4db242d038b/LICENSE.md) |
-| LeoECS Lite | 2012-2024 leopotam@yandex.ru | MIT-Red | [ecslite/src](Benchmarks.Local/vendor/ecslite/src/) | [Оригинал](Benchmarks.Local/vendor/ecslite/LICENSE.md), [закреплённый upstream](https://github.com/Leopotam/ecslite/blob/5053141d7d663c6b1855c8409ac93dfac807b239/LICENSE.md) |
-| Morpeh | 2025 Oleg Morozov, Igor Boyko, Matvey Reschikov | MIT | [Morpeh Core](Benchmarks.Local/vendor/morpeh/Scellecs.Morpeh/Core/) | [Оригинал](Benchmarks.Local/vendor/morpeh/LICENSE.md), [закреплённый upstream](https://github.com/scellecs/morpeh/blob/9f6369384792a01d74df24efd35b08ae313e4f12/LICENSE.md) |
-| StaticEcs | 2026 FFS | MIT | [StaticEcs/Src](Benchmarks.Local/vendor/StaticEcs/Src/) | [Оригинал](Benchmarks.Local/vendor/StaticEcs/LICENSE.md), [закреплённый upstream](https://github.com/Felid-Force-Studios/StaticEcs/blob/23b1cf36d89497e8a126d38459d688e2b0a5dea3/LICENSE.md) |
-| StaticPack | 2025 FFS | MIT | [StaticPack/Src](Benchmarks.Local/vendor/StaticPack/Src/) | [Оригинал](Benchmarks.Local/vendor/StaticPack/LICENSE.md), [закреплённый upstream](https://github.com/Felid-Force-Studios/StaticPack/blob/7bfb6cf925901b9366dda884258d727a89fff76e/LICENSE.md) |
+| LeoECS Classic | 2012 - 2023 leopotam@yandex.ru | MIT-Red либо отдельно согласованная собственническая/коммерческая лицензия | [ecs/src](SKECS.Benchmarks/Vendor/Sources/ecs/src/) | [Оригинал](SKECS.Benchmarks/Vendor/Sources/ecs/LICENSE.md), [закреплённый upstream](https://github.com/Leopotam/ecs/blob/1213c31c9ef8325d48e74a52b345c4db242d038b/LICENSE.md) |
+| LeoECS Lite | 2012-2024 leopotam@yandex.ru | MIT-Red | [ecslite/src](SKECS.Benchmarks/Vendor/Sources/ecslite/src/) | [Оригинал](SKECS.Benchmarks/Vendor/Sources/ecslite/LICENSE.md), [закреплённый upstream](https://github.com/Leopotam/ecslite/blob/5053141d7d663c6b1855c8409ac93dfac807b239/LICENSE.md) |
+| Morpeh | 2025 Oleg Morozov, Igor Boyko, Matvey Reschikov | MIT | [Morpeh Core](SKECS.Benchmarks/Vendor/Sources/morpeh/Scellecs.Morpeh/Core/) | [Оригинал](SKECS.Benchmarks/Vendor/Sources/morpeh/LICENSE.md), [закреплённый upstream](https://github.com/scellecs/morpeh/blob/9f6369384792a01d74df24efd35b08ae313e4f12/LICENSE.md) |
+| StaticEcs | 2026 FFS | MIT | [StaticEcs/Src](SKECS.Benchmarks/Vendor/Sources/StaticEcs/Src/) | [Оригинал](SKECS.Benchmarks/Vendor/Sources/StaticEcs/LICENSE.md), [закреплённый upstream](https://github.com/Felid-Force-Studios/StaticEcs/blob/23b1cf36d89497e8a126d38459d688e2b0a5dea3/LICENSE.md) |
+| StaticPack | 2025 FFS | MIT | [StaticPack/Src](SKECS.Benchmarks/Vendor/Sources/StaticPack/Src/) | [Оригинал](SKECS.Benchmarks/Vendor/Sources/StaticPack/LICENSE.md), [закреплённый upstream](https://github.com/Felid-Force-Studios/StaticPack/blob/7bfb6cf925901b9366dda884258d727a89fff76e/LICENSE.md) |
 
 StaticPack является зависимостью StaticEcs, а не отдельной измеряемой ECS. Точные
 URL репозиториев, полные commit ID, размеры файлов и SHA-256 записаны в
-[манифесте исходников](Benchmarks.Local/vendor-manifest.json).
+[манифесте исходников](SKECS.Benchmarks/Vendor/manifest.json).
 
 ## Условия Лицензий
 
@@ -51,14 +51,14 @@ URL репозиториев, полные commit ID, размеры файло�
 
 ## Наши Адаптации
 
-Сторонние исходники и лицензии не изменены. Наши [адаптеры микробенчмарков](Benchmarks.Local/Adapters.cs),
-[статические адаптеры](Benchmarks.Local/StaticAdapters.cs), [стресс-адаптеры](Benchmarks.Local/StressAdapters.cs)
+Сторонние исходники и лицензии не изменены. Наши [адаптеры микробенчмарков](SKECS.Benchmarks/Comparison/Adapters.cs),
+[статические адаптеры](SKECS.Benchmarks/Comparison/StaticAdapters.cs), [стресс-адаптеры](SKECS.Benchmarks/Comparison/StressAdapters.cs)
 и [хранилища SpaceBattle](SpaceBattle.Adapters/) являются отдельными сравнительными
 интеграциями, а не реализациями upstream или одобренными авторами рекомендациями
 по производительности.
 
-[StaticLibrary.csproj](Benchmarks.Local/StaticLibrary.csproj) собирает исходники
-StaticEcs и StaticPack для .NET 8. [MorpehLibrary.csproj](Benchmarks.Local/MorpehLibrary.csproj)
+[StaticLibrary.csproj](SKECS.Benchmarks/Vendor/StaticLibrary.csproj) собирает исходники
+StaticEcs и StaticPack для .NET 8. [MorpehLibrary.csproj](SKECS.Benchmarks/Vendor/MorpehLibrary.csproj)
 собирает неизменённый Morpeh Core для netstandard2.1 с исходной целевой платформой
 и Debug defines, без ресурсов Unity/пакета/редактора и без генерации NuGet-пакета.
 Это наши сборочные обёртки, а не изменения алгоритмов ECS.
@@ -69,8 +69,7 @@ StaticEcs и StaticPack для .NET 8. [MorpehLibrary.csproj](Benchmarks.Local/M
 
 NuGet-зависимости объявлены в проектах и восстанавливаются обычным способом; их
 кеши пакетов, бинарные файлы, SDK и нативные библиотеки **не распространяются в
-этом репозитории исходников**. Среди них [Aether.Physics2D 2.2.0](https://www.nuget.org/packages/Aether.Physics2D/2.2.0)
-(MS-PL), [Silk.NET 2.23.0](https://www.nuget.org/packages/Silk.NET.Windowing/2.23.0),
+этом репозитории исходников**. Среди них [Silk.NET 2.23.0](https://www.nuget.org/packages/Silk.NET.Windowing/2.23.0),
 [StbImageSharp 2.30.16](https://www.nuget.org/packages/StbImageSharp/2.30.16),
 [BenchmarkDotNet 0.14.0](https://www.nuget.org/packages/BenchmarkDotNet/0.14.0)
 и инструменты xUnit/test SDK/coverage. Это не полный перечень транзитивных
@@ -79,7 +78,7 @@ NuGet-зависимости объявлены в проектах и восс�
 для всего включённого. У сгенерированных изображений клиента есть отдельный
 [provenance](SpaceBattle.Game/Assets/PROVENANCE.ru.md).
 
-Собственный код репозитория (включая SECS, адаптеры и тесты), документация,
+Собственный код репозитория (включая SKECS, адаптеры и тесты), документация,
 данные и собственная графика распространяются по корневой [лицензии MIT](LICENSE).
 Это разрешение относится только к материалам, права на которые принадлежат
 правообладателю проекта. Для включённых сторонних исходников и других материалов
@@ -88,8 +87,8 @@ NuGet-зависимости объявлены в проектах и восс�
 
 ## Браузерная Поставка
 
-[WebAssembly-демо](SpaceBattle.Web/README.ru.md) распространяет собранные SECS,
-SpaceBattle.Core и SpaceBattle.SECS с Aether.Physics2D 2.2.0 (MS-PL),
+[WebAssembly-демо](SpaceBattle.Web/README.ru.md) распространяет собранные SKECS,
+SpaceBattle.Core и SpaceBattle.SKECS,
 .NET/Blazor 8.0.31 (MIT и исходные уведомления о сторонних компонентах) и Lucide 1.55.0
 (ISC / MIT для иконок на основе Feather). Статический сайт содержит оригинальные
 лицензии, copyright и provenance изображений в
@@ -106,14 +105,14 @@ OpenGL и зависимости бенчмарков/тестов. Услови
 ## Проверка
 
 ```sh
-dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
-dotnet test tools/BenchmarkTools.Tests/BenchmarkTools.Tests.csproj -c Release
+dotnet run --project SKECS.Benchmarks -c Release -- verify-vendor
+dotnet test tools/BenchmarkSupport.Tests/BenchmarkSupport.Tests.csproj -c Release
 ```
 
-[Нативная проверка](tools/BenchmarkTools/VendorVerifier.cs) сверяет размеры и SHA-256 всех файлов манифеста, включая лицензии, и отклоняет незакреплённые C#-файлы в распространяемых runtime-каталогах. [.gitattributes](.gitattributes) предотвращает преобразование переводов строк в проверяемых сторонних файлах.
+[Нативная проверка](tools/BenchmarkSupport/VendorVerifier.cs) сверяет аудированные метаданные компонентов, размеры и SHA-256 всех файлов манифеста, включая лицензии, и точный распространяемый состав Git. Она отклоняет незакреплённые C#-файлы в распространяемых runtime-каталогах. [.gitattributes](.gitattributes) предотвращает преобразование переводов строк в проверяемых сторонних файлах.
 
 ```sh
-dotnet run --project tools/BenchmarkTools -c Release -- restore-vendor
+dotnet run --project SKECS.Benchmarks -c Release -- restore-vendor
 ```
 
-Необязательная [реализация восстановления](tools/BenchmarkTools/VendorRestore.cs) загружает закреплённые архивы, проверяет выбранные runtime-исходники и оригинальные лицензии до установки отсутствующих файлов и отказывается перезаписывать изменённые локальные файлы. Загрузка требует сети; удалённые репозитории не изменяются. Обычному клону этот шаг не нужен. Условия лицензирования выше сохраняются.
+Необязательная [реализация восстановления](SKECS.Benchmarks/Analysis/VendorRestore.cs) загружает закреплённые архивы, проверяет выбранные runtime-исходники и оригинальные лицензии до установки отсутствующих файлов и отказывается перезаписывать изменённые локальные файлы. Загрузка требует сети; удалённые репозитории не изменяются. Обычному клону этот шаг не нужен. Условия лицензирования выше сохраняются.

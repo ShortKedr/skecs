@@ -2,7 +2,7 @@ English | [Русский](REPORT.ru.md)
 
 # ECS comparison — 2026-10-18
 
-[Benchmark overview](../../../SKECS.Benchmarks/README.md) | [Harness and reproduction](../../../Benchmarks.Local/README.md)
+[Benchmark overview](../../../SKECS.Benchmarks/README.md) | [Harness and reproduction](../../../SKECS.Benchmarks/README.md)
 
 [Complete SKECS suites and API measurements](SUPPLEMENT.md) include 34 current and 51 legacy BenchmarkDotNet cases, creation/accessor and retained-storage diagnostics.
 
@@ -10,11 +10,11 @@ All five frameworks were measured afresh in one sequential campaign: 40 base cas
 
 Environment: .NET 8.0.32, X64, AMD Ryzen 9 9900X 12-Core Processor, 24 logical processors. Release; one thread; tiered compilation off. `9063e9d780526dc937d949a6709b33241b47a092`; working tree modified: `True`.
 
-Local artifacts in `artifacts/benchmarks/current/micro`: `campaign.json` pins the measured revision and hashes; `base.json` and `stress.json` retain every observation. Source and assembly hashes describe the historical measured snapshot.
+Local artifacts in `artifacts/benchmarks/current/micro`: `campaign.json` pins the measured revision and hashes; `base.json` and `stress.json` retain every observation. Source and assembly hashes describe the measured snapshot.
 
 ## Framework revisions used
 
-Third-party rows show exact upstream commits from the hash-verified `Benchmarks.Local/vendor-manifest.json`, rather than guessed release numbers. The SKECS row records the campaign repository revision.
+Third-party rows show exact upstream commits from the hash-verified `SKECS.Benchmarks/Vendor/manifest.json`, rather than guessed release numbers. The SKECS row records the campaign repository revision.
 
 StaticEcs **2.2.9**; StaticPack **1.2.6** (`7bfb6cf925901b9366dda884258d727a89fff76e`). The manifest records SHA-256 for every included upstream source file.
 
@@ -75,7 +75,3 @@ Error bars show sample standard deviation, not confidence intervals. Base timing
 Base validation passed for all five frameworks at 1,000/100,000 entities before timing. Stress validation passed at 257/4,097 entities: seven scenarios repeated three times, payload round-trip and retired handles. Each measured stress case passed final full-population validation. Exact matrices, input hashes, sample counts, means, standard deviations and allocations were checked before report generation.
 
 These are equivalent logical operations through selected adapters, not identical storage or each framework’s best possible API. Results apply to this machine, runtime, snapshots and workload. They do not establish a universal ECS ranking, Unity/IL2CPP performance, total-memory efficiency or cross-platform determinism. Close means should not be treated as reliable wins without further experiments.
-
-## Retained history
-
-Previous five-ECS runs: `artifacts/benchmarks/history/Benchmarks.Local/results-all-updated.json`, `artifacts/benchmarks/history/Benchmarks.Local/stress-all-updated.json`, [charts](../updated/comparison.png). The separate [optimization experiment](../optimization-methodology.md) uses preserved historical binaries. Neither is the current campaign or evidence of today’s before/after improvement.

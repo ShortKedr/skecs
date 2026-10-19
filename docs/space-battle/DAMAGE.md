@@ -4,8 +4,6 @@ English | [Русский](DAMAGE.ru.md)
 
 Current source revision: **`layered-weapon-damage-v1`**. Desktop and production
 Mono AOT WASM use the same [C# rules](../../SpaceBattle.Core/DamageRules.cs).
-This intentional gameplay change invalidates older trajectories/checksums; it
-does not revise historical measurements or claim a performance improvement.
 
 ## Profiles
 
@@ -59,68 +57,18 @@ neutral damage. `DamageWeapon` is the explicit weapon API used by all projectile
 
 ## AI Estimate
 
-This section records the initial v2 layer estimate. Current source uses
-[layered-squads-v3](TACTICS_V3.md) with readiness, staggered first impacts,
-separate suppression/loss estimates and usefulness-based composition. Damage profiles are unchanged.
+The [layered squad model](TACTICS.md) evaluates shield and hull damage separately, using real weapon profiles, readiness, flight time, hit probability and heat budgets. It includes staggered arrivals and bounded estimates of return damage, suppression and allied shots.
 
-The AI sums each contributing weapon's expected DPS separately for shield and
-hull, including its layer profile, accuracy/range and heat budget. Its continuous
-two-phase estimate is `S / shieldDps + H / (hullDps * (1 - armor))`, skipping empty
-layers and treating a positive layer with no effective DPS as unreachable.
-It does not divide one effective-health scalar by mixed raw DPS. Existing
-approach time, flight time, threat preference, target locks and group formation remain.
-
-This is an approximation: discrete volleys/overkill, future shield regeneration,
-heat evolution, exact arrival schedules, turret aim/obstruction and asynchronous
-target choices are not simulated by the estimate. Mounted DPS retains the existing
-class-catalog cannon/plasma pairs and independent cooling budget: arbitrary external
-gun edits, removal or reparenting are not represented in that approximation. Actual
-hits always use the emitted projectile's own weapon profile. The estimate is a selection
-heuristic, not a promise of measured time to kill.
+This is a target-selection heuristic. It does not simulate future acceleration, regeneration, every discrete volley, exact turret obstruction or arbitrary runtime changes to mounted guns. Actual hits use the emitted projectile's own weapon profile.
 
 ## Verification
 
-Three fresh native processes produced identical 24-row controlled studies.
-Each volley schedules base damage 100, starting at tick 60 and repeating every
-60 ticks (60 Hz). Target hull is 1000, armor 0.25, and only the starting shield
-changes. The mixed pair schedules 50 plasma + 50 cannon base damage; all-five
-schedules 20 per kind. Results below are **simulation seconds to kill**, not CPU time.
+[Headless checks](../../SpaceBattle.Benchmarks/Measurement/Validation.cs) cover layer accounting, damage/AI estimates and adapter replays. Run them with the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md):
 
-| Composition | Shield 0 | Shield 750 | Shield 3000 |
-| --- | ---: | ---: | ---: |
-| MachineGun / Cannon / HeavyCannon | 9 | 17 | 39 |
-| Plasma | 14 | 19 | 34 |
-| Missile | 14 | 21 | 44 |
-| Plasma then Cannon | 11 | 17 | 35 |
-| Cannon then Plasma | 11 | 17 | 35 |
-| All five | 11 | 18 | 38 |
+```sh
+dotnet run --project SpaceBattle.Benchmarks -c Release -- validate space-battle
+```
 
-These synthetic ordered hits isolate layer accounting: no travel, misses,
-regeneration, cooling, heat lockout, AI, or secondary fragments. Actual weapon
-catalogs are untouched. Plasma gains on the shield-heavy fixture, but kinetic
-still wins at shield 750 because hull work dominates. This is not fleet balance.
-Raw evidence: `Benchmarks.Local/tmp/weapon-damage-20261012/compositions-r1.json`
-through `compositions-r3.json` (ignored, not published).
+The controlled `measure --damage-study` command compares equal base-DPS compositions and shielded/unshielded targets. Save diagnostic evidence under ignored `artifacts/tooling/tmp`; these fixtures do not establish fleet balance.
 
-Native full validation and ten checkpoints through tick 3000 passed on all five
-adapters, with final checksum `8C4682204BBAC537` in that native scenario. Forced
-scalar damage/AI checks passed. Warmed direct `DamageWeapon` batches allocated
-zero bytes on all five stores; this is not a claim about whole-Step allocations.
-
-Windows x64 desktop Release and stable .NET 8.0.31 production Mono AOT were built
-and run. Chromium passed 11 actual AOT layer probes, three profile/reset replays,
-combat, controls and desktop/mobile rendering checks. Desktop controls, counts,
-statistics and nonblank atlas rendering passed at tick 600. The unmodified
-Playwright action client reached tick 360 with no errors. Desktop, browser and
-mobile frames were visually inspected, colliders disabled. No cross-platform
-bitwise checksum guarantee or validation on other browser/CPU architectures is claimed.
-
-Run the [headless checks](../../SpaceBattle.Headless/Validation.cs) with
-`--validate`, `--validate-adapters` and `--validate-ports`. The controlled
-`--damage-study` compares equal base-DPS compositions and shielded/unshielded
-targets, without attributing differences to fleet balance. Save new evidence
-under ignored `Benchmarks.Local/tmp`; never replace published benchmark data.
-
-The production [browser checks](../../tools/web/check-web.mjs) inspect the actual
-AOT layer outputs and revision as well as combat, deterministic reset and rendering.
-Revision metadata is exported by both frontends and new headless reports.
+The production [browser checks](../../tools/web/check-web.mjs) inspect actual AOT layer outputs and revision, combat, deterministic reset and rendering. Revision metadata is exported by both frontends and headless reports.

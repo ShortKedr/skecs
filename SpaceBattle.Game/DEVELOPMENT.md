@@ -8,7 +8,7 @@ Both clients share a [generated gun atlas](Assets/PROVENANCE.md#gun-atlas), with
 fixed mounts, crop-relative bearing pivots and independently rotating/recoiling heads.
 Mount bases and weapon heads use the same parent-hull RGB paint, including the
 main heavy cannon. Orange overheat indicators remain independent of team paint.
-`--validate-gun-tints --gun-tints-capture Benchmarks.Local/tmp/gun-tints.png
+`--validate-gun-tints --gun-tints-capture artifacts/tooling/tmp/gun-tints.png
 --width 1920 --height 1400` checks native PNG-pixel references, both teams,
 transparency, recoil and heat in a hidden GL window.
 Projectiles and particles use a shared [generated effects atlas](Assets/PROVENANCE.md#effects-atlas):
@@ -18,7 +18,7 @@ head/trail crops. Both clients validate the same cell/pivot contract.
 Colored effect cores have a controlled contrast lift; the
 [contrast regression](Assets/PROVENANCE.md#contrast-checks) checks readability
 against fixed whole-scene/local brightness budgets, without per-frame bloom.
-`--validate-effects --effects-capture Benchmarks.Local/tmp/particles.png` runs a
+`--validate-effects --effects-capture artifacts/tooling/tmp/particles.png` runs a
 hidden GL framebuffer regression for all four particle kinds at full/quarter
 alpha, writes a gallery and exits. It is independent of gameplay captures and
 must run separately from profiling/live-statistics validation.
@@ -35,7 +35,7 @@ circle; following adds white/amber brackets. Physics shapes, damage and gameplay
 colors/data are unchanged. The native HUD and its reserved camera area remain native.
 OpenGL texture-edge sampling and Canvas antialiasing are not pixel-identical.
 
-`--validate-scene-style --scene-style-capture Benchmarks.Local/tmp/desktop-web-visuals/native-gallery.png`
+`--validate-scene-style --scene-style-capture artifacts/tooling/tmp/desktop-web-visuals/native-gallery.png`
 checks real framebuffer debris color/radius and allocation-free scene composition,
 then writes a render-only comparison fixture (default window is 1440 x 900).
 Run `node tools/web/check-desktop-scene.mjs --url http://127.0.0.1:8054/`
@@ -94,7 +94,7 @@ Run the built executable normally for a visible window. Automated captures use
 a hidden OpenGL window unless `--visible` is passed:
 
 ```powershell
-SpaceBattle.Game.exe --capture Benchmarks.Local/tmp/desktop-capture/tick-900.png --capture-tick 900 --exit-after-capture --validate-render --visible
+SpaceBattle.Game.exe --capture artifacts/tooling/tmp/desktop-capture/tick-900.png --capture-tick 900 --exit-after-capture --validate-render --visible
 ```
 
 Run from the repository root; capture paths must stay inside that working
@@ -122,7 +122,7 @@ and shields. No per-team projectile count or friendly-fire immunity is inferred.
 After building, run from the repository root:
 
 ```powershell
-SpaceBattle.Game/bin/Release/net8.0/SpaceBattle.Game.exe --profile-frames 3600 --profile-warmup 120 --capture-tick 900 --ships-per-team 96 --profile-output Benchmarks.Local/tmp/desktop-profile/frontend.json --profile-csv Benchmarks.Local/tmp/desktop-profile/frontend.csv --hidden
+SpaceBattle.Game/bin/Release/net8.0/SpaceBattle.Game.exe --profile-frames 3600 --profile-warmup 120 --capture-tick 900 --ships-per-team 96 --profile-output artifacts/tooling/tmp/desktop-profile/frontend.json --profile-csv artifacts/tooling/tmp/desktop-profile/frontend.csv --hidden
 ```
 
 This is an **uncapped deterministic fixed replay**, not a real-time game FPS
@@ -145,12 +145,12 @@ All output paths must remain under the current project directory.
 The [desktop timing study](../docs/space-battle/DESKTOP_TIMING.md) compares five fresh processes with matched assemblies, configuration and final checksum. Run from the repository root:
 
 ```sh
-dotnet run --project tools/BenchmarkTools -c Release -- run desktop
-dotnet run --project tools/BenchmarkTools -c Release -- report desktop
-dotnet run --project tools/BenchmarkTools -c Release -- verify desktop
+dotnet run --project SpaceBattle.Benchmarks -c Release -- run desktop
+dotnet run --project SpaceBattle.Benchmarks -c Release -- report desktop
+dotnet run --project SpaceBattle.Benchmarks -c Release -- verify desktop
 ```
 
-The [portable .NET CLI](../tools/BenchmarkTools/README.md) builds, validates and measures sequentially without Python or PowerShell. Desktop requires a working graphics device. Raw JSON/CSV/gzip stays in ignored `artifacts/benchmarks/current/desktop`; Markdown/SVG is published under `docs/space-battle`. For a separate run, use `run desktop --output artifacts/benchmarks/repro/desktop`, then select that path with `report desktop --data` or `verify desktop --data`; `report --output` may select any project-local directory. Default `run all` runs headless suites; `run all --include-desktop` explicitly adds this study. Finish other measurements and builds before starting.
+The [portable .NET CLI](../SpaceBattle.Benchmarks/README.md) builds, validates and measures sequentially without Python or PowerShell. Desktop requires a working graphics device. Raw JSON/CSV/gzip stays in ignored `artifacts/benchmarks/current/desktop`; Markdown/SVG is published under `docs/space-battle`. For a separate run, use `run desktop --output artifacts/benchmarks/repro/desktop`, then select that path with `report desktop --data` or `verify desktop --data`; `report --output` may select any project-local directory. Default `run all` runs headless suites; `run all --include-desktop` explicitly adds this study. Finish other measurements and builds before starting.
 
 CPU phase values are host elapsed Stopwatch timings, not hardware CPU-cycle
 counters. SimulationCPU covers Step (live statistics are excluded in profiling); SnapshotCaptureCPU

@@ -95,8 +95,8 @@ test("CLI defaults match requested gameplay window; output confined to ignored t
   assert.throws(() => parseArgs(["--site", "x", "--wat", "1"]));
   assert.throws(() => parseArgs(["--site"]));
   assert.throws(() => checkOutputPath(path.join(root, "artifacts/capture")));
-  assert.throws(() => checkOutputPath(path.join(root, "Benchmarks.Local/tmp")));
-  assert.equal(checkOutputPath(path.join(root, "Benchmarks.Local/tmp/fresh")), path.join(root, "Benchmarks.Local/tmp/fresh"));
+  assert.throws(() => checkOutputPath(path.join(root, "artifacts/tooling/tmp")));
+  assert.equal(checkOutputPath(path.join(root, "artifacts/tooling/tmp/fresh")), path.join(root, "artifacts/tooling/tmp/fresh"));
 });
 
 test("mock battle warms independently then resets, seeks outside capture, profiles Advance(1)", async () => {

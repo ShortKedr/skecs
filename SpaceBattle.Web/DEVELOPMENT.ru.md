@@ -61,8 +61,8 @@ desktop/mobile-скриншоты в артефакте `space-battle-browser-ch
 touch, адаптивная раскладка и восстановление после ошибки. Локальный запуск:
 
 ```powershell
-$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/Benchmarks.Local/tmp/playwright-browsers"
-npm ci --prefix tools/web --cache Benchmarks.Local/tmp/npm-cache
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/artifacts/tooling/tmp/playwright-browsers"
+npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
 ./tools/build-space-battle-web.ps1
 node tools/web/node_modules/playwright/cli.js install chromium webkit
 node tools/web/check-web.mjs --base /skecs/
@@ -112,7 +112,7 @@ Canvas CPU показывает сглаженное CPU-время рисова
 в тиках. При запущенном локальном сервере из раздела выше:
 
 ```powershell
-node tools/web/profile-web.mjs --url http://localhost:8000/ --warmup-ticks 600 --output Benchmarks.Local/tmp/web-performance.json
+node tools/web/profile-web.mjs --url http://localhost:8000/ --warmup-ticks 600 --output artifacts/tooling/tmp/web-performance.json
 ```
 
 Используется nominal, сид 7331, viewport Chromium 1440x900. Меняйте `--warmup-ticks`,
@@ -123,5 +123,5 @@ node tools/web/profile-web.mjs --url http://localhost:8000/ --warmup-ticks 600 -
 Измеренное сравнение и его ограничения приведены в
 [отчёте](../docs/space-battle/REPORT.ru.md). Для воспроизведения настольной кампании
 следуйте [методике бенчмарков](../docs/space-battle/README.ru.md) и
-[перечню реализаций и сборок](../Benchmarks.Local/README.ru.md).
+[перечню реализаций и сборок](../SKECS.Benchmarks/README.ru.md).
 Публикация или запуск демо не пересоздаёт и не заменяет эти измерения.

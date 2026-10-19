@@ -4,9 +4,9 @@ import path from "node:path";
 import { PNG } from "pngjs";
 
 const option = (name, fallback) => process.argv.includes(name) ? process.argv[process.argv.indexOf(name) + 1] : fallback;
-const root = process.cwd(), tmp = path.join(root, "Benchmarks.Local/tmp");
-const nativePath = path.resolve(option("--native", "Benchmarks.Local/tmp/desktop-web-visuals/native-gallery.png"));
-const output = path.resolve(option("--output", "Benchmarks.Local/tmp/desktop-web-visuals"));
+const root = process.cwd(), tmp = path.join(root, "artifacts/tooling/tmp");
+const nativePath = path.resolve(option("--native", "artifacts/tooling/tmp/desktop-web-visuals/native-gallery.png"));
+const output = path.resolve(option("--output", "artifacts/tooling/tmp/desktop-web-visuals"));
 assert.ok(nativePath.startsWith(tmp + path.sep) && output.startsWith(tmp + path.sep), "Only project-local ignored evidence");
 const url = new URL(option("--url", "http://127.0.0.1:8054/"));
 assert.ok(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname), "Loopback browser only");

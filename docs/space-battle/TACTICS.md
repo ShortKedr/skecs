@@ -1,150 +1,76 @@
 English | [Русский](TACTICS.ru.md)
 
-[Methodology / README](README.md) | [Frozen report](REPORT_2026-10-11.md)
+# Layered Squad Tactics
 
-# Tactical AI v2 (Historical)
+Current AI revision: **layered-squads-v3**. Desktop and Mono AOT share C# code.
+[DamageRules](../../SpaceBattle.Core/DamageRules.cs) is the source for the layered-weapon-damage-v1 damage profiles used by tactical scoring.
 
-Current source uses [layered-squads-v3](TACTICS_V3.md). The v2 description below
-is retained as the earlier model, not the current formation/scoring algorithm.
+## Composition And Persistence
 
-Current gameplay adds [mounted armament `mounted-armament-v7`](ARMAMENT.md).
-Target cost now also includes mounted cannon/plasma DPS with their own heat
-budgets. Heavy hull weapons steer toward predicted intercept before firing.
-V6 reduces mount damage/rate in the shared catalog; kill-time estimates use
-those auxiliary values without changing the tactical algorithm.
+Groups contain 2-4 ships, Interceptor through Gunship. Team-specific
+spatial snapshots feed greedy joint-cost recruitment, not combination enumeration
+or a diversity quota. Mixed and homogeneous groups compete on usefulness.
+Compatibility includes speed/range ratios, arrival delay, health and weapon/heat
+readiness. Temporary screening/cooling preserves membership; death, docking,
+class/team changes and large separation repair the roster and elect a survivor.
+Periodic review replaces at most one member for a clear improvement. A shield
+transition does not reset leases or pause useful fire while waiting for plasma.
 
-At the V5 stage described here, tactical revision was `tactical-lock-v2`: v5 changes only the catalog heavy
-rate feeding AI estimated DPS, not target selection, leases, squads or movement.
-Heavy nominal cooldowns are 12/14/18/22/26 seconds in Frigate/Destroyer/
-LightCarrier/FleetCarrier/Foundry order; low doubles them, high halves them.
-Damage stays 60/80/480/640/800, with range, speed, heat and normal guns unchanged.
-`SpawnShip` sets 50%-100% initial heavy charge of the actual churn-scaled cooldown
-relative to `birthTick`, from seed + ship serial through a local RNG independent
-of battle RNG. Late-built/respawned ships get the same rule, no free first heavy
-volley; turrets start ready as before. This replaces 54 ready heavy weapons in
-the old nominal initial fleet of 198 and old cooldowns of 3.5/4/6/7/8 seconds.
-It changes cadence and sustained firepower, not per-shot lethality, and is initial
-tuning, not balance proof. The estimator does not model this initial readiness.
-V5 passed mechanics validation and all five adapter replays; current correctness
-evidence is documented in [Armament](ARMAMENT.md). No measurements or historical studies are changed.
+[TacticsSettings](../../SpaceBattle.Core/TacticsSettings.cs) defaults are heuristics,
+not proven balance: 120-tick reviews, 20% replacement improvement, minimum
+speed/range ratios 0.45/0.35, 2.5-second arrival tolerance, 8-second engagement
+ceiling. Target leases retain 120 ticks and the 35% switch threshold.
 
-This describes the earlier `tactical-lock-v2` implementation. The source links below now resolve to current code and do not restore v2:
-[TacticalAi.cs](../../SpaceBattle.Core/TacticalAi.cs) and
-[Battle.cs](../../SpaceBattle.Core/Battle.cs), with firing/repair rules in
-[CombatSystems.cs](../../SpaceBattle.Core/CombatSystems.cs).
-The report's measured workload is the frozen `predictive-neutral-v1`, not this
-tactical revision. At the time of this v2 description, no new timing suite had been run for it; the older charts therefore do
-not measure v2 performance. The later v2/v3 comparison is recorded in [Tactics v3](TACTICS_V3.md). This document makes no measured
-speed or tactical-superiority claim.
+## Scoring And Movement
 
-## Deterministic Reasoning
+A bounded first-impact/continuous-rate model handles shield then hull through
+real profiles, weapon readiness/cooldown, flight, hit probability, packet overkill
+and own heat limits. Late participants do not contribute full DPS before arrival.
+Return damage/expected losses and probabilistic plasma suppression are separate
+from direct damage; suppression is capped at 25% cost benefit, not guaranteed
+overheat or a reduction of HP. Flying allied shots receive at most 35% initial
+confidence, attenuated by motion/heading; credited damage is capped at half each
+remaining layer. Actual CCD and friendly fire are untouched.
 
-`Collect` sorts ships by serial. Before individual decisions, `PrepareTactics`
-copies living ships into immutable decision rows, reconstructs squads and assigns
-shared targets. Strict score comparisons keep the first candidate on ties.
-Tactical selection is a deterministic heuristic, not learning or a search planner;
-the snapshots keep its reasoning independent of ECS query order. This does not
-promise cross-platform floating-point/checksum equality.
+Target-relative angular lanes use individual working ranges, short separation
+and steering away from an ally crossing a firing ray. This reduces intended
+overlap, but neither guarantees a clear path nor immunizes allies. Wounded ships
+still screen behind healthier ships, recover and return through existing states.
 
-Individual decisions normally occur every `12 + Serial % 8` ticks. Docked ships
-and brains with `NextDecisionTick == int.MaxValue` skip decisions.
+## Budgets And Limits
 
-## Target Cost And Lease
+Defaults: 16384 spatial cell/membership visits and 8192 target-cost evaluations
+per phase, 2048 composition evaluations per review; 16 local targets, 8 rotating
+global probes, 6 formation targets, 16 recruits and 4096 projectile intents.
+Prepared indexes and reusable buffers avoid allocations in the hot path once their capacity has been reserved.
+Recruitment filters assigned/ineligible rows before filling the bounded sample,
+so an assigned prefix cannot permanently starve a dense cell. When spatial work
+is exhausted, a constant-sized neighboring serial window allows stable progress.
 
-Lower cost is preferred, among living undocked enemies:
+Limited spatial queries are deterministic samples, not globally optimal nearest
+or target searches. Stable traversal is followed by snapshot/serial sorting.
+Current-velocity engagement bounds plus rotating global probes may still omit a
+good target until a later review. On exhaustion, live leases and existing groups
+are retained; sampled compatible free recruits provide a stable fallback.
+Diagnostics count fallback explicitly.
 
-```text
-effectiveHealth = shield + hull / max(0.05, 1 - armor)
-cost = (effectiveHealth / DPS + 1.8 * approachSeconds + 0.5 * flightSeconds)
-       * (threatening ? 0.82 : 1)
-```
+These counters bound spatial visits and expensive score calls, not all AI CPU
+time: compatibility/arrival prefilters and steering also do work. Snapshot/index
+preparation is linear; two additional team indexes require roughly 0.5 MiB of
+cell metadata plus population-sized buffers. Fully coupled dense physical
+contacts still have a quadratic worst case; physics was not changed here.
 
-- Primary and secondary DPS use damage, burst, cooldown, tick rate and churn.
-  Each weapon uses a constant-velocity intercept with inherited shooter velocity
-  and muzzle offset; missiles use speed 85 for this estimate. Outside touching
-  distance, intercept times outside `(0, 4]` seconds give zero DPS. A radius/speed/
-  flight-time accuracy weight is clamped to `[0.25, 1]`, with range attenuation.
-- Combined DPS is scaled by cooling plus unused heat capacity spread over three
-  seconds, divided by weapon heat rate, clamped to `[0.15, 1]`.
-- Approach estimates closing to 90% of the larger weapon range using maximum
-  speed minus the target's radial velocity. Targets already inside firing range
-  need no approach. Contributions are rejected outside firing range when
-  closing speed is at most 0.5, approach exceeds 15 seconds,
-  or a carrier would chase beyond 1.5 times that range.
-- Squads sum only `Attack` members' contributions, use the minimum approach time
-  and maximum estimated flight time. A recent attacker (within 180 ticks), or an
-  enemy in `Attack` targeting a contributor, receives the threat discount.
+Approximation limits: future acceleration, sustained discrete volleys, regen/
+repair, changing heat and exact turret aim/obstruction. Large solo ships retain
+catalog mount pairs, not arbitrary external gun edits. Cross-platform bitwise
+determinism and a win in every scenario are not claimed.
 
-A changed nonempty target gets a 120-tick lease (two seconds at 60 Hz). A valid,
-finite-cost target is retained during the lease. Afterwards, switching requires
-a strictly greater than 35% cost reduction: `newCost < currentCost * 0.65`.
-Dead, missing, docked or otherwise unavailable targets bypass the decision timer
-and lease immediately at the next AI pass; nonfinite individual/group costs also
-force reconsideration. Replacement can be empty when no feasible target exists.
-A squad checks feasibility collectively, not separately for every member.
-`EstimatedKillSeconds` stores this weighted cost, not a promised kill time.
+## Validation
 
-## Small Squads And Movement
+[Squad tests](../../SpaceBattle.Benchmarks/Measurement/SquadCompositionValidation.cs) cover
+composition, compatibility, leases, death repair, cover, lanes and dense budgets.
+[Scoring tests](../../SpaceBattle.Benchmarks/Measurement/TacticalScoringValidation.cs) cover
+layer/arrival/heat estimates. Full checks and all-port replays remain required.
 
-Undocked, decision-enabled `Interceptor`, `Fighter`, `Bomber` and `Gunship` in
-`Attack` or `Screen` form same-team groups of 2-4. New members must be strictly
-within 48 units of the leader; separation beyond 96 units, lost/ineligible leaders
-or singleton groups trigger repair. Formation is revisited every 120 ticks or on
-repair. Serial order and nearest candidates determine grouping, not optimal
-assignment. Members receive the leader's shared focus target and lease.
 
-Attacking members loosely follow the healthiest attacking member, using vertical
-slot offsets; correction starts beyond 20 units and is capped at 40% maximum
-speed. Orbital tangent speed is 65% maximum speed solo, 35% grouped, 15% for
-carriers. Preferred distance is 48% of primary range, or 65% for carriers.
-Facing follows the target in `Attack`, otherwise movement. Turning is smoothed:
-desired angular speed is capped at 2.5 rad/s (carriers 0.8), with angular
-acceleration limited to 10 rad/s² (carriers 1.5). Thrust, damping and arena-edge
-steering still constrain movement.
-
-## Screen And Repair Retreat
-
-Threat detection uses an enemy that damaged the ship within 180 ticks and is
-within 1.3 times its weapon range, or an attacking enemy targeting the ship within
-1.1 times its range. A threatened squad member enters `Screen` below 65% hull
-or 18% shield, if suitable cover exists.
-
-Cover must be an undocked same-team ally outside `Screen`/`Retreat`/`Docking`,
-with at least 65% hull and vitality at least 0.15 above the protected ship.
-Vitality is `0.65 * hullFraction + 0.35 * shieldFraction`. Search range is
-`48 + allyRadius`; scoring favors vitality, the same squad (+0.5), and proximity.
-Overheated allies above 92% heat and threatened allies that qualify for their own
-screening are excluded, preventing cover orders behind another retreating ship.
-The ally need not belong to that squad. The destination is behind the ally away
-from the threat, with clearance `allyRadius + ownRadius + 6`; a lateral waypoint
-helps move around the ally when starting in front. This is steering, not a
-guarantee of blocked enemy shots. `Screen` ships do not fire.
-Screen steering matches the cover ally's pre-tick snapshot velocity and reduces position correction
-near the destination, rather than crossing the point at full speed.
-
-Recovery requires at least 75% hull, 35% shield and heat below 80% limit.
-Until recovered, `Screen` persists while threatened or before the 90-tick cover
-deadline; entering/changing cover resets that deadline. Losing usable cover can
-return the ship to `Attack`; dead/docked cover bypasses the decision timer.
-
-Critical retreat takes precedence for non-carriers with a home: hull below 25%
-or heat above 92% limit. An existing retreat persists while hull is below 85%.
-Ships head home and request docking within `homeRadius + ownRadius + 3`.
-Docking still depends on lifecycle checks and repair-slot availability. Docked
-ships repair hull, recharge shields and cool; undocking requires the release
-tick, at least 98% hull and heat below 30% limit.
-
-## Limits And Unchanged Rules
-
-There is no obstacle pathfinding, fleet-level optimization or guaranteed cover.
-Approximate kill cost does not forecast aim spread, occlusion, future maneuvering,
-shield regeneration, consumable use, detailed missile acceleration/homing,
-projectile caps, current cooldown readiness or future overkill allocation.
-Intercept means an aiming estimate, not shooting down incoming projectiles.
-
-Friendly fire is unchanged: projectiles can damage any other enabled ship fixture,
-including allies. Armament v7 excludes only the projectile owner (the parent for
-mounted guns), not its team or target; debris and hull contacts stay neutral.
-Actual predictive aim and deterministic spread remain firing
-rules. See the frozen report for its original evidence and attribution limits,
-not validation or performance results for this tactical revision.
+Run the complete native validation with the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md). Current workload performance is published in the [benchmark report](REPORT.md).

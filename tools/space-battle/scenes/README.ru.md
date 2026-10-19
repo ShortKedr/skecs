@@ -2,7 +2,7 @@
 
 # Поиск сцен и запись видео
 
-[Обзор SpaceBattle](../../../docs/space-battle/README.ru.md) | [Исследования](../../../docs/space-battle/RESEARCH.ru.md)
+[Обзор SpaceBattle](../../../docs/space-battle/README.ru.md)
 
 Переиспользуемые инструменты для трёх настоящих событий SpaceBattle: совместных
 убийств группы, смертельных попаданий HeavyCannon и углового доварпа с последующим
@@ -18,15 +18,15 @@
 При первой установке зависимостей держите кэши внутри проекта:
 
 ```powershell
-npm ci --prefix tools/web --cache Benchmarks.Local/tmp/npm-cache
-$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD 'Benchmarks.Local/tmp/playwright-browsers'
+npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD 'artifacts/tooling/tmp/playwright-browsers'
 npm exec --prefix tools/web -- playwright install chromium
 ```
 
 Поиск:
 
 ```powershell
-./tools/space-battle/find-scenes.ps1 -WorkDirectory Benchmarks.Local/tmp/scene-tools -Profiles nominal,high -Seeds 7331 -Ticks 4200
+./tools/space-battle/find-scenes.ps1 -WorkDirectory artifacts/tooling/tmp/scene-tools -Profiles nominal,high -Seeds 7331 -Ticks 4200
 ```
 
 Первый вызов готовит изолированную пару production/probe Mono AOT через
@@ -34,7 +34,7 @@ npm exec --prefix tools/web -- playwright install chromium
 проверки хешей исходников и сборок. После прерванной подготовки или изменения
 исходников нужен новый `-WorkDirectory`; завершённые сборки не перезаписываются.
 `-DotnetExecutable` выбирает уже установленный SDK. Если существует локальный
-`Benchmarks.Local/tmp/dotnet-aot/dotnet.exe`, он предпочтителен.
+`artifacts/tooling/tmp/dotnet-aot/dotnet.exe`, он предпочтителен.
 
 Команда выводит путь свежего `search.json`: рейтинг эпизодов, точные причинные
 события, разрешённая игровая конфигурация, идентичность исходников/сборок,
@@ -45,7 +45,7 @@ checkpoints независимых replay, бюджет поиска и отсу
 Запись первого тяжёлого эпизода из этого файла:
 
 ```powershell
-./tools/space-battle/capture-scene.ps1 -Search Benchmarks.Local/tmp/scene-tools/search-example/search.json -Type heavy -Rank 1 -OutputDirectory Benchmarks.Local/tmp/scene-tools/video-heavy
+./tools/space-battle/capture-scene.ps1 -Search artifacts/tooling/tmp/scene-tools/search-example/search.json -Type heavy -Rank 1 -OutputDirectory artifacts/tooling/tmp/scene-tools/video-heavy
 ```
 
 Замените `search-example` выведенным каталогом. `-Type group` и `-Type warp`
@@ -121,8 +121,7 @@ Chromium из поиска. После обновления браузера п�
 
 Собственные временные localhost-серверы и браузеры закрываются, существующие
 preview-процессы не трогаются. Выходные файлы, временные профили браузера и кэши
-сборки остаются в ignored `Benchmarks.Local`. Исторические отчёты и измерения не
-пересоздаются. Для иных критериев используйте Node entry points
+сборки остаются в ignored `artifacts/tooling`. Для иных критериев используйте Node entry points
 [find-scenes.mjs](find-scenes.mjs), [capture-scene.mjs](capture-scene.mjs) и чистый
 [детектор](scene-candidates.mjs), а не изменения симуляции.
 

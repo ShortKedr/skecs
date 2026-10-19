@@ -1,7 +1,7 @@
 param(
-    [string]$Study = "Benchmarks.Local/tmp/mono-study-20261012",
+    [string]$Study = "artifacts/tooling/tmp/mono-study-20261012",
     [ValidateSet("Freeze", "A", "B", "C", "D", "Profile")][string]$Variant = "Freeze",
-    [string]$Sdk = "Benchmarks.Local/tmp/dotnet-aot",
+    [string]$Sdk = "artifacts/tooling/tmp/dotnet-aot",
     [switch]$BaselineHeap,
     [switch]$PrivateLtoCache
 )
@@ -9,9 +9,9 @@ $ErrorActionPreference = "Stop"
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.."))
 function LocalPath([string]$relative) {
     $full = [IO.Path]::GetFullPath((Join-Path $root $relative))
-    $allowed = Join-Path $root "Benchmarks.Local/tmp"
+    $allowed = Join-Path $root "artifacts/tooling/tmp"
     if (-not $full.StartsWith($allowed + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Study and SDK must stay in ignored Benchmarks.Local/tmp: $full"
+        throw "Study and SDK must stay in ignored artifacts/tooling/tmp: $full"
     }
     return $full
 }
@@ -21,12 +21,12 @@ $dotnet = Join-Path $sdkPath "dotnet.exe"
 $env:DOTNET_ROOT = $sdkPath
 $env:DOTNET_ROOT_X64 = $sdkPath
 $env:PATH = "$sdkPath;$env:PATH"
-$env:DOTNET_CLI_HOME = Join-Path $root "Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = Join-Path $root "Benchmarks.Local/nuget-packages"
+$env:DOTNET_CLI_HOME = Join-Path $root "artifacts/tooling/dotnet-home"
+$env:NUGET_PACKAGES = Join-Path $root "artifacts/tooling/nuget-packages"
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = "1"
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = "1"
 $env:DOTNET_GENERATE_ASPNET_CERTIFICATE = "false"
-$env:TEMP = Join-Path $root "Benchmarks.Local/tmp"
+$env:TEMP = Join-Path $root "artifacts/tooling/tmp"
 $env:TMP = $env:TEMP
 if ($Variant -eq "Freeze") {
     if (Test-Path -LiteralPath $studyPath) { throw "Use a fresh study directory" }

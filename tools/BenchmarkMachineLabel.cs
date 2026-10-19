@@ -1,4 +1,4 @@
-internal static class BenchmarkMachineLabel
+public static class BenchmarkMachineLabel
 {
     public static string Value
     {

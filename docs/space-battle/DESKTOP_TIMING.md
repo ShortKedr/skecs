@@ -68,7 +68,7 @@ Raw CSV is retained locally as lossless gzip archives. The local manifest record
 
 
 ```sh
-dotnet run --project tools/BenchmarkTools -- report desktop --data artifacts/benchmarks/current/desktop --output docs/space-battle/desktop-current
+dotnet run --project SpaceBattle.Benchmarks -- report desktop --data artifacts/benchmarks/current/desktop --output docs/space-battle/desktop-current
 ```
 
 Checksum: `4876EB52A0D4AFC3`. Local measurement inputs: `artifacts/benchmarks/current/desktop`.

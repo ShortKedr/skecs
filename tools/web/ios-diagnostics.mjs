@@ -145,7 +145,7 @@ export async function validateOutput(output, root = ROOT) {
     } catch (error) { if (error.code !== "ENOENT") throw error; ancestor = path.dirname(ancestor); }
   }
   try { execFileSync("git", ["check-ignore", "--quiet", "--no-index", "--", relative], { cwd: root, stdio: "pipe" }); }
-  catch { throw new Error("Output must be covered by existing project ignore rules (e.g. Benchmarks.Local/tmp/...)"); }
+  catch { throw new Error("Output must be covered by existing project ignore rules (e.g. artifacts/tooling/tmp/...)"); }
 }
 
 async function state(page) {

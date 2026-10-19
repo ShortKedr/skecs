@@ -2,7 +2,7 @@ English | [Русский](COLORS.ru.md)
 
 # Colour scale for benchmark reports
 
-[Documentation map](../README.md) · [SECS results](current/REPORT.md) · [SpaceBattle results](../space-battle/REPORT.md)
+[Documentation map](../README.md) · [SKECS results](current/REPORT.md) · [SpaceBattle results](../space-battle/REPORT.md)
 
 The same colours describe relative differences in comparable tables and charts. The printed numbers, units, error bars and source data remain the evidence; colour helps scan them.
 
@@ -23,26 +23,15 @@ The thresholds describe observed effect size. They are not significance tests, c
 - Managed allocations or memory: the same metric and scope, compared separately from timing. Byte counts from different storage or process scopes are not mixed.
 - Comparison bar charts: each panel uses its own documented comparison group. Axis labels identify the implementations; bar colours carry the same meaning as table markers. Time-series plots retain series colours to identify their lines, rather than assign one quality score to a changing trajectory.
 
-Population, gameplay events, checksum, input sizes, sample counts, parameters and stage shares retain ordinary formatting. Their magnitude does not express performance quality. Archive results retain their date and configuration; their colours do not make them current measurements.
-
-## Historical variability research
-
-Retained Python research tools additionally support the rules below; current native reports use the effect-size scale above without inferring range separation.
-
-When summaries of independent runs are available, the reference is the best median of those summaries. Differences beyond 5% are coloured only when the observed minimum-to-maximum ranges are sufficiently separated under the comparison rule. Overlapping ranges, incomplete variability data and small differences stay grey.
-
-An explicitly published interval may be used with its reported central value. Its endpoints are not treated as additional runs. These ranges describe the recorded variation; they are not confidence intervals.
-
-An absolute threshold is used only when its metric, units and reason are explicitly recorded. It supplements the relative rule and does not change the printed result. Current native reports have no absolute thresholds and do not read the deprecated `tools/space-battle/heatmap_policy.json`.
+Population, gameplay events, checksum, input sizes, sample counts, parameters and stage shares retain ordinary formatting. Their magnitude does not express performance quality.
 
 ## Reproduction
 
-[ReportColors.cs](../../tools/BenchmarkTools/ReportColors.cs) supplies the palette and classification for current .NET reports. Native report generators use local SVG markers and the same palette for SVG charts without external images, CSS or network calls.
+[ReportColors.cs](../../tools/BenchmarkSupport/ReportColors.cs) supplies the palette and classification for current .NET reports. Native report generators use local SVG markers and the same palette for SVG charts without external images, CSS or network calls.
 
 ```sh
-dotnet run --project tools/BenchmarkTools -c Release -- report all
+dotnet run --project SKECS.Benchmarks -c Release -- report all
+dotnet run --project SpaceBattle.Benchmarks -c Release -- report all
 ```
 
 This reads retained local inputs from `artifacts/benchmarks/current` and regenerates Markdown/SVG under `docs/`. Use `--data` for different saved inputs and `--output` for a publication destination. New timing runs are unnecessary for a presentation change.
-
-[benchmark_colors.py](../../tools/benchmark_colors.py) and the [research report formatter](../../tools/colorize_research_reports.py) are deprecated and are not used by current native reports. See the [tool status](../../tools/README.md) for supported entry points and removal boundaries.

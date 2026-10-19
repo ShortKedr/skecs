@@ -11,7 +11,7 @@ if (index < 0 || !args[index + 1]) throw new Error("--site is required");
 const site = path.resolve(args.splice(index, 2)[1]);
 const faultIndex = args.indexOf("--raf-faults"), rafFaults = faultIndex >= 0;
 if (rafFaults) args.splice(faultIndex, 1);
-if (!site.startsWith(path.resolve("Benchmarks.Local/tmp") + path.sep)) throw new Error("Local generated site only");
+if (!site.startsWith(path.resolve("artifacts/tooling/tmp") + path.sep)) throw new Error("Local generated site only");
 const html = await fs.readFile(path.join(site, "index.html"), "utf8");
 const base = /<base href="(\/[^"?#]*)"\s*\/?>/.exec(html)?.[1];
 if (!base || !base.endsWith("/")) throw new Error("Expected absolute site base directory");

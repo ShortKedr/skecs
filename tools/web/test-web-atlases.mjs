@@ -146,15 +146,15 @@ test("PNG CRC corruption, truncation, trailing bytes and dimensions mismatches f
 });
 
 test("CLI requires output, supports only input/output and rejects missing or duplicate values", () => {
-  assert.deepEqual(parseArguments(["--output", "Benchmarks.Local/tmp/build"]),
-    { input: sharedAssets, output: "Benchmarks.Local/tmp/build" });
+  assert.deepEqual(parseArguments(["--output", "artifacts/tooling/tmp/build"]),
+    { input: sharedAssets, output: "artifacts/tooling/tmp/build" });
   assert.deepEqual(parseArguments(["--input", "source", "--output", "target"]), { input: "source", output: "target" });
   for (const args of [[], ["--output"], ["--output", ""], ["--output", "--input"],
     ["--wat", "value"], ["--output", "a", "--output", "b"]]) assert.throws(() => parseArguments(args));
 });
 
 async function withFixture(run) {
-  const temporary = path.join(projectRoot, "Benchmarks.Local", "tmp");
+  const temporary = path.join(projectRoot, "artifacts", "tooling", "tmp");
   // Validate the ancestors before creating the isolated synthetic fixture.
   await validateOutputDirectory(sharedAssets, path.join(temporary, "web-atlas-unit-tests"));
   await fs.mkdir(temporary, { recursive: true });

@@ -11,7 +11,7 @@ import {
 } from "./mono-compiler-study.mjs";
 
 // Fixtures/results are confined to a NEW ignored study directory; no real replay.
-const directory = outputPath(PROJECT_ROOT, `Benchmarks.Local/tmp/mono-study-unit-${randomUUID()}`);
+const directory = outputPath(PROJECT_ROOT, `artifacts/tooling/tmp/mono-study-unit-${randomUUID()}`);
 await reserveOutput(PROJECT_ROOT, directory);
 const results = [];
 function unit(name, body) {
@@ -245,8 +245,8 @@ unit("runtime version is explicit boot provenance, not a compiler label guess", 
 });
 
 unit("output guards restrict all artifacts to NEW project-local ignored study dirs", async () => {
-  for (const value of ["Benchmarks.Local/tmp", "Benchmarks.Local/tmp/../outside", "Benchmarks.Local/tmp/new/nested",
-    "tools/web/result.json", "../elsewhere", "Benchmarks.Local/tmp/.hidden", "Benchmarks.Local/tmp/a:b"])
+  for (const value of ["artifacts/tooling/tmp", "artifacts/tooling/tmp/../outside", "artifacts/tooling/tmp/new/nested",
+    "tools/web/result.json", "../elsewhere", "artifacts/tooling/tmp/.hidden", "artifacts/tooling/tmp/a:b"])
     assert.throws(() => outputPath(PROJECT_ROOT, value));
   assert.equal(inside(PROJECT_ROOT, directory), true);
   assert.equal(inside(PROJECT_ROOT, PROJECT_ROOT + "-other/file"), false);
@@ -258,7 +258,7 @@ unit("output guards restrict all artifacts to NEW project-local ignored study di
 });
 
 unit("mock metadata verifies junction rejection at root, tmp ancestor and final target", async () => {
-  for (const unsafe of [PROJECT_ROOT, path.join(PROJECT_ROOT, "Benchmarks.Local", "tmp"), directory]) {
+  for (const unsafe of [PROJECT_ROOT, path.join(PROJECT_ROOT, "artifacts", "tooling", "tmp"), directory]) {
     const lstat = async current => ({ isSymbolicLink: () => current === unsafe });
     await assert.rejects(assertNoLinks(PROJECT_ROOT, directory, lstat), /Symlink\/junction/);
   }

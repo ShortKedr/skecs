@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../BenchmarkMachineInfo.cs" Link="BenchmarkMachineInfo.cs" />
+    <Compile Include="../BenchmarkMachineLabel.cs" Link="BenchmarkMachineLabel.cs" />
+  </ItemGroup>
+</Project>

@@ -13,9 +13,9 @@ Library project: `SpaceBattle.Adapters.csproj`. Public stores in namespace
 ## Dependencies
 
 Classic and Lite compile the existing vendor source files as linked sources,
-matching `Benchmarks.Local/Comparison.csproj`, without referencing its executable.
+matching `SKECS.Benchmarks/SKECS.Benchmarks.csproj`, without referencing its executable.
 Morpeh references its existing vendor project. StaticEcs references
-`Benchmarks.Local/StaticLibrary.csproj` (2.2.9). StaticPack 1.2.6 is compiled from the pinned source snapshot.
+`SKECS.Benchmarks/Vendor/StaticLibrary.csproj` (2.2.9). StaticPack 1.2.6 is compiled from the pinned source snapshot.
 
 ## Contract
 
@@ -57,8 +57,8 @@ Run from the repository root. Do not start a competing restore while another
 restore is active:
 
 ```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
+$env:DOTNET_CLI_HOME = "$PWD/artifacts/tooling/dotnet-home"
+$env:NUGET_PACKAGES = "$PWD/artifacts/tooling/nuget-packages"
 dotnet restore SpaceBattle.Adapters/SpaceBattle.Adapters.csproj
 dotnet build SpaceBattle.Adapters/SpaceBattle.Adapters.csproj -c Release --no-restore -m:1
 ```
@@ -67,7 +67,7 @@ Build success alone does not validate adapter behavior. After building the
 headless host, run from the repository root, outside timing:
 
 ```powershell
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate-adapters
+dotnet SpaceBattle.Benchmarks/bin/Release/net8.0/SpaceBattle.Benchmarks.dll measure --validate-adapters
 ```
 
 The library provides `AdapterValidation.RunAll()` for the existing validation
