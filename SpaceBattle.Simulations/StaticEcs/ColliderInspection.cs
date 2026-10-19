@@ -10,8 +10,7 @@ public sealed partial class Battle
     public void CaptureColliders(List<DebugCollider> destination, bool refreshEntities = true)
     {
         ArgumentNullException.ThrowIfNull(destination);
-        if (refreshEntities) Collect();
-        SortMovingRows();
+        Collect(); SortMovingRows();
         destination.Clear();
         foreach (var row in ships)
         {

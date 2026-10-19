@@ -17,9 +17,9 @@ public sealed partial class Battle : IDisposable
     public double LastTickMs { get; private set; }
     public double[] LastStageMs { get; } = new double[StageNames.Length];
     public int ShipCount => ships.Count;
-    public int ProjectileCount => projectiles.Count;
-    public int DebrisCount => debris.Count;
-    public int ParticleCount => particles.Count;
+    public int ProjectileCount => projectileCount;
+    public int DebrisCount => debrisCount;
+    public int ParticleCount => particleCount;
     public int TurretCount => turrets.Count;
     public int TeamShipCount(int team) => team is >= 0 and <= 1 ? teamCounts[team] : throw new ArgumentOutOfRangeException(nameof(team));
     public int PhysicsBodies => physics.Bodies;
@@ -30,6 +30,7 @@ public sealed partial class Battle : IDisposable
     private readonly DampingFactorCache dampingFactors = new();
     private readonly List<ShipRow> ships = new();
     private readonly List<MovingRow> projectiles = new(), debris = new(), particles = new();
+    private int projectileCount, debrisCount, particleCount;
     private readonly List<MovingRow> turrets = new();
     private readonly List<ShotRequest> shots = new();
     private readonly List<StateRequest> states = new();
@@ -112,7 +113,7 @@ public sealed partial class Battle : IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
         var start = Stopwatch.GetTimestamp(); var previous = start;
         Tick++;
-        Collect(); Mark(0);
+        CollectShips(); Mark(0);
         PrepareTactics();
         var ai = new AiSystem { Battle = this }; RunAiSystem(ref ai); Mark(1);
         var thermal = new ThermalSystem { Battle = this }; RunThermalSystem(ref thermal);
@@ -156,9 +157,19 @@ public sealed partial class Battle : IDisposable
         ships.Sort(static (a, b) => a.Identity.Serial.CompareTo(b.Identity.Serial));
     }
 
+    private int[] serialKeys = [];
+    private void SortBySerial<T>(List<T> rows, Func<T, int> serialOf)
+    {
+        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(rows);
+        if (serialKeys.Length < span.Length) serialKeys = new int[Math.Max(span.Length, serialKeys.Length * 2)];
+        var keys = serialKeys.AsSpan(0, span.Length);
+        for (var i = 0; i < span.Length; i++) keys[i] = serialOf(span[i]);
+        keys.Sort(span);
+    }
+
     private void CompactMovingRows()
     {
-        Compact(projectiles); Compact(debris); Compact(particles); Compact(turrets);
+        Compact(turrets);
         void Compact(List<MovingRow> rows)
         {
             var write = 0;

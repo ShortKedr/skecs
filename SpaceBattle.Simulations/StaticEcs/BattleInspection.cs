@@ -21,8 +21,7 @@ public sealed partial class Battle
     /// <param name="refreshEntities">Keep true after direct Store edits; false reuses the lists finalized by Step.</param>
     public void Capture(BattleFrame frame, bool refreshEntities = true)
     {
-        if (refreshEntities) Collect();
-        SortMovingRows();
+        Collect(); SortMovingRows();
         frame.Tick = Tick; frame.ArenaHalfSize = Config.ArenaHalfSize; frame.LastTickMs = LastTickMs; frame.Counters = Counters.Copy();
         frame.Ships.Clear(); frame.Projectiles.Clear(); frame.Debris.Clear(); frame.Particles.Clear(); frame.Turrets.Clear();
         foreach (var row in ships)

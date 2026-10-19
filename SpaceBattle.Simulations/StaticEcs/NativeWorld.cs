@@ -89,6 +89,17 @@ public sealed partial class Battle
     [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Set<T>(EntityKey e, in T value) where T : unmanaged => Native(e).Set(new Wrapper<T> { Value = value });
     [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Remove<T>(EntityKey e) where T : unmanaged { if (Alive(e)) Native(e).Delete<Wrapper<T>>(); }
     public void Commit() { }
+    private void ForgetMoving(EntityKey e)
+    {
+        var native = Native(e);
+        if (native.Is<ProjectileEntity>()) projectileCount--;
+        else if (native.Is<DebrisEntity>()) debrisCount--;
+        else if (native.Is<ParticleEntity>()) particleCount--;
+    }
+    private void RunProjectileHitQuery(ref ProjectileHitQuery processor) => NativeWorld.Query().Read<Wrapper<Projectile>, Wrapper<Transform>>().For(ref processor);
+    private void RunDebrisHitQuery(ref DebrisHitQuery processor) => NativeWorld.Query().Read<Wrapper<Debris>, Wrapper<Transform>>().For(ref processor);
+    private void RunExpiredParticleQuery(ref ExpiredParticleQuery processor) => NativeWorld.Query().Read<Wrapper<Particle>>().For(ref processor);
+    private void RunIntentQuery(ref IntentQuery processor) => NativeWorld.Query().Read<Wrapper<Projectile>, Wrapper<Transform>, Wrapper<Motion>>().For(ref processor);
     public StoreDiagnostics Diagnostics() => new(entityCount, null, null, null, null);
     private void RunShipCollector(ref ShipCollector processor) => NativeWorld.Query().Write<Wrapper<Identity>, Wrapper<Transform>>().For(ref processor);
     private void RunProjectileCollector(ref ProjectileCollector processor) => NativeWorld.Query().Write<Wrapper<Projectile>>().For(ref processor);
