@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using NativeWorld = FFS.Libraries.StaticEcs.World<SpaceBattle.Simulations.StaticEcs.NativeWorldType>;
 using System.Diagnostics;
 using System.Numerics;
@@ -69,7 +70,7 @@ public sealed partial class Battle : IDisposable
 
     public EntityKey SpawnShip(int team, ShipClass kind, Vector2 position, EntityKey home)
     {
-        var e = Store.Create(); var radius = ShipCatalog.Radius(kind); var carrier = ShipCatalog.IsCarrier(kind);
+        var e = Store.Create<ShipEntity>(); var radius = ShipCatalog.Radius(kind); var carrier = ShipCatalog.IsCarrier(kind);
         var hull = carrier ? 5000 + ((int)kind - 8) * 3000 : 90 + (int)kind * 42;
         var shield = carrier ? hull * 0.45f : hull * 0.7f;
         var id = new Identity { Serial = ++serial, Team = team, Class = kind };
@@ -171,7 +172,7 @@ public sealed partial class Battle : IDisposable
 
     private struct ShipCollector : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Transform>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Transform> c1) => Execute(Key(native), ref c0.Value, ref c1.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Transform> c1) => Execute(Key(native), ref c0.Value, ref c1.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Transform t)
         {
@@ -182,17 +183,17 @@ public sealed partial class Battle : IDisposable
     }
     private struct ProjectileCollector : NativeWorld.IQuery.Write<Wrapper<Projectile>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Projectile> c0) => Execute(Key(native), ref c0.Value); public Battle Battle; public void Execute(EntityKey e, ref Projectile p) => Battle.projectiles.Add(new(e, p.Serial)); }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Projectile> c0) => Execute(Key(native), ref c0.Value); public Battle Battle; public void Execute(EntityKey e, ref Projectile p) => Battle.projectiles.Add(new(e, p.Serial)); }
     private struct DebrisCollector : NativeWorld.IQuery.Write<Wrapper<Debris>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Debris> c0) => Execute(Key(native), ref c0.Value); public Battle Battle; public void Execute(EntityKey e, ref Debris p) => Battle.debris.Add(new(e, p.Serial)); }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Debris> c0) => Execute(Key(native), ref c0.Value); public Battle Battle; public void Execute(EntityKey e, ref Debris p) => Battle.debris.Add(new(e, p.Serial)); }
     private struct ParticleCollector : NativeWorld.IQuery.Write<Wrapper<Particle>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Particle> c0) => Execute(Key(native), ref c0.Value); public Battle Battle; public void Execute(EntityKey e, ref Particle p) => Battle.particles.Add(new(e, p.Serial)); }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Particle> c0) => Execute(Key(native), ref c0.Value); public Battle Battle; public void Execute(EntityKey e, ref Particle p) => Battle.particles.Add(new(e, p.Serial)); }
 
     private void State(EntityKey e, StateKind kind, bool enabled, EntityKey other = default)
         => states.Add(new(e, Store.Get<Identity>(e).Serial, kind, enabled, other));
-    private bool AliveShip(EntityKey e) => Store.Alive(e) && Store.Has<Identity>(e) && Store.Get<Hull>(e).Current > 0;
+    private bool AliveShip(EntityKey e) => Store.Alive(e) && Native(e).Is<ShipEntity>() && Store.Get<Hull>(e).Current > 0;
     private EntityKey NearestHome(int team, Vector2 position)
     {
         var best = float.MaxValue; var home = EntityKey.None;
@@ -206,7 +207,7 @@ public sealed partial class Battle : IDisposable
     }
     private struct AiSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Brain>, Wrapper<Transform>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Brain> c1, ref Wrapper<Transform> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Brain> c1, ref Wrapper<Transform> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Brain b, ref Transform t)
             => Battle.DecideTactics(e, id, ref b, t);
@@ -214,7 +215,7 @@ public sealed partial class Battle : IDisposable
 
     private struct ThermalSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Heat>, Wrapper<Shield>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Heat> c1, ref Wrapper<Shield> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Heat> c1, ref Wrapper<Shield> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Heat h, ref Shield s)
         {
@@ -233,7 +234,7 @@ public sealed partial class Battle : IDisposable
 
     private struct InventorySystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Inventory>, Wrapper<Hull>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Inventory> c1, ref Wrapper<Hull> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Inventory> c1, ref Wrapper<Hull> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Inventory inventory, ref Hull hull)
         {
@@ -260,7 +261,7 @@ public sealed partial class Battle : IDisposable
 
     private struct SteeringSystem : NativeWorld.IQuery.Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Brain>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Transform> c0, ref Wrapper<Motion> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Transform> c0, ref Wrapper<Motion> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Transform t, ref Motion m, ref Brain b)
         {
