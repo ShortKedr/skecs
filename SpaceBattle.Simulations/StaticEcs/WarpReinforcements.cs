@@ -161,7 +161,7 @@ public sealed partial class Battle
     private EntityKey SpawnWarpParticle(Vector2 position, int kind, float radius, int expiry)
     {
         if (Config.ParticleMultiplier == 0 || particles.Count >= Config.MaxParticles) return EntityKey.None;
-        var e = Store.Create(); var number = ++serial;
+        var e = Store.Create<ParticleEntity>(); var number = ++serial;
         Store.Set(e, new Transform { Position = position, Previous = position });
         Store.Set(e, new Motion());
         Store.Set(e, new Particle { Serial = number, Kind = kind, Size = radius, StartTick = Tick, ExpiresTick = expiry, Color = Vector4.One });

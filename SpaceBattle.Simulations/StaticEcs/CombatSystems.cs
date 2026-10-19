@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using NativeWorld = FFS.Libraries.StaticEcs.World<SpaceBattle.Simulations.StaticEcs.NativeWorldType>;
 using System.Numerics;
 
@@ -9,13 +10,13 @@ public sealed partial class Battle
     private readonly Dictionary<EntityKey, int> occupiedDocks = new(), ownedShips = new();
     private struct WeaponSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Weapon>, Wrapper<Brain>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Weapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Weapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Weapon w, ref Brain b) => Battle.TryFire(e, id, ref w, b, 0);
     }
     private struct SecondarySystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<SecondaryWeapon>, Wrapper<Brain>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<SecondaryWeapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<SecondaryWeapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref SecondaryWeapon w, ref Brain b) => Battle.TryFire(e, id, ref w.Value, b, 1);
     }
@@ -74,7 +75,7 @@ public sealed partial class Battle
                 if (heat.Value >= heat.Limit) { if (!mounted) State(shot.Owner, StateKind.Overheat, true); break; }
                 if (projectiles.Count >= Config.MaxProjectiles) break;
                 var position = origin + forward * muzzleOffset;
-                var e = Store.Create(); var number = ++serial;
+                var e = Store.Create<ProjectileEntity>(); var number = ++serial;
                 var radius = weapon.Kind == WeaponKind.MachineGun ? 0.12f : weapon.Kind == WeaponKind.HeavyCannon ? 0.9f : 0.45f;
                 var rectangle = weapon.Kind is WeaponKind.MachineGun or WeaponKind.Cannon;
                 Store.Set(e, new Transform { Position = position, Previous = position, Angle = angle });
@@ -92,7 +93,7 @@ public sealed partial class Battle
     }
     private struct CarrierSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Carrier>, Wrapper<Transform>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Carrier> c1, ref Wrapper<Transform> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Carrier> c1, ref Wrapper<Transform> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Carrier c, ref Transform t)
         {
@@ -107,7 +108,7 @@ public sealed partial class Battle
     }
     private struct DockSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Docked>, Wrapper<Hull>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Docked> c1, ref Wrapper<Hull> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Docked> c1, ref Wrapper<Hull> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Docked dock, ref Hull h)
         {
@@ -249,7 +250,7 @@ public sealed partial class Battle
         for (var i = 0; i < count * Config.ParticleMultiplier; i++)
         {
             if (particles.Count >= Config.MaxParticles) break;
-            var e = Store.Create(); var number = ++serial;
+            var e = Store.Create<ParticleEntity>(); var number = ++serial;
             Store.Set(e, new Transform { Position = position, Previous = position });
             var drift = new Vector2(rng.Range(-8, 8), rng.Range(-8, 8));
             var size = kind == 2 ? rng.Range(1, 4) : rng.Range(0.15f, 0.8f);
@@ -275,7 +276,7 @@ public sealed partial class Battle
         {
             if (debris.Count >= Config.MaxDebris) break;
             var angle = rng.Range(0, MathF.Tau); var speed = rng.Range(15, 65);
-            var e = Store.Create(); var number = ++serial;
+            var e = Store.Create<DebrisEntity>(); var number = ++serial;
             Store.Set(e, new Transform { Position = position, Previous = position, Angle = angle });
             Store.Set(e, new Motion { Velocity = velocity + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * speed, AngularVelocity = rng.Range(-8, 8) });
             Store.Set(e, new Debris { Serial = number, Radius = rng.Range(0.08f, 0.3f), Damage = damage, ExpiresTick = Tick + 3600 });
