@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using NativeWorld = FFS.Libraries.StaticEcs.World<SpaceBattle.Simulations.StaticEcs.NativeWorldType>;
 using System.Numerics;
 
@@ -7,15 +8,17 @@ public sealed partial class Battle
 {
     private readonly List<(int Tick, SpawnRequest Spawn)> reinforcements = new();
     private readonly Dictionary<EntityKey, int> occupiedDocks = new(), ownedShips = new();
+    private readonly record struct HitRequest(int Serial, EntityKey Entity, int TargetSerial, Vector2 Impact);
+    private readonly List<HitRequest> hits = new();
     private struct WeaponSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Weapon>, Wrapper<Brain>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Weapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Weapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Weapon w, ref Brain b) => Battle.TryFire(e, id, ref w, b, 0);
     }
     private struct SecondarySystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<SecondaryWeapon>, Wrapper<Brain>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<SecondaryWeapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<SecondaryWeapon> c1, ref Wrapper<Brain> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref SecondaryWeapon w, ref Brain b) => Battle.TryFire(e, id, ref w.Value, b, 1);
     }
@@ -72,9 +75,9 @@ public sealed partial class Battle
             {
                 var heat = Store.Get<Heat>(heatEntity);
                 if (heat.Value >= heat.Limit) { if (!mounted) State(shot.Owner, StateKind.Overheat, true); break; }
-                if (projectiles.Count >= Config.MaxProjectiles) break;
+                if (projectileCount >= Config.MaxProjectiles) break;
                 var position = origin + forward * muzzleOffset;
-                var e = Store.Create(); var number = ++serial;
+                var e = Store.Create<ProjectileEntity>(); var number = ++serial;
                 var radius = weapon.Kind == WeaponKind.MachineGun ? 0.12f : weapon.Kind == WeaponKind.HeavyCannon ? 0.9f : 0.45f;
                 var rectangle = weapon.Kind is WeaponKind.MachineGun or WeaponKind.Cannon;
                 Store.Set(e, new Transform { Position = position, Previous = position, Angle = angle });
@@ -82,7 +85,7 @@ public sealed partial class Battle
                 Store.Set(e, new Projectile { Serial = number, Owner = shot.Owner, Target = shot.Target,
                     Kind = weapon.Kind, Damage = weapon.Damage, Radius = radius, HalfLength = rectangle ? radius * 2 : 0,
                     Shape = rectangle ? ProjectileShape.Rectangle : ProjectileShape.Disk, ExpiresTick = Tick + 240 });
-                projectiles.Add(new(e, number)); Counters.Shots++; Counters.StructuralAdds += 3;
+                projectileCount++; Counters.Shots++; Counters.StructuralAdds += 3;
                 if (mounted) { Counters.TurretShots++; Store.Get<MountedTurret>(shot.Gun).LastFireTick = Tick; }
                 if (weapon.Kind == WeaponKind.HeavyCannon) Counters.HeavyShots++;
                 Store.Get<Heat>(heatEntity).Value += weapon.HeatPerShot;
@@ -92,7 +95,7 @@ public sealed partial class Battle
     }
     private struct CarrierSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Carrier>, Wrapper<Transform>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Carrier> c1, ref Wrapper<Transform> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Carrier> c1, ref Wrapper<Transform> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Carrier c, ref Transform t)
         {
@@ -107,7 +110,7 @@ public sealed partial class Battle
     }
     private struct DockSystem : NativeWorld.IQuery.Write<Wrapper<Identity>, Wrapper<Docked>, Wrapper<Hull>>
     {
-        public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Docked> c1, ref Wrapper<Hull> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Identity> c0, ref Wrapper<Docked> c1, ref Wrapper<Hull> c2) => Execute(Key(native), ref c0.Value, ref c1.Value, ref c2.Value);
         public Battle Battle;
         public void Execute(EntityKey e, ref Identity id, ref Docked dock, ref Hull h)
         {
@@ -179,17 +182,13 @@ public sealed partial class Battle
             if (serialToShip.TryGetValue(contact.FirstSerial, out var a) && AliveShip(a)) Damage(a, (contact.RelativeSpeed - 10) * 0.35f, false, false);
             if (serialToShip.TryGetValue(contact.SecondSerial, out var b) && AliveShip(b)) Damage(b, (contact.RelativeSpeed - 10) * 0.35f, false, false);
         }
-        foreach (var row in projectiles)
+        var projectileHits = new ProjectileHitQuery { Battle = this, Cells = physics.SweepCellMask() }; RunProjectileHitQuery(ref projectileHits);
+        // Hits apply in serial order, so detection may visit the rows in any order.
+        SortBySerial(hits, static hit => hit.Serial);
+        foreach (var row in hits)
         {
-            ref var p = ref Store.Get<Projectile>(row.Entity); var t = Store.Get<Transform>(row.Entity);
-            if (p.ExpiresTick <= Tick) { retired.Add(row.Entity); continue; }
-            var ownerSerial = Store.Alive(p.Owner) && Store.Has<Identity>(p.Owner) ? Store.Get<Identity>(p.Owner).Serial : -1;
-            int targetSerial; Vector2 impact;
-            var hit = p.Shape == ProjectileShape.Rectangle
-                ? physics.SweepRectangle(t.Previous, t.Position, new(p.HalfLength, p.Radius), t.Angle, ownerSerial, out targetSerial, out impact)
-                : physics.Sweep(t.Previous, t.Position, p.Radius, ownerSerial, out targetSerial, out impact);
-            if (!hit) { if (Outside(t.Position)) retired.Add(row.Entity); continue; }
-            if (!serialToShip.TryGetValue(targetSerial, out var target) || !AliveShip(target)) continue;
+            ref var p = ref Store.Get<Projectile>(row.Entity); var impact = row.Impact;
+            if (!serialToShip.TryGetValue(row.TargetSerial, out var target) || !AliveShip(target)) continue;
             DamageWeapon(target, p.Damage, p.Kind, p.Owner); Counters.Hits++;
             if (Store.Alive(p.Owner) && Store.Has<Identity>(p.Owner) &&
                 Store.Get<Identity>(p.Owner).Team == Store.Get<Identity>(target).Team) Counters.FriendlyFireHits++;
@@ -199,19 +198,72 @@ public sealed partial class Battle
             if (p.Kind is WeaponKind.Cannon or WeaponKind.Missile) Fragments(impact, velocity * 0.12f, 6, p.Damage * 0.2f);
             retired.Add(row.Entity);
         }
-        foreach (var row in debris)
+        hits.Clear();
+        var debrisHits = new DebrisHitQuery { Battle = this, Cells = physics.SweepCellMask() }; RunDebrisHitQuery(ref debrisHits);
+        SortBySerial(hits, static hit => hit.Serial);
+        foreach (var row in hits)
         {
-            ref var p = ref Store.Get<Debris>(row.Entity); var t = Store.Get<Transform>(row.Entity);
-            if (p.ExpiresTick <= Tick) { retired.Add(row.Entity); continue; }
-            // Fragments damage either faction. No engine or artificial velocity decay.
-            if (!physics.Sweep(t.Previous, t.Position, p.Radius, out var targetSerial, out var impact))
-            { if (Outside(t.Position)) retired.Add(row.Entity); continue; }
-            if (!serialToShip.TryGetValue(targetSerial, out var target) || !AliveShip(target)) continue;
+            ref var p = ref Store.Get<Debris>(row.Entity); var impact = row.Impact;
+            if (!serialToShip.TryGetValue(row.TargetSerial, out var target) || !AliveShip(target)) continue;
             var speed = Store.Get<Motion>(row.Entity).Velocity.Length();
             Damage(target, p.Damage * MathF.Max(0.2f, speed / 40), false, true);
             Counters.DebrisHits++; Effect(impact, Vector2.Zero, 0, 2); retired.Add(row.Entity);
         }
-        foreach (var row in particles) if (Store.Get<Particle>(row.Entity).ExpiresTick <= Tick) retired.Add(row.Entity);
+        hits.Clear();
+        var expiredParticles = new ExpiredParticleQuery { Battle = this }; RunExpiredParticleQuery(ref expiredParticles);
+    }
+    private struct ProjectileHitQuery : NativeWorld.IQuery.Read<Wrapper<Projectile>, Wrapper<Transform>>
+    {
+        public Battle Battle;
+        public PhysicsService.SweepCells Cells;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, in Wrapper<Projectile> c0, in Wrapper<Transform> c1)
+        {
+            ref readonly var p = ref c0.Value; ref readonly var t = ref c1.Value;
+            if (p.ExpiresTick <= Battle.Tick) { Battle.retired.Add(Key(native)); return; }
+            var mayHit = p.Shape == ProjectileShape.Rectangle
+                ? Cells.MayHitRectangle(t.Previous, t.Position, new(p.HalfLength, p.Radius), t.Angle)
+                : Cells.MayHit(t.Previous, t.Position, p.Radius);
+            if (mayHit) Sweep(Key(native), p, t);
+            else { Battle.physics.CountEmptySweep(); if (Battle.Outside(t.Position)) Battle.retired.Add(Key(native)); }
+        }
+        private readonly void Sweep(EntityKey e, in Projectile p, in Transform t)
+        {
+            var store = Battle.Store;
+            var ownerSerial = store.Alive(p.Owner) && store.Has<Identity>(p.Owner) ? store.Get<Identity>(p.Owner).Serial : -1;
+            int targetSerial; Vector2 impact;
+            var hit = p.Shape == ProjectileShape.Rectangle
+                ? Battle.physics.SweepRectangle(t.Previous, t.Position, new(p.HalfLength, p.Radius), t.Angle, ownerSerial, out targetSerial, out impact)
+                : Battle.physics.Sweep(t.Previous, t.Position, p.Radius, ownerSerial, out targetSerial, out impact);
+            if (!hit) { if (Battle.Outside(t.Position)) Battle.retired.Add(e); return; }
+            Battle.hits.Add(new(p.Serial, e, targetSerial, impact));
+        }
+    }
+    private struct DebrisHitQuery : NativeWorld.IQuery.Read<Wrapper<Debris>, Wrapper<Transform>>
+    {
+        public Battle Battle;
+        public PhysicsService.SweepCells Cells;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, in Wrapper<Debris> c0, in Wrapper<Transform> c1)
+        {
+            ref readonly var p = ref c0.Value; ref readonly var t = ref c1.Value;
+            if (p.ExpiresTick <= Battle.Tick) { Battle.retired.Add(Key(native)); return; }
+            if (Cells.MayHit(t.Previous, t.Position, p.Radius)) Sweep(Key(native), p, t);
+            else { Battle.physics.CountEmptySweep(); if (Battle.Outside(t.Position)) Battle.retired.Add(Key(native)); }
+        }
+        private readonly void Sweep(EntityKey e, in Debris p, in Transform t)
+        {
+            // Fragments damage either faction. No engine or artificial velocity decay.
+            if (!Battle.physics.Sweep(t.Previous, t.Position, p.Radius, out var targetSerial, out var impact))
+            { if (Battle.Outside(t.Position)) Battle.retired.Add(e); return; }
+            Battle.hits.Add(new(p.Serial, e, targetSerial, impact));
+        }
+    }
+    private struct ExpiredParticleQuery : NativeWorld.IQuery.Read<Wrapper<Particle>>
+    {
+        public Battle Battle;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, in Wrapper<Particle> c0)
+        {
+            if (c0.Value.ExpiresTick <= Battle.Tick) Battle.retired.Add(Key(native));
+        }
     }
     private bool Outside(Vector2 position) => MathF.Abs(position.X) > Config.ArenaHalfSize * 2.5f || MathF.Abs(position.Y) > Config.ArenaHalfSize * 2.5f;
     public void Damage(EntityKey e, float amount, bool plasma, bool fragment)
@@ -248,8 +300,8 @@ public sealed partial class Battle
         var rng = new RandomStream(Config.Seed ^ (uint)(serial * 113 + Tick));
         for (var i = 0; i < count * Config.ParticleMultiplier; i++)
         {
-            if (particles.Count >= Config.MaxParticles) break;
-            var e = Store.Create(); var number = ++serial;
+            if (particleCount >= Config.MaxParticles) break;
+            var e = Store.Create<ParticleEntity>(); var number = ++serial;
             Store.Set(e, new Transform { Position = position, Previous = position });
             var drift = new Vector2(rng.Range(-8, 8), rng.Range(-8, 8));
             var size = kind == 2 ? rng.Range(1, 4) : rng.Range(0.15f, 0.8f);
@@ -265,7 +317,7 @@ public sealed partial class Battle
             Store.Set(e, new Motion { Velocity = motion });
             Store.Set(e, new Particle { Serial = number, ExpiresTick = Tick + lifetime, Kind = kind, Size = size,
                 Color = kind == 3 ? new(0.45f, 0.85f, 1, 1) : kind == 1 ? new(0.2f, 1, 0.8f, 1) : kind == 2 ? new(1, 0.35f, 0.1f, 1) : new(1, 0.8f, 0.2f, 1) });
-            particles.Add(new(e, number)); Counters.StructuralAdds += 3;
+            particleCount++; Counters.StructuralAdds += 3;
         }
     }
     private void Fragments(Vector2 position, Vector2 velocity, int count, float damage)
@@ -273,13 +325,13 @@ public sealed partial class Battle
         var rng = new RandomStream(Config.Seed ^ (uint)(serial * 73 + Tick));
         for (var i = 0; i < count; i++)
         {
-            if (debris.Count >= Config.MaxDebris) break;
+            if (debrisCount >= Config.MaxDebris) break;
             var angle = rng.Range(0, MathF.Tau); var speed = rng.Range(15, 65);
-            var e = Store.Create(); var number = ++serial;
+            var e = Store.Create<DebrisEntity>(); var number = ++serial;
             Store.Set(e, new Transform { Position = position, Previous = position, Angle = angle });
             Store.Set(e, new Motion { Velocity = velocity + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * speed, AngularVelocity = rng.Range(-8, 8) });
             Store.Set(e, new Debris { Serial = number, Radius = rng.Range(0.08f, 0.3f), Damage = damage, ExpiresTick = Tick + 3600 });
-            debris.Add(new(e, number)); Counters.StructuralAdds += 3;
+            debrisCount++; Counters.StructuralAdds += 3;
         }
     }
     private void FlushLifecycle()
@@ -347,7 +399,7 @@ public sealed partial class Battle
         }
         states.Clear();
         // Native destruction is deferred until all hit queries have completed.
-        foreach (var e in retired) if (Store.Alive(e)) { Store.Destroy(e); Counters.StructuralRemoves += 3; }
+        foreach (var e in retired) if (Store.Alive(e)) { ForgetMoving(e); Store.Destroy(e); Counters.StructuralRemoves += 3; }
         retired.Clear(); Store.Commit();
         ownedShips.Clear();
         if (builds.Count > 0)

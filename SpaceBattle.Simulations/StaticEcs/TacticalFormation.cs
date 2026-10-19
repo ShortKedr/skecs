@@ -116,8 +116,7 @@ public sealed partial class Battle
         if (speed <= 0 || range <= 0 || MathF.Min(a.Motion.MaxSpeed, b.Motion.MaxSpeed) < speed * Config.Tactics.MinimumSpeedRatio ||
             MathF.Min(OperatingRange(a), OperatingRange(b)) < range * Config.Tactics.MinimumRangeRatio) return false;
         if (target < 0) return true;
-        ref readonly var victim = ref AiRows[target];
-        var first = MemberEngageSeconds(a, victim); var second = MemberEngageSeconds(b, victim);
+        var first = CachedEngageSeconds(leader, target); var second = CachedEngageSeconds(member, target);
         return float.IsFinite(first) && float.IsFinite(second) &&
             MathF.Abs(first - second) <= Config.Tactics.MaximumJoinDelaySeconds;
     }

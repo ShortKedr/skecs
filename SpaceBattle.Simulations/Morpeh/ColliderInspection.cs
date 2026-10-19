@@ -10,6 +10,7 @@ public sealed partial class Battle
     {
         ArgumentNullException.ThrowIfNull(destination);
         if (refreshEntities) Collect();
+        SortMovingRows();
         destination.Clear();
         foreach (var row in ships)
         {

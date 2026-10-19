@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using FFS.Libraries.StaticEcs;
 using NativeWorld = FFS.Libraries.StaticEcs.World<SpaceBattle.Simulations.StaticEcs.NativeWorldType>;
 namespace SpaceBattle.Simulations.StaticEcs;
@@ -8,9 +9,19 @@ public sealed partial class Battle
     public string Name => "StaticEcs 2.2.9";
     private struct Wrapper<T> : IComponent, IComponentConfig<Wrapper<T>> where T : unmanaged { public T Value; public ComponentTypeConfig<Wrapper<T>> Config() => new(noDataLifecycle: true); }
     private static int active;
+    private struct ShipEntity : IEntityType { public byte Id() => 1; }
+    private struct TurretEntity : IEntityType { public byte Id() => 2; }
+    private struct ProjectileEntity : IEntityType { public byte Id() => 3; }
+    private struct DebrisEntity : IEntityType { public byte Id() => 4; }
+    private struct ParticleEntity : IEntityType { public byte Id() => 5; }
     private void InitializeNative() {
         if (Interlocked.CompareExchange(ref active, 1, 0) != 0) throw new InvalidOperationException("Only one StaticEcs Battle may be active.");
         NativeWorld.Create(WorldConfig.Default());
+        NativeWorld.Types().EntityType<ShipEntity>();
+        NativeWorld.Types().EntityType<TurretEntity>();
+        NativeWorld.Types().EntityType<ProjectileEntity>();
+        NativeWorld.Types().EntityType<DebrisEntity>();
+        NativeWorld.Types().EntityType<ParticleEntity>();
         NativeWorld.Types().Component<Wrapper<Identity>>();
         NativeWorld.Types().Component<Wrapper<Transform>>();
         NativeWorld.Types().Component<Wrapper<Motion>>();
@@ -40,11 +51,11 @@ public sealed partial class Battle
         NativeWorld.Initialize();
     }
     private void DisposeNative() { NativeWorld.Destroy(); Interlocked.Exchange(ref active, 0); }
-    private static EntityGID Gid(EntityKey e) => new((uint)e.Id, (ushort)e.Generation, 0);
-    private static NativeWorld.Entity Native(EntityKey e) => new((uint)e.Id);
-    private static EntityKey Key(NativeWorld.Entity e) { var gid = e.GID; return new((int)gid.Id, gid.Version); }
-    public EntityKey Create() { var e = NativeWorld.NewEntity<Default>(); entityCount++; return Key(e); }
-    public bool Alive(EntityKey e) => !disposed && !e.IsNone && e.Generation > 0 && Gid(e).TryUnpack<NativeWorldType>(out _);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] private static NativeWorld.Entity Native(EntityKey e) => new((uint)e.Id);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] private static EntityKey Key(NativeWorld.Entity e) { var gid = e.GID; return new((int)gid.Id, gid.Version); }
+    public EntityKey Create() => Create<Default>();
+    public EntityKey Create<TEntityType>() where TEntityType : struct, IEntityType { var e = NativeWorld.NewEntity<TEntityType>(); entityCount++; return Key(e); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public bool Alive(EntityKey e) => !disposed && !e.IsNone && e.Generation > 0 && Native(e).Version == e.Generation;
     public void Destroy(EntityKey e)
     {
         if (!Alive(e)) return;
@@ -73,11 +84,22 @@ public sealed partial class Battle
 
         public void Block<TWorld>(int value) where TWorld : struct, IWorldType { }
     }
-    public ref T Get<T>(EntityKey e) where T : unmanaged => ref Native(e).Ref<Wrapper<T>>().Value;
-    public bool Has<T>(EntityKey e) where T : unmanaged => Alive(e) && Native(e).Has<Wrapper<T>>();
-    public void Set<T>(EntityKey e, in T value) where T : unmanaged => Native(e).Set(new Wrapper<T> { Value = value });
-    public void Remove<T>(EntityKey e) where T : unmanaged { if (Alive(e)) Native(e).Delete<Wrapper<T>>(); }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public ref T Get<T>(EntityKey e) where T : unmanaged => ref Native(e).Ref<Wrapper<T>>().Value;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public bool Has<T>(EntityKey e) where T : unmanaged => Alive(e) && Native(e).Has<Wrapper<T>>();
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Set<T>(EntityKey e, in T value) where T : unmanaged => Native(e).Set(new Wrapper<T> { Value = value });
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Remove<T>(EntityKey e) where T : unmanaged { if (Alive(e)) Native(e).Delete<Wrapper<T>>(); }
     public void Commit() { }
+    private void ForgetMoving(EntityKey e)
+    {
+        var native = Native(e);
+        if (native.Is<ProjectileEntity>()) projectileCount--;
+        else if (native.Is<DebrisEntity>()) debrisCount--;
+        else if (native.Is<ParticleEntity>()) particleCount--;
+    }
+    private void RunProjectileHitQuery(ref ProjectileHitQuery processor) => NativeWorld.Query().Read<Wrapper<Projectile>, Wrapper<Transform>>().For(ref processor);
+    private void RunDebrisHitQuery(ref DebrisHitQuery processor) => NativeWorld.Query().Read<Wrapper<Debris>, Wrapper<Transform>>().For(ref processor);
+    private void RunExpiredParticleQuery(ref ExpiredParticleQuery processor) => NativeWorld.Query().Read<Wrapper<Particle>>().For(ref processor);
+    private void RunIntentQuery(ref IntentQuery processor) => NativeWorld.Query().Read<Wrapper<Projectile>, Wrapper<Transform>, Wrapper<Motion>>().For(ref processor);
     public StoreDiagnostics Diagnostics() => new(entityCount, null, null, null, null);
     private void RunShipCollector(ref ShipCollector processor) => NativeWorld.Query().Write<Wrapper<Identity>, Wrapper<Transform>>().For(ref processor);
     private void RunProjectileCollector(ref ProjectileCollector processor) => NativeWorld.Query().Write<Wrapper<Projectile>>().For(ref processor);
@@ -91,31 +113,22 @@ public sealed partial class Battle
     private void RunSecondarySystem(ref SecondarySystem processor) => NativeWorld.Query().Write<Wrapper<Identity>, Wrapper<SecondaryWeapon>, Wrapper<Brain>>().For(ref processor);
     private void RunCarrierSystem(ref CarrierSystem processor) => NativeWorld.Query().Write<Wrapper<Identity>, Wrapper<Carrier>, Wrapper<Transform>>().For(ref processor);
     private void RunDockSystem(ref DockSystem processor) => NativeWorld.Query().Write<Wrapper<Identity>, Wrapper<Docked>, Wrapper<Hull>>().For(ref processor);
-    private struct ProjectileMotionSystemQuery : NativeWorld.IQueryBlock.Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Projectile>>
+    private struct ProjectileMotionSystemQuery : NativeWorld.IQuery.Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Projectile>>
     {
         public ProjectileMotionSystem Processor;
-        public void Invoke(uint count, NativeWorld.EntityBlock entities, Block<Wrapper<Transform>> c0, Block<Wrapper<Motion>> c1, Block<Wrapper<Projectile>> c2)
-        {
-            for(uint row = 0; row < count; row++) Processor.Execute(ref c0[row].Value, ref c1[row].Value, ref c2[row].Value);
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Transform> c0, ref Wrapper<Motion> c1, ref Wrapper<Projectile> c2) => Processor.Execute(ref c0.Value, ref c1.Value, ref c2.Value);
     }
-    private void RunProjectileMotionSystem(ref ProjectileMotionSystem processor) { var query = new ProjectileMotionSystemQuery { Processor = processor }; NativeWorld.Query().WriteBlock<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Projectile>>().For(ref query); processor = query.Processor; }
-    private struct DebrisMotionSystemQuery : NativeWorld.IQueryBlock.Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Debris>>
+    private void RunProjectileMotionSystem(ref ProjectileMotionSystem processor) { var query = new ProjectileMotionSystemQuery { Processor = processor }; NativeWorld.Query().Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Projectile>>().For(ref query); processor = query.Processor; }
+    private struct DebrisMotionSystemQuery : NativeWorld.IQuery.Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Debris>>
     {
         public DebrisMotionSystem Processor;
-        public void Invoke(uint count, NativeWorld.EntityBlock entities, Block<Wrapper<Transform>> c0, Block<Wrapper<Motion>> c1, Block<Wrapper<Debris>> c2)
-        {
-            for(uint row = 0; row < count; row++) Processor.Execute(ref c0[row].Value, ref c1[row].Value, ref c2[row].Value);
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Transform> c0, ref Wrapper<Motion> c1, ref Wrapper<Debris> c2) => Processor.Execute(ref c0.Value, ref c1.Value, ref c2.Value);
     }
-    private void RunDebrisMotionSystem(ref DebrisMotionSystem processor) { var query = new DebrisMotionSystemQuery { Processor = processor }; NativeWorld.Query().WriteBlock<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Debris>>().For(ref query); processor = query.Processor; }
-    private struct ParticleMotionSystemQuery : NativeWorld.IQueryBlock.Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Particle>>
+    private void RunDebrisMotionSystem(ref DebrisMotionSystem processor) { var query = new DebrisMotionSystemQuery { Processor = processor }; NativeWorld.Query().Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Debris>>().For(ref query); processor = query.Processor; }
+    private struct ParticleMotionSystemQuery : NativeWorld.IQuery.Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Particle>>
     {
         public ParticleMotionSystem Processor;
-        public void Invoke(uint count, NativeWorld.EntityBlock entities, Block<Wrapper<Transform>> c0, Block<Wrapper<Motion>> c1, Block<Wrapper<Particle>> c2)
-        {
-            for(uint row = 0; row < count; row++) Processor.Execute(ref c0[row].Value, ref c1[row].Value, ref c2[row].Value);
-        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, ref Wrapper<Transform> c0, ref Wrapper<Motion> c1, ref Wrapper<Particle> c2) => Processor.Execute(ref c0.Value, ref c1.Value, ref c2.Value);
     }
-    private void RunParticleMotionSystem(ref ParticleMotionSystem processor) { var query = new ParticleMotionSystemQuery { Processor = processor }; NativeWorld.Query().WriteBlock<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Particle>>().For(ref query); processor = query.Processor; }
+    private void RunParticleMotionSystem(ref ParticleMotionSystem processor) { var query = new ParticleMotionSystemQuery { Processor = processor }; NativeWorld.Query().Write<Wrapper<Transform>, Wrapper<Motion>, Wrapper<Particle>>().For(ref query); processor = query.Processor; }
 }

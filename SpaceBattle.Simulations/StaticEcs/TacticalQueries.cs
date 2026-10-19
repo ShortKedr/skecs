@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using NativeWorld = FFS.Libraries.StaticEcs.World<SpaceBattle.Simulations.StaticEcs.NativeWorldType>;
 using System.Numerics;
 
@@ -7,6 +8,8 @@ public sealed partial class Battle
 {
     private readonly List<int> coverCandidates = new(68);
     private float maximumTargetSpeed;
+    private readonly record struct FireIntent(int Serial, int Target, float Shield, float Hull);
+    private readonly List<FireIntent> intents = new();
 
     private SpatialPointIndex MemberPoints(int team) => team == 0 ? teamPoints0 : team == 1 ? teamPoints1 : tacticalPoints;
     private SpatialPointIndex OpponentPoints(int team) => team == 0 ? teamPoints1 : team == 1 ? teamPoints0 : tacticalPoints;
@@ -52,7 +55,7 @@ public sealed partial class Battle
         foreach (var target in targetCandidates)
         {
             if (!TargetAvailable(actor, AiRows[target].Entity) || formationTargets.Contains(target)) continue;
-            var arrival = MemberEngageSeconds(actor, AiRows[target]);
+            var arrival = CachedEngageSeconds(leader, target);
             if (!float.IsFinite(arrival)) continue;
             var slot = retained;
             while (slot < formationTargets.Count && arrivals[slot] <= arrival) slot++;
@@ -73,29 +76,54 @@ public sealed partial class Battle
 
     private void PrepareCommittedFire()
     {
-        var count = Math.Min(projectiles.Count, Config.Tactics.MaximumIntentProjectiles);
-        for (var i = 0; i < count; i++)
+        var count = Math.Min(projectileCount, Config.Tactics.MaximumIntentProjectiles);
+        if (projectileCount > count)
         {
-            var entity = projectiles[i].Entity;
-            if (!Store.Alive(entity)) continue;
-            var shot = Store.Get<Projectile>(entity); Tactics.IntentProjectiles++;
-            if (shot.ExpiresTick <= Tick || !aiIndexes.TryGetValue(shot.Target, out var targetIndex) ||
-                !Store.Alive(shot.Owner) || !Store.Has<Identity>(shot.Owner)) continue;
-            ref readonly var target = ref AiRows[targetIndex];
-            if (target.Docked || Store.Get<Identity>(shot.Owner).Team == target.Id.Team) continue;
-            var position = Store.Get<Transform>(entity).Position; var velocity = Store.Get<Motion>(entity).Velocity;
-            var delta = target.Transform.Position - position; var distance = delta.Length(); var speed = velocity.Length();
-            if (speed <= 0 || !float.IsFinite(speed + distance) || Vector2.Dot(velocity, delta) < speed * distance * 0.5f) continue;
-            var flight = distance / speed;
-            if (flight > Config.Tactics.MaximumEngageSeconds || flight > (shot.ExpiresTick - (double)Tick) / Config.TickRate) continue;
-            var probability = Config.Tactics.IncomingHitConfidence *
-                target.Radius / MathF.Max(target.Radius, target.Radius + target.Motion.Velocity.Length() * flight * 0.025f);
-            var profile = DamageRules.ForWeapon(shot.Kind, Config.Damage);
-            var damage = DamageRules.Resolve(shot.Damage, target.Shield.Current, target.Hull.Armor, profile);
-            committedShield[targetIndex] = MathF.Min(target.Shield.Current * 0.5f, committedShield[targetIndex] + damage.Shield * probability);
-            committedHull[targetIndex] = MathF.Min(target.Hull.Current * 0.5f, committedHull[targetIndex] + damage.Hull * probability);
+            Collect(); SortMovingRows();
+            for (var i = 0; i < count; i++) CommitIntent(projectiles[i].Entity);
         }
-        if (projectiles.Count > count) Tactics.BudgetFallbacks++;
+        else { var intentQuery = new IntentQuery { Battle = this }; RunIntentQuery(ref intentQuery); }
+        // Commitments accumulate in serial order, so the rows may come in any order.
+        SortBySerial(intents, static intent => intent.Serial);
+        foreach (var intent in intents)
+        {
+            ref readonly var target = ref AiRows[intent.Target];
+            committedShield[intent.Target] = MathF.Min(target.Shield.Current * 0.5f, committedShield[intent.Target] + intent.Shield);
+            committedHull[intent.Target] = MathF.Min(target.Hull.Current * 0.5f, committedHull[intent.Target] + intent.Hull);
+        }
+        intents.Clear();
+        if (projectileCount > count) Tactics.BudgetFallbacks++;
+    }
+
+    private struct IntentQuery : NativeWorld.IQuery.Read<Wrapper<Projectile>, Wrapper<Transform>, Wrapper<Motion>>
+    {
+        public Battle Battle;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] public void Invoke(NativeWorld.Entity native, in Wrapper<Projectile> c0, in Wrapper<Transform> c1, in Wrapper<Motion> c2)
+            => Battle.CommitIntent(c0.Value, c1.Value.Position, c2.Value.Velocity);
+    }
+
+    private void CommitIntent(EntityKey entity)
+    {
+        if (!Store.Alive(entity)) return;
+        CommitIntent(Store.Get<Projectile>(entity), Store.Get<Transform>(entity).Position, Store.Get<Motion>(entity).Velocity);
+    }
+
+    private void CommitIntent(in Projectile shot, Vector2 position, Vector2 velocity)
+    {
+        Tactics.IntentProjectiles++;
+        if (shot.ExpiresTick <= Tick || !aiIndexes.TryGetValue(shot.Target, out var targetIndex) ||
+            !Store.Alive(shot.Owner) || !Store.Has<Identity>(shot.Owner)) return;
+        ref readonly var target = ref AiRows[targetIndex];
+        if (target.Docked || Store.Get<Identity>(shot.Owner).Team == target.Id.Team) return;
+        var delta = target.Transform.Position - position; var distance = delta.Length(); var speed = velocity.Length();
+        if (speed <= 0 || !float.IsFinite(speed + distance) || Vector2.Dot(velocity, delta) < speed * distance * 0.5f) return;
+        var flight = distance / speed;
+        if (flight > Config.Tactics.MaximumEngageSeconds || flight > (shot.ExpiresTick - (double)Tick) / Config.TickRate) return;
+        var probability = Config.Tactics.IncomingHitConfidence *
+            target.Radius / MathF.Max(target.Radius, target.Radius + target.Motion.Velocity.Length() * flight * 0.025f);
+        var profile = DamageRules.ForWeapon(shot.Kind, Config.Damage);
+        var damage = DamageRules.Resolve(shot.Damage, target.Shield.Current, target.Hull.Armor, profile);
+        intents.Add(new(shot.Serial, targetIndex, damage.Shield * probability, damage.Hull * probability));
     }
 
     private float GroupWorkingRange(EntityKey entity, EntityKey target, float fallback)
