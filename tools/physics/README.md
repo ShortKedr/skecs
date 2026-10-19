@@ -2,6 +2,8 @@ English | [Русский](README.ru.md)
 
 # Local Physics Study
 
+> Deprecated standalone research harness. It is outside current CI, the benchmark campaign and the programmatic validation harness. Use [BenchmarkTools](../BenchmarkTools/README.md) for current measurements; see the [tool catalog](../README.md) for support status.
+
 [Research index](../../docs/space-battle/RESEARCH.md) | [Current campaign](../../docs/space-battle/REPORT.md)
 
 Standalone native comparison tooling, not a runtime physics implementation.

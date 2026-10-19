@@ -276,29 +276,16 @@ Mean counts match across all five ECS and are shown once.
 
 - CPU: AMD Ryzen 9 9900X 12-Core Processor; RAM: 61.49 GiB.
 - Runtime: .NET 8.0.32; OS: Microsoft Windows 10.0.26200; tiered compilation: `0`.
-- Base commit: `ed0f4841a3b597e8f7ee7251b3d7e982b43d676a`; measured source SHA256: [finite-2026-10-14/manifest.json](finite-2026-10-14/manifest.json).
-- [JSON](finite-2026-10-14/), [summary.csv](finite-2026-10-14/summary.csv), [hardware.json](finite-2026-10-14/hardware.json).
+- Base commit: `ed0f4841a3b597e8f7ee7251b3d7e982b43d676a`; measured source SHA256: finite-2026-10-14/manifest.json (`artifacts/benchmarks/history/docs/space-battle/finite-2026-10-14/manifest.json`).
+- `artifacts/benchmarks/history/docs/space-battle/finite-2026-10-14/`, [summary.csv](finite-2026-10-14/summary.csv), hardware.json (`artifacts/benchmarks/history/docs/space-battle/finite-2026-10-14/hardware.json`).
 
 The manifest records source and input hashes; each JSON records exact upstream pins and SHA256 hashes of all measured DLLs. Provenance.Sources.SECS in the headless host is a historical descriptive string; the campaign manifest supplies its exact revision and source hashes.
 
 ## Reproduction
 
-From the project root, with .NET 8, an SDK supporting C# 13 (9.0 or newer), and available NuGet packages. Charts require Python 3.12 and matplotlib. Run measurements sequentially without other heavy work. This command replaces the specified OutputDirectory; use another directory inside the project for experiments.
+This is an archived experiment. Exact reproduction requires the sources, binaries and tooling from its recorded historical revision. Its JSON, manifests and raw CSVs now live only in local `artifacts/benchmarks/history/docs/space-battle/`; reports and charts remain versioned.
 
-```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
-$env:MSBuildEnableWorkloadResolver = 'false'
-dotnet build SpaceBattle.Headless/SpaceBattle.Headless.csproj -c Release --no-restore -m:1 -p:GeneratePackageOnBuild=false
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate-adapters
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate-ports
-./tools/space-battle/run-suite.ps1 -SkipBuild -Preset benchmark -OutputDirectory docs/space-battle/finite-2026-10-14
-python tools/space-battle/analyze_current.py --data-dir docs/space-battle/finite-2026-10-14 --preset benchmark --report-base REPORT --verify-ticks
-```
-
-Without --verify-ticks the analyzer verifies published JSON and hashes and builds the report without requiring local CSVs. Long tick CSVs stay local; published JSON is sufficient for summary tables and charts.
-
+For the current workload, use the [.NET benchmark tools](../../tools/BenchmarkTools/README.md) and `dotnet run --project tools/BenchmarkTools -c Release -- run space-battle`. This records raw data under ignored `artifacts/benchmarks/current/space-battle` and builds the current report. The command does not reproduce this document's historical profiles.
 ## History and related documents
 
 - [Archived 2026-10-11 campaign](REPORT_2026-10-11.md): predictive-neutral-v1, Aether, old frontend replay and entity composition. Its values are not compared with this campaign because gameplay rules, physics and workload changed.

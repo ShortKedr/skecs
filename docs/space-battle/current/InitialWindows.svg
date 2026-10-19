@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1025" viewBox="0 0 1000 1025" role="img">
+<title>Opening windows, remainder and full run</title><rect width="100%" height="100%" fill="white"/>
+<g font-family="system-ui, sans-serif" fill="#17202a">
+<text x="24" y="32" font-size="22" font-weight="bold">Opening windows, remainder and full run</text>
+<text x="24" y="58" font-size="14">ms · lower is better · colour shows relative lag, not statistical significance</text>
+<text x="228" y="111" text-anchor="end" font-size="14">SKECS First600</text>
+<rect x="240" y="90" width="511.527731" height="30" fill="#efad46"/>
+<text x="759.527731" y="111" font-size="14">0.765524</text>
+<text x="228" y="155" text-anchor="end" font-size="14">SKECS First2000</text>
+<rect x="240" y="134" width="467.63959" height="30" fill="#59b35d"/>
+<text x="715.63959" y="155" font-size="14">0.699844</text>
+<text x="228" y="199" text-anchor="end" font-size="14">SKECS RemainderAfter2000</text>
+<rect x="240" y="178" width="444.766423" height="30" fill="#2e9b50"/>
+<text x="692.766423" y="199" font-size="14">0.665613</text>
+<text x="228" y="243" text-anchor="end" font-size="14">SKECS Full</text>
+<rect x="240" y="222" width="445.19" height="30" fill="#2e9b50"/>
+<text x="693.19" y="243" font-size="14">0.666247</text>
+<text x="228" y="287" text-anchor="end" font-size="14">LeoECSLite First600</text>
+<rect x="240" y="266" width="650" height="30" fill="#c93637"/>
+<text x="898" y="287" font-size="14">0.972754</text>
+<text x="228" y="331" text-anchor="end" font-size="14">LeoECSLite First2000</text>
+<rect x="240" y="310" width="608.516564" height="30" fill="#c93637"/>
+<text x="856.516564" y="331" font-size="14">0.910673</text>
+<text x="228" y="375" text-anchor="end" font-size="14">LeoECSLite RemainderAfter2000</text>
+<rect x="240" y="354" width="585.358626" height="30" fill="#c93637"/>
+<text x="833.358626" y="375" font-size="14">0.876016</text>
+<text x="228" y="419" text-anchor="end" font-size="14">LeoECSLite Full</text>
+<rect x="240" y="398" width="585.787477" height="30" fill="#c93637"/>
+<text x="833.787477" y="419" font-size="14">0.876657</text>
+<text x="228" y="463" text-anchor="end" font-size="14">LeoECS Classic First600</text>
+<rect x="240" y="442" width="647.02203" height="30" fill="#c93637"/>
+<text x="895.02203" y="463" font-size="14">0.968298</text>
+<text x="228" y="507" text-anchor="end" font-size="14">LeoECS Classic First2000</text>
+<rect x="240" y="486" width="600.195098" height="30" fill="#c93637"/>
+<text x="848.195098" y="507" font-size="14">0.898219</text>
+<text x="228" y="551" text-anchor="end" font-size="14">LeoECS Classic RemainderAfter2000</text>
+<rect x="240" y="530" width="561.365973" height="30" fill="#dc513c"/>
+<text x="809.365973" y="551" font-size="14">0.84011</text>
+<text x="228" y="595" text-anchor="end" font-size="14">LeoECS Classic Full</text>
+<rect x="240" y="574" width="562.08503" height="30" fill="#dc513c"/>
+<text x="810.08503" y="595" font-size="14">0.841186</text>
+<text x="228" y="639" text-anchor="end" font-size="14">Morpeh First600</text>
+<rect x="240" y="618" width="593.348629" height="30" fill="#c93637"/>
+<text x="841.348629" y="639" font-size="14">0.887973</text>
+<text x="228" y="683" text-anchor="end" font-size="14">Morpeh First2000</text>
+<rect x="240" y="662" width="550.516442" height="30" fill="#dc513c"/>
+<text x="798.516442" y="683" font-size="14">0.823873</text>
+<text x="228" y="727" text-anchor="end" font-size="14">Morpeh RemainderAfter2000</text>
+<rect x="240" y="706" width="506.195954" height="30" fill="#f2d85c"/>
+<text x="754.195954" y="727" font-size="14">0.757545</text>
+<text x="228" y="771" text-anchor="end" font-size="14">Morpeh Full</text>
+<rect x="240" y="750" width="507.016704" height="30" fill="#f2d85c"/>
+<text x="755.016704" y="771" font-size="14">0.758773</text>
+<text x="228" y="815" text-anchor="end" font-size="14">StaticEcs 2.2.9 First600</text>
+<rect x="240" y="794" width="506.945956" height="30" fill="#f2d85c"/>
+<text x="754.945956" y="815" font-size="14">0.758668</text>
+<text x="228" y="859" text-anchor="end" font-size="14">StaticEcs 2.2.9 First2000</text>
+<rect x="240" y="838" width="464.863763" height="30" fill="#59b35d"/>
+<text x="712.863763" y="859" font-size="14">0.69569</text>
+<text x="228" y="903" text-anchor="end" font-size="14">StaticEcs 2.2.9 RemainderAfter2000</text>
+<rect x="240" y="882" width="436.23252" height="30" fill="#2e9b50"/>
+<text x="684.23252" y="903" font-size="14">0.652842</text>
+<text x="228" y="947" text-anchor="end" font-size="14">StaticEcs 2.2.9 Full</text>
+<rect x="240" y="926" width="436.762728" height="30" fill="#2e9b50"/>
+<text x="684.762728" y="947" font-size="14">0.653635</text>
+</g></svg>

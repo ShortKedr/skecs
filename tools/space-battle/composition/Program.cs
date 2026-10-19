@@ -7,7 +7,8 @@ using SpaceBattle;
 
 CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
 var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../../"));
-var docs = Path.Combine(root, "docs/space-battle");
+// Historical observer inputs and generated intermediates are local artifacts.
+var docs = Path.Combine(root, "artifacts/benchmarks/history/docs/space-battle");
 var jsonOptions = new JsonSerializerOptions { WriteIndented = true, IncludeFields = true };
 if (args.Contains("--selftest"))
 {
@@ -31,6 +32,7 @@ Directory.CreateDirectory(Path.Combine(docs, "composition"));
 foreach (var (profile, multiplier) in new[] { ("low", 0.5f), ("nominal", 1f), ("high", 2f) })
 {
     var sourcePath = Path.Combine(docs, "results", profile + "-skecs.json");
+    if (!File.Exists(sourcePath)) sourcePath = Path.Combine(docs, "results", profile + "-secs.json");
     using var source = JsonDocument.Parse(File.ReadAllText(sourcePath));
     var data = source.RootElement;
     var config = data.GetProperty("Metadata").GetProperty("Options").Deserialize<BattleConfig>(jsonOptions)!;

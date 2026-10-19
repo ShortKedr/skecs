@@ -137,7 +137,7 @@ experiment does not overwrite the published benchmark tables.
 
 ## Measured Experiment (2026-10-12)
 
-The [machine-readable summary](physics-experiment-summary.json) retains every
+The `artifacts/benchmarks/history/docs/space-battle/physics-experiment-summary.json` retains every
 independent run mean, ranges, input/raw/binary hashes, workload counts and
 checksums. Machine: Ryzen 9 9900X, 24 logical CPUs, Windows build 26200.
 Builds and other QA runs were finished before each timing window; background

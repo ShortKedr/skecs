@@ -37,6 +37,7 @@ static class OptimizedApiRunner
             os = RuntimeInformation.OSDescription,
             architecture = RuntimeInformation.ProcessArchitecture.ToString(),
             machine = BenchmarkMachineLabel.Value,
+            revision = Environment.GetEnvironmentVariable("SKECS_BENCHMARK_REVISION") ?? "unrecorded working tree",
             date = DateTimeOffset.Now.ToString("O"),
             stopwatchFrequency = Stopwatch.Frequency,
             tieredCompilation = Environment.GetEnvironmentVariable("DOTNET_TieredCompilation"),
@@ -72,7 +73,8 @@ static class OptimizedApiRunner
         var stddev = Math.Sqrt(samples.Sum(x => (x - mean) * (x - mean)) / (SampleCount - 1));
         Console.WriteLine($"Optimized API create {method,-24} N={count,7}: {mean / 1e6:F3} ms, SD={stddev / 1e6:F3}, {repetitions} repetitions/sample");
         return new { operation = "Create", method, entityCount = count, meanNs = mean, stddevNs = stddev,
-            samplesNs = samples, allocatedBytes = allocations.Average(), storageNativeBytes = nativeBytes.Average(), repetitions };
+            samplesNs = samples, allocatedBytes = allocations.Average(), samplesAllocatedBytes = allocations,
+            storageNativeBytes = nativeBytes.Average(), samplesStorageNativeBytes = nativeBytes, repetitions };
     }
 
     private static double TimeCreation(string method, int count, out double allocatedBytes, out long nativeBytes, int repetitions = 1)
@@ -120,7 +122,8 @@ static class OptimizedApiRunner
         var stddev = Math.Sqrt(samples.Sum(x => (x - mean) * (x - mean)) / (SampleCount - 1));
         Console.WriteLine($"Optimized API lookup {method,-24} N={count,7}: {mean / 1e6:F3} ms, SD={stddev / 1e6:F3}, checksum={workload.Checksum}");
         return new { operation = "Lookup", method, entityCount = count, meanNs = mean, stddevNs = stddev,
-            samplesNs = samples, allocatedBytes = allocations.Average(), checksum = workload.Checksum, repetitions,
+            samplesNs = samples, allocatedBytes = allocations.Average(), samplesAllocatedBytes = allocations,
+            checksum = workload.Checksum, repetitions,
             storageNativeBytes = workload.NativeBytes,
             accessorBufferBytes = workload.AccessorBufferBytes };
     }

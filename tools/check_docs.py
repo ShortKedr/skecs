@@ -37,6 +37,9 @@ DOCUMENTS = [
     "docs/benchmarks/COLORS.md",
     "docs/benchmarks/current/SUPPLEMENT.md",
     "docs/space-battle/GAME_REPORT.md", "docs/space-battle/DESKTOP_TIMING.md",
+    "tools/BenchmarkTools/README.md", "Benchmarks.Local/CodeGen/README.md",
+    "docs/space-battle/composition/COMPOSITION.md",
+    "tools/README.md",
 ]
 
 

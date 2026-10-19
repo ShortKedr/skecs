@@ -1,0 +1,25 @@
+using BenchmarkDotNet.Attributes;
+
+namespace SKECS.Benchmarks;
+
+[MemoryDiagnoser]
+public class StressBenchmarks
+{
+    private StressWorkload _workload = null!;
+    public IEnumerable<int> EntityCounts => Environment.GetEnvironmentVariable("SKECS_STRESS_EXTREME") == "1"
+        ? [5_000_000] : [100_000, 1_000_000];
+    [ParamsSource(nameof(EntityCounts))] public int EntityCount { get; set; }
+
+    [GlobalSetup(Targets = [{{STRESS_SETUP_TARGETS}}])]
+    public void Setup() => _workload = new StressWorkload(EntityCount);
+    [GlobalSetup(Target = nameof(WideIteration))]
+    public void SetupWide() => _workload = new StressWorkload(EntityCount, wide: true);
+    [IterationSetup(Target = nameof(MixedFrames))]
+    public void ResetMixed()
+    {
+        _workload.Dispose();
+        Setup();
+    }
+    [GlobalCleanup] public void Cleanup() => _workload.Dispose();
+{{STRESS_BENCHMARKS}}
+}

@@ -2,6 +2,8 @@ English | [Русский](README.ru.md)
 
 # Space Battle Diagnostic Tools
 
+> Deprecated standalone research harness. It is outside current CI, the benchmark campaign and the programmatic validation harness. Use [BenchmarkTools](../BenchmarkTools/README.md) for current measurements; see the [tool catalog](../README.md) for support status.
+
 The protocol below reproduces **2026-10-11** source snapshots (`6150700`, `c51390c`, `d853ae7`) with the earlier Aether physics. For current circle-kernel profiling use [HardwareStudy](../HardwareStudy/README.md) and the [physics tools](../physics/README.md).
 
 [Research index](../../docs/space-battle/RESEARCH.md) | [Current campaign](../../docs/space-battle/REPORT.md)

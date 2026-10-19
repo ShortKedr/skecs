@@ -16,13 +16,16 @@ describe the revision and measurements named in the report.
 
 ## Measurements
 
+[Maintained tools and deprecated entry points](../tools/README.md) covers CI,
+benchmark execution/analysis and the programmatic validation harness.
+
 | Workload | Method and results |
 | --- | --- |
 | Current five-framework microbenchmarks | [Results and scope](benchmarks/current/REPORT.md) |
 | All SKECS BenchmarkDotNet suites and API diagnostics | [Supplemental results](benchmarks/current/SUPPLEMENT.md) |
 | Reproduce microbenchmarks | [Benchmark entrypoint](../SKECS.Benchmarks/README.md), [local harness](../Benchmarks.Local/README.md) |
 | Before/after runtime optimizations | [Paired measurement methodology](benchmarks/optimization-methodology.md) |
-| Finite battle, including low/nominal/high activity profiles | [Space Battle report](space-battle/REPORT.md) |
+| Current real-game high workload across five ECS implementations | [Space Battle report](space-battle/REPORT.md) |
 | Battle matching desktop defaults | [Game preset, stages and HUD windows](space-battle/GAME_REPORT.md) |
 | Desktop startup and HUD Mean | [Matched Release/headless study](space-battle/DESKTOP_TIMING.md) |
 | Colour markers in reports and charts | [Shared comparison scale](benchmarks/COLORS.md) |

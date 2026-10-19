@@ -102,15 +102,15 @@ licensing conditions above remain unchanged.
 
 ## Verification
 
-```powershell
-python tools/check_vendor.py
-python -m unittest discover -s tools -p 'test_check_vendor.py' -v
-python tools/check_docs.py
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
+dotnet test tools/BenchmarkTools.Tests/BenchmarkTools.Tests.csproj -c Release
 ```
 
-The checker verifies hashes, license presence, exact path case, and that Git's
-publishable source subset matches the manifest. [.gitattributes](.gitattributes)
-prevents line-ending conversion of hash-verified upstream files.
-[fetch.ps1](Benchmarks.Local/fetch.ps1) optionally restores missing manifest files
-from pinned archives, checks their hashes before copying, and refuses to overwrite
-changed local sources. A normal clone does not need this step.
+The [native verifier](tools/BenchmarkTools/VendorVerifier.cs) checks lengths and SHA-256 hashes for every manifest file, including licenses, and rejects unpinned C# files in the distributed runtime directories. [.gitattributes](.gitattributes) prevents line-ending conversion of hash-verified upstream files.
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- restore-vendor
+```
+
+The optional [restore implementation](tools/BenchmarkTools/VendorRestore.cs) downloads pinned archives, verifies the selected runtime sources and original licenses before installing missing files, and refuses to overwrite changed local files. Downloading requires network access; remote repositories remain unchanged. A normal clone does not need this step. The license conditions above still apply.

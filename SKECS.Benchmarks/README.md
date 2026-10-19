@@ -2,40 +2,43 @@ English | [Русский](README.ru.md)
 
 # SKECS benchmarks
 
-[Project overview](../README.md) | [SpaceBattle report](../docs/space-battle/REPORT.md) | [Harness](../Benchmarks.Local/README.md)
+[Project overview](../README.md) | [SpaceBattle report](../docs/space-battle/REPORT.md) | [Comparison harness](../Benchmarks.Local/README.md) | [Portable tools](../tools/BenchmarkTools/README.md)
 
 ## Current comparison
 
-The [current campaign report](../docs/benchmarks/current/REPORT.md) contains a fresh comparison of SKECS, LeoECS Lite, LeoECS Classic, Morpeh and StaticEcs: 40 base cases and 70 stress cases, with complete raw samples, source hashes and three charts. All five frameworks were measured again using the same shared workload contract.
+The [current campaign report](../docs/benchmarks/current/REPORT.md) compares SKECS, LeoECS Lite, LeoECS Classic, Morpeh and StaticEcs: 40 base cases and 70 stress cases. All five frameworks use the same logical workload contract.
 
-![Base comparison](../docs/benchmarks/current/comparison.png)
+![Base comparison](../docs/benchmarks/current/comparison.svg)
 
-The base matrix measures Create, Iterate, Churn and Destroy at 1,000 and 100,000 entities. Stress measures dense/sparse/wide iteration, random lookup, 256-byte payload churn, 10% recycling and a 120-frame mixed batch at 100,000 and 1,000,000 entities. The [report](../docs/benchmarks/current/REPORT.md) gives operation times and explains measurement limits. The [harness README](../Benchmarks.Local/README.md) documents exact scenarios and reproduction.
+Create, Iterate, Churn and Destroy run at 1,000 and 100,000 entities. Stress covers dense/sparse/wide iteration, random lookup, 256-byte payload churn, 10% recycling and a 120-frame mixed batch at 100,000 and 1,000,000 entities. The [harness guide](../Benchmarks.Local/README.md) describes the scenarios and validation.
 
-These are Stopwatch measurements of equivalent logical work through selected adapters. They characterize the recorded machine and snapshots; they do not establish a universal ranking or Unity/IL2CPP performance. Error bars show sample standard deviation. Managed allocations in JSON exclude native memory.
+These Stopwatch measurements characterize the recorded machine and source snapshots. They do not establish a universal ranking or Unity/IL2CPP performance. Error bars show sample standard deviation; managed allocation figures exclude native memory. Raw samples, metadata and hashes stay in ignored `artifacts/benchmarks/current/micro`; Markdown and SVG reports are published under `docs/benchmarks/current`.
 
 ## SKECS BenchmarkDotNet suites
 
-[ComparisonBenchmarks](ComparisonBenchmarks.cs) uses the same [base workload](ComparisonWorkload.cs) as the five-framework runner. [StressBenchmarks](StressBenchmarks.cs) uses the same [stress workload](StressWorkload.cs). [OptimizedApiBenchmarks](OptimizedApiBenchmarks.cs) evaluates separate SKECS factory/accessor APIs; these measurements are not substituted into the shared comparison. [Program.cs](Program.cs) also retains the original iteration/churn benchmarks. `SKECS.OtherBenchmarks` contains a separate legacy suite.
+[ComparisonBenchmarks](ComparisonBenchmarks.cs) and [StressBenchmarks](StressBenchmarks.cs) reference the .NET 8 [shared workload library](../benchmarks/SKECS.Benchmarks.Workloads/SKECS.Benchmarks.Workloads.csproj), as does the five-framework runner. The shared [base workload](../benchmarks/SKECS.Benchmarks.Workloads/ComparisonWorkload.cs) and [stress workload](../benchmarks/SKECS.Benchmarks.Workloads/StressWorkload.cs) therefore have one compiled implementation.
 
-BenchmarkDotNet here measures SKECS only. For a quick launch check after a Release build:
+[OptimizedApiBenchmarks](OptimizedApiBenchmarks.cs) evaluates separate factory/accessor APIs. [Program.cs](Program.cs) retains the original iteration/churn benchmarks, and `SKECS.OtherBenchmarks` contains the legacy suite. BenchmarkDotNet measures SKECS here; optimized API results are separate from the shared comparison.
 
-```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
-dotnet build SKECS.Benchmarks/SKECS.Benchmarks.csproj -c Release --no-restore -p:GeneratePackageOnBuild=false -m:1
-dotnet SKECS.Benchmarks/bin/Release/net8.0/SKECS.Benchmarks.dll --filter '*ComparisonBenchmarks.Iterate*' --job Dry --inProcess --artifacts Benchmarks.Local/repro-bdn-smoke
+Run from the repository root with .NET 8 runtime and an SDK supporting C# 13 (9.0 or newer):
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- generate --check
+dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
+dotnet run --project tools/BenchmarkTools -c Release -- validate all
+dotnet run --project tools/BenchmarkTools -c Release -- run supplement
+dotnet run --project tools/BenchmarkTools -c Release -- report supplement
+dotnet run --project tools/BenchmarkTools -c Release -- verify supplement
 ```
 
-A Dry job checks launch and workload execution. The [supplemental report](../docs/benchmarks/current/SUPPLEMENT.md) contains fresh timings for all 34 default cases here and 51 legacy cases, measured with Short/InProcess, three warmup and eight actual iterations. It also includes the ten direct-creation/accessor cases and retained-native-storage diagnostics. Reproduce these sequentially, separately from the five-framework and SpaceBattle campaigns:
+The [supplemental report](../docs/benchmarks/current/SUPPLEMENT.md) covers 34 default cases here and 51 legacy cases with Short/InProcess, three warmup and eight measured iterations, plus direct-creation/accessor cases and retained-storage diagnostics. The portable .NET tool builds and runs these sequentially and retains full BenchmarkDotNet exports locally. Its reporting and SVG generation need no Python or PowerShell.
 
-```powershell
-./Benchmarks.Local/run_supplement.ps1
-python Benchmarks.Local/report_supplement.py docs/benchmarks/current
-```
+`run all` also measures the five-framework comparison and full headless SpaceBattle. Desktop startup measurement is explicit: `run desktop` or `run all --include-desktop`. `report all` and `verify all` include saved desktop data when present; `--include-desktop` requires it.
 
-The opt-in `SKECS_STRESS_EXTREME=1` matrix at five million entities is separate from the default suite. InProcess avoids generated child-project restores; its process isolation differs from the default BenchmarkDotNet toolchain.
+Use `run supplement --output artifacts/benchmarks/repro/micro` for separate raw output. Then use `report supplement --data artifacts/benchmarks/repro/micro --output artifacts/benchmarks/repro/report` and `verify supplement --data artifacts/benchmarks/repro/micro`. These suffixes follow the same `dotnet run --project tools/BenchmarkTools -c Release --` prefix. See the [CLI guide](../tools/BenchmarkTools/README.md) for all options.
+
+The opt-in `SKECS_STRESS_EXTREME=1` five-million-entity matrix remains separate from the default campaign. InProcess has different process isolation from the default BenchmarkDotNet toolchain. Dry/smoke jobs check launch and execution; they are not full performance rankings.
 
 ## Historical experiments
 
-The [2026-10-11 optimization methodology](../docs/benchmarks/optimization-methodology.md) records a separate SECS before/after experiment and the preserved binaries required to interpret it. [Previous base](../Benchmarks.Local/results-all-updated.json) and [stress](../Benchmarks.Local/stress-all-updated.json) data remain available, alongside [previous charts](../docs/benchmarks/updated/comparison.png). They are retained history, not today's rating. Rebuilding the current source does not reproduce the old baseline binary.
+The [2026-10-11 optimization methodology](../docs/benchmarks/optimization-methodology.md) records a separate SECS before/after experiment and the preserved binaries needed to interpret it. [Previous charts](../docs/benchmarks/updated/comparison.png) retain historical context. Raw historical measurements are local artifacts; rebuilding current sources does not reproduce the old baseline binary.

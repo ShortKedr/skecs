@@ -6,17 +6,10 @@ if (StorageRunner.Handle(args)) return;
 if (StressRunner.Handle(args)) return;
 if (OptimizedApiRunner.Handle(args)) return;
 
-var factories = new (string Name, Func<int, IWorkload> Create)[]
-{
-    ("SKECS", n => new SkecsWorkload(n)),
-    ("LeoECS Lite", n => new LiteWorkload(n)),
-    ("LeoECS Classic", n => new ClassicWorkload(n)),
-    ("Morpeh", n => new MorpehWorkload(n)),
-    ("StaticEcs", n => new StaticWorkload(n))
-};
+var factories = BenchmarkRegistry.Basic;
 if (args.Contains("--skecs-only")) factories = factories.Where(f => f.Name == "SKECS").ToArray();
 var counts = new[] { 1_000, 100_000 };
-var scenarios = new[] { "Create", "Iterate", "Churn", "Destroy" };
+var scenarios = SKECS.Benchmarks.BenchmarkModel.BasicScenarios;
 foreach (var factory in factories)
 foreach (var count in counts)
 {
@@ -102,7 +95,8 @@ foreach (var (factory, count, scenario) in cases)
     var mean = samples.Average();
     var stddev = Math.Sqrt(samples.Sum(x => (x - mean) * (x - mean)) / (sampleCount - 1));
     results.Add(new { framework = factory.Name, scenario, entityCount = count, meanNs = mean,
-        stddevNs = stddev, samplesNs = samples, allocatedBytes = allocations.Average(), repetitions });
+        stddevNs = stddev, samplesNs = samples, allocatedBytes = allocations.Average(),
+        samplesAllocatedBytes = allocations, repetitions });
     Console.WriteLine($"{factory.Name,-16} {scenario,-8} N={count,6}: {mean / count:F2} ns/entity, SD={stddev / count:F2}");
 }
 var metadata = new
@@ -114,7 +108,7 @@ var metadata = new
     date = DateTimeOffset.Now.ToString("O"),
     stopwatchFrequency = Stopwatch.Frequency,
     tieredCompilation = Environment.GetEnvironmentVariable("DOTNET_TieredCompilation"),
-    cpu = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER"),
+    cpu = BenchmarkMachineInfo.CpuName,
     sampleCount,
     targetSampleNs,
     footer = "Release; tiering off; 20 samples; setup/forced GC excluded; Morpeh Commit included",

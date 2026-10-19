@@ -92,20 +92,9 @@ SECS в метаданных свежего повторного замера б
 
 ## Воспроизведение
 
-Запускайте из корня репозитория с локальным окружением matplotlib:
+Это архивное сравнение от 2026-10-11. Его сырые входные файлы перенесены в игнорируемую директорию `artifacts/benchmarks/history/Benchmarks.Local/`; опубликованный график `optimization.png` сохранён. Точное воспроизведение требует исторических инструментов и сохранённого исходного baseline-бинарника, описанного выше.
 
-```powershell
-$env:PYTHONPATH = (Resolve-Path Benchmarks.Local/python-packages).Path
-python Benchmarks.Local/plot_optimization.py
-```
-
-По умолчанию построитель графика читает два файла свежих повторных замеров базовой
-версии и два файла оптимизированной версии, названные выше, затем записывает
-`docs/benchmarks/optimization.png`. Для выбора других входных данных используйте
-`--base-results`, `--base-stress`, `--optimized-results` или `--optimized-stress`.
-Он не изменяет JSON результатов. Достаточно результатов оптимизированной версии
-только для SECS; строки других фреймворков игнорируются.
-
+Текущие серии измерений и отчёты выполняет [.NET CLI](../../tools/BenchmarkTools/README.ru.md): `dotnet run --project tools/BenchmarkTools -c Release -- run all`. Текущая серия не является повторным замером этого архивного сравнения.
 ## Результаты
 
 ![Парные замеры SECS](optimization.png)

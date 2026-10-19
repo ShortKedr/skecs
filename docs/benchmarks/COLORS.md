@@ -12,7 +12,7 @@ The same colours describe relative differences in comparable tables and charts. 
 
 The reference is the best unrounded value within one explicitly comparable group. For a metric where less is better, lag is `(value / best - 1) × 100%`. Where more is better, it is `(1 - value / best) × 100%`. The scale is fixed across reports: green through 5%, green to yellow through 15%, yellow to red through 30%, red from 30%. Nine discrete shades preserve the original scale; the colours are never stretched to the minimum and maximum of a table.
 
-If every value is within 5% of the reference, the whole group is grey. Grey means neutral or insufficient separation; it does not prove equality. Unknown values and groups with only one known value are unranked. With a zero reference, zero matches zero and a positive lower-is-better value has undefined relative lag; it receives the last shade only when it exceeds any explicit absolute threshold. No artificial epsilon is added.
+If every value is within 5% of the reference, the whole group is grey. Grey means neutral or insufficient separation; it does not prove equality. Current native reports compare finite nonnegative values with less-is-better semantics; a single-value group is grey. With a zero reference, zero matches zero and a positive value receives the last shade because its relative lag is infinite. No artificial epsilon is added.
 
 The thresholds describe observed effect size. They are not significance tests, confidence intervals or a universal framework ranking. Ordinary workload samples, adjacent ticks and phases of one simulation are not independent runs.
 
@@ -25,16 +25,24 @@ The thresholds describe observed effect size. They are not significance tests, c
 
 Population, gameplay events, checksum, input sizes, sample counts, parameters and stage shares retain ordinary formatting. Their magnitude does not express performance quality. Archive results retain their date and configuration; their colours do not make them current measurements.
 
-## Reported variability
+## Historical variability research
+
+Retained Python research tools additionally support the rules below; current native reports use the effect-size scale above without inferring range separation.
 
 When summaries of independent runs are available, the reference is the best median of those summaries. Differences beyond 5% are coloured only when the observed minimum-to-maximum ranges are sufficiently separated under the comparison rule. Overlapping ranges, incomplete variability data and small differences stay grey.
 
 An explicitly published interval may be used with its reported central value. Its endpoints are not treated as additional runs. These ranges describe the recorded variation; they are not confidence intervals.
 
-An absolute threshold is used only when its metric, units and reason are explicitly recorded. It supplements the relative rule and does not change the printed result. The existing SpaceBattle policy is [heatmap_policy.json](../../tools/space-battle/heatmap_policy.json); it currently has no absolute thresholds.
+An absolute threshold is used only when its metric, units and reason are explicitly recorded. It supplements the relative rule and does not change the printed result. Current native reports have no absolute thresholds and do not read the deprecated `tools/space-battle/heatmap_policy.json`.
 
 ## Reproduction
 
-[benchmark_colors.py](../../tools/benchmark_colors.py) supplies the shared palette and classification. Report generators use local SVG markers and the same palette for PNG charts; no external images, CSS or network calls are needed. The [legacy import](../../tools/space-battle/heatmap.py) keeps the archived SpaceBattle generator compatible.
+[ReportColors.cs](../../tools/BenchmarkTools/ReportColors.cs) supplies the palette and classification for current .NET reports. Native report generators use local SVG markers and the same palette for SVG charts without external images, CSS or network calls.
 
-Regenerate reports and charts from saved inputs to update presentation. New timing runs are unnecessary for a colour change.
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- report all
+```
+
+This reads retained local inputs from `artifacts/benchmarks/current` and regenerates Markdown/SVG under `docs/`. Use `--data` for different saved inputs and `--output` for a publication destination. New timing runs are unnecessary for a presentation change.
+
+[benchmark_colors.py](../../tools/benchmark_colors.py) and the [research report formatter](../../tools/colorize_research_reports.py) are deprecated and are not used by current native reports. See the [tool status](../../tools/README.md) for supported entry points and removal boundaries.

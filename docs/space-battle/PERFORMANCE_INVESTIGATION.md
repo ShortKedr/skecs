@@ -35,13 +35,13 @@ Revisions: `6150700` (before tactics), `c51390c` (tactical AI), `d853ae7` (live 
 
 Three independent fresh replays per revision. Native warms a separate battle for 1,200 ticks; WASM warms a separate battle for 600 ticks and then resets. Measurements cover ticks 1-600 and 601-1,200. A tick is not an independent repeat. Tables report the median of the three run means, with run-mean ranges where useful, not the fastest sample. Stage medians are computed separately and need not sum exactly to the median total.
 
-Native: .NET 8.0.31 CoreCLR, Release. Browser: .NET 8.0.31 Mono AOT, SDK 8.0.425, Chromium 151.0.7922.34 headless, 1440x900, 24 visible logical processors. This host's [hardware inventory](hardware.json) identifies a Ryzen 9 9900X. Builds and timed runs were not overlapped. Background applications, clock changes and headless rendering remain sources of uncertainty.
+Native: .NET 8.0.31 CoreCLR, Release. Browser: .NET 8.0.31 Mono AOT, SDK 8.0.425, Chromium 151.0.7922.34 headless, 1440x900, 24 visible logical processors. This host's `artifacts/benchmarks/history/docs/space-battle/hardware.json` identifies a Ryzen 9 9900X. Builds and timed runs were not overlapped. Background applications, clock changes and headless rendering remain sources of uncertainty.
 
 Browser comparison uses production `Advance(1)` plus binary frame export, with Canvas/DOM paused. The only baseline browser-source addition is an on-demand `DiagnosticStage(int)` export reading existing stage timers outside their timing scope. Revision order alternates. Native core timings exclude snapshots, rendering and frontend statistics.
 
 Checksums and populations reproduce across repeats within each runtime. Native and WASM checksums differ: these runs do **not** establish cross-platform bitwise lockstep. This also prevents interpreting their timing ratio as a pure compiler overhead measurement.
 
-Raw data: [native before](performance-study/native-before.json), [native tactics](performance-study/native-tactics.json), [native statistics](performance-study/native-stats.json), [browser revisions](performance-study/web.json), [summary](performance-study/summary.json).
+Raw data: native before (`artifacts/benchmarks/history/docs/space-battle/performance-study/native-before.json`), native tactics (`artifacts/benchmarks/history/docs/space-battle/performance-study/native-tactics.json`), native statistics (`artifacts/benchmarks/history/docs/space-battle/performance-study/native-stats.json`), browser revisions (`artifacts/benchmarks/history/docs/space-battle/performance-study/web.json`), summary (`artifacts/benchmarks/history/docs/space-battle/performance-study/summary.json`).
 
 ## Revision Comparison
 
@@ -82,17 +82,17 @@ Tactical AI has avoidable work: full target scoring before decision gates, wide 
 
 ## Dense Web And Desktop
 
-The [full-browser probes](performance-study/web-live-1.json) advance to tick 180, sample 40 direct ticks (181-220), measure export separately, force 30 frontend frames, then observe five seconds of live RAF. [Repeat 2](performance-study/web-live-2.json), [repeat 3](performance-study/web-live-3.json).
+The full-browser probes (`artifacts/benchmarks/history/docs/space-battle/performance-study/web-live-1.json`) advance to tick 180, sample 40 direct ticks (181-220), measure export separately, force 30 frontend frames, then observe five seconds of live RAF. Repeat 2 (`artifacts/benchmarks/history/docs/space-battle/performance-study/web-live-2.json`), repeat 3 (`artifacts/benchmarks/history/docs/space-battle/performance-study/web-live-3.json`).
 
 Core means: 23.885 / 26.930 / 26.572 ms. Core plus export: 29.790 / 33.852 / 33.565 ms. Export-only at the later frozen frame: 4.338 / 5.550 / 5.117 ms. Export-only is a different tick window, so subtracting it from the earlier total is invalid. Live simulation rates later in the battle: 55.9 / 50.9 / 54.3 ticks/s. Render rates: 56.1 / 51.1 / 54.5 FPS. Those live rates are not rates for the frozen peak: the battle changes during the five-second observation.
 
-Desktop [replay 1](performance-study/desktop-1.json), [replay 2](performance-study/desktop-2.json), [replay 3](performance-study/desktop-3.json): fresh process, no warmup, exactly 600 steps/rendered frames, 1440x900, VSync off, full scene/HUD submission. Median run means: simulation 3.237 ms, capture 0.514 ms, render submission 2.201 ms, total CPU frame 7.469 ms. CPU-frame P95 ranges 14.770-17.118 ms. The existing replay profiler disables live statistics recording/refresh, measures uncapped replay rather than real-time gameplay FPS, and separates presentation/GPU timing. It does not prove every live desktop frame is below budget.
+Desktop replay 1 (`artifacts/benchmarks/history/docs/space-battle/performance-study/desktop-1.json`), replay 2 (`artifacts/benchmarks/history/docs/space-battle/performance-study/desktop-2.json`), replay 3 (`artifacts/benchmarks/history/docs/space-battle/performance-study/desktop-3.json`): fresh process, no warmup, exactly 600 steps/rendered frames, 1440x900, VSync off, full scene/HUD submission. Median run means: simulation 3.237 ms, capture 0.514 ms, render submission 2.201 ms, total CPU frame 7.469 ms. CPU-frame P95 ranges 14.770-17.118 ms. The existing replay profiler disables live statistics recording/refresh, measures uncapped replay rather than real-time gameplay FPS, and separates presentation/GPU timing. It does not prove every live desktop frame is below budget.
 
 ## Build And Web Approach
 
 Release publishing compiles 47 assemblies, including `SECS`, `SpaceBattle.SECS`, `SpaceBattle.Core`, `Aether.Physics2D` and generic AOT instances. Actual generated build commands enable SIMD and native WASM exception handling. Assembly bitcode and final WASM use `-O2`; native runtime glue uses `-Oz`. The latter is not evidence that the entire game was compiled for size. The game loop uses a reusable binary buffer, not per-frame JSON.
 
-The deployed Pages site was also [probed read-only](performance-study/live-runtime.json): `aot-binary`, `tactical-lock-v2`, binary protocol v2, 198 initial ships, `crossOriginIsolated=false`. These flags do not prove that every dynamically reached generic method avoids interpretation; no named method-level CPU trace was captured.
+The deployed Pages site was also probed read-only (`artifacts/benchmarks/history/docs/space-battle/performance-study/live-runtime.json`): `aot-binary`, `tactical-lock-v2`, binary protocol v2, 198 initial ships, `crossOriginIsolated=false`. These flags do not prove that every dynamically reached generic method avoids interpretation; no named method-level CPU trace was captured.
 
 `-O3`, LTO and a newer runtime were not measured in this study. Mono AOT is not evidence of desktop CoreCLR performance. Without a named CPU trace, the remaining gap cannot be assigned to generic dispatch, bounds checks, runtime helpers or interpreter fallback in particular methods.
 
@@ -104,7 +104,7 @@ The inspected Pages response did not provide COOP/COEP, which managed multithrea
 
 A conservative swept-AABB empty-space test was added **only to an archived copy** of `PhysicsService`. An eligible candidate retains the exact original five casts. Empty space returns the original miss outputs. The bounds enclose rounded ray endpoints and the original origin-query epsilon, with outward rounding; non-finite bounds fall back to the original path. No team, owner or hull filter was added.
 
-[Paired browser runs](performance-study/web-sweep-comparison.json), three independent replays per variant in alternating order:
+Paired browser runs (`artifacts/benchmarks/history/docs/space-battle/performance-study/web-sweep-comparison.json`), three independent replays per variant in alternating order:
 
 | Metric, ticks 1-600 | Original | Experimental |
 | --- | ---: | ---: |
@@ -115,12 +115,12 @@ A conservative swept-AABB empty-space test was added **only to an archived copy*
 
 Core run-mean ranges: original 12.327-12.927 ms, experimental 9.200-9.625 ms. This is about 25% less core time and 54% less hits time. Later core means are 4.783 versus 3.910 ms. These are observed effects, not a statistical-significance claim or a guarantee for other scenes.
 
-[Native experimental runs](performance-study/native-sweep.json) have a median early mean of 1.278 ms versus the earlier baseline's 1.716 ms. These native samples were sequential, not paired; prefer the paired browser result for the speed claim.
+Native experimental runs (`artifacts/benchmarks/history/docs/space-battle/performance-study/native-sweep.json`) have a median early mean of 1.278 ms versus the earlier baseline's 1.716 ms. These native samples were sequential, not paired; prefer the paired browser result for the speed claim.
 
 21,518 native differential sweeps matched hit/miss, serial and impact-coordinate bits against the unfiltered original path: empty space, stationary/zero-radius rays, origin overlap, compound fixtures, disabled fixtures, removal/slot reuse and large-coordinate cases. Replays retained the original populations, counters and checksums at ticks 600/1200 in both runtimes. This is not exhaustive proof: additional seeds, moving-target boundary cases and long-running low/high profiles were not measured.
 
 [Experimental patch](../../tools/performance/sweep-empty-space.patch) and [differential harness](../../tools/performance/SweepCheck.cs) are retained for reproduction; the patch is **not applied** to the production project. The remaining 20 ms core P95 still misses 60 Hz even before drawing/export.
 
-The dense full-browser probe repeated on the experiment ([run 1](performance-study/web-sweep-live-1.json), [run 2](performance-study/web-sweep-live-2.json), [run 3](performance-study/web-sweep-live-3.json)) measured 16.375 / 16.398 / 16.583 ms for ticks 181-220, versus 23.885 / 26.930 / 26.572 ms previously. Median core-plus-export means were 21.918 versus 33.565 ms. These full-frontend series were sequential, not paired, and still do not meet the full 60 Hz frame budget in the dense interval. Later live tick rates were 59.5-59.9 ticks/s as the workload evolved.
+The dense full-browser probe repeated on the experiment (run 1 (`artifacts/benchmarks/history/docs/space-battle/performance-study/web-sweep-live-1.json`), run 2 (`artifacts/benchmarks/history/docs/space-battle/performance-study/web-sweep-live-2.json`), run 3 (`artifacts/benchmarks/history/docs/space-battle/performance-study/web-sweep-live-3.json`)) measured 16.375 / 16.398 / 16.583 ms for ticks 181-220, versus 23.885 / 26.930 / 26.572 ms previously. Median core-plus-export means were 21.918 versus 33.565 ms. These full-frontend series were sequential, not paired, and still do not meet the full 60 Hz frame budget in the dense interval. Later live tick rates were 59.5-59.9 ticks/s as the workload evolved.
 
 Reproduction tools: [native harness](../../tools/performance/Program.cs), [browser harness](../../tools/web/profile-revisions.mjs), [tool instructions](../../tools/performance/README.md).

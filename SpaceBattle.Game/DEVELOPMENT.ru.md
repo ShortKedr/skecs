@@ -126,10 +126,6 @@ OpenGL; соседний JSON содержит количество сущнос
 
 ## Профилирование Клиента
 
-Для сравнения HUD и headless есть [исследование desktop-таймингов](../docs/space-battle/DESKTOP_TIMING.ru.md): пять свежих процессов с одинаковыми сборками, конфигурацией и итоговой checksum. Воспроизведение: `./tools/space-battle/run-desktop-study.ps1`, затем `python tools/space-battle/analyze_desktop.py`. Запускайте отдельно от ECS-бенчмарков и длинных серий SpaceBattle.
-
-`--profile-paced` ограничивает replay до 60 отрисованных кадров/с: один Step на кадр, VSync выключен. `--profile-warmup 0` записывает холодный старт с тика 1; обычный прогрев продвигает тот же бой. JSON и необязательный CSV сохраняют внутренний HUD-таймер Step и все девять стадий отдельно от wrapper/snapshot/render/total CPU.
-
 После сборки запускайте из корня репозитория:
 
 ```powershell
@@ -152,6 +148,18 @@ SpaceBattle.Game/bin/Release/net8.0/SpaceBattle.Game.exe --profile-frames 3600 -
 кадров и кадров прогрева ограничено миллионом; измеряемое число должно быть
 положительным. `--profile-csv PATH` необязателен. Все пути вывода должны оставаться
 внутри текущего каталога проекта.
+
+Для сравнения HUD и headless есть [исследование desktop-таймингов](../docs/space-battle/DESKTOP_TIMING.ru.md): пять свежих процессов с одинаковыми сборками, конфигурацией и итоговой checksum. Из корня репозитория:
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- run desktop
+dotnet run --project tools/BenchmarkTools -c Release -- report desktop
+dotnet run --project tools/BenchmarkTools -c Release -- verify desktop
+```
+
+[Переносимый .NET CLI](../tools/BenchmarkTools/README.ru.md) выполняет сборку, проверки и последовательные замеры; Python и PowerShell не нужны. Desktop требует рабочего графического устройства. Сырые JSON/CSV/gzip сохраняются в игнорируемом `artifacts/benchmarks/current/desktop`, Markdown/SVG — в `docs/space-battle`. Для отдельного прогона задайте `run desktop --output artifacts/benchmarks/repro/desktop`, затем используйте этот путь с `report desktop --data` или `verify desktop --data`; каталог `report --output` может быть любым внутри проекта. Обычный `run all` выполняет headless-наборы; `run all --include-desktop` явно добавляет это исследование. Завершите другие замеры и сборки перед запуском.
+
+`--profile-paced` ограничивает replay до 60 отрисованных кадров/с: один Step на кадр, VSync выключен. `--profile-warmup 0` записывает холодный старт с тика 1; обычный прогрев продвигает тот же бой. JSON и необязательный CSV сохраняют внутренний HUD-таймер Step и все девять стадий отдельно от wrapper/snapshot/render/total CPU.
 
 CPU-фазы являются измерениями прошедшего времени хоста через Stopwatch, а не
 аппаратными счётчиками тактов CPU. SimulationCPU охватывает Step (текущая

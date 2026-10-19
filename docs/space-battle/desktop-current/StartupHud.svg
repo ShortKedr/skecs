@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="365" viewBox="0 0 1000 365" role="img">
+<title>HUD Mean at tick 30</title><rect width="100%" height="100%" fill="white"/>
+<g font-family="system-ui, sans-serif" fill="#17202a">
+<text x="24" y="32" font-size="22" font-weight="bold">HUD Mean at tick 30</text>
+<text x="24" y="58" font-size="14">ms · lower is better · colour shows relative lag, not statistical significance</text>
+<text x="228" y="111" text-anchor="end" font-size="14">headless-warm-fast</text>
+<rect x="240" y="90" width="63.240981" height="30" fill="#2e9b50"/>
+<text x="311.240981" y="111" font-size="14">0.389377</text>
+<text x="228" y="155" text-anchor="end" font-size="14">headless-warm-paced</text>
+<rect x="240" y="134" width="113.954279" height="30" fill="#c93637"/>
+<text x="361.954279" y="155" font-size="14">0.70162</text>
+<text x="228" y="199" text-anchor="end" font-size="14">desktop-cold-fast-tiering0</text>
+<rect x="240" y="178" width="650" height="30" fill="#c93637"/>
+<text x="898" y="199" font-size="14">4.00207</text>
+<text x="228" y="243" text-anchor="end" font-size="14">desktop-cold-fast-default</text>
+<rect x="240" y="222" width="459.821751" height="30" fill="#c93637"/>
+<text x="707.821751" y="243" font-size="14">2.831137</text>
+<text x="228" y="287" text-anchor="end" font-size="14">desktop-cold-paced-default</text>
+<rect x="240" y="266" width="468.449827" height="30" fill="#c93637"/>
+<text x="716.449827" y="287" font-size="14">2.88426</text>
+</g></svg>

@@ -85,7 +85,7 @@ dotnet Benchmarks.Local/tmp/spatial-verified/bin/SpaceBattle.Headless/release/Sp
 node --test tools/space-battle/test_summarize_spatial.mjs
 ```
 
-[Браузерный профайлер](../../tools/web/profile-revisions.mjs) принимает `--sites` с двумя локальными корнями опубликованных сборок и затем закрывает localhost-серверы. [Генератор сводки](../../tools/space-battle/summarize-spatial.mjs) отказывается обобщать результаты с изменённой траекторией геймплея. Сборки/сырые временные результаты остаются в игнорируемом `Benchmarks.Local/tmp`; отдельные [данные сводки](spatial-optimization/summary.json) содержат независимые средние, диапазоны, native-стадии, счётчики и хеши бинарников.
+[Браузерный профайлер](../../tools/web/profile-revisions.mjs) принимает `--sites` с двумя локальными корнями опубликованных сборок и затем закрывает localhost-серверы. [Генератор сводки](../../tools/space-battle/summarize-spatial.mjs) отказывается обобщать результаты с изменённой траекторией геймплея. Сборки/сырые временные результаты остаются в игнорируемом `Benchmarks.Local/tmp`; отдельные данные сводки (`artifacts/benchmarks/history/docs/space-battle/spatial-optimization/summary.json`) содержат независимые средние, диапазоны, native-стадии, счётчики и хеши бинарников.
 
 ## Что Ещё Затратно
 

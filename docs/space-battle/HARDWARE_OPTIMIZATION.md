@@ -39,7 +39,7 @@ No float reassociation, explicit FMA or fast-math was introduced. Candidate sort
 
 ## Measured Stage Matrix
 
-Initial window 1-300, Step ms. Stage 5 is the retained production implementation; the later split experiment is not included in it. Detailed [native stages](hardware-optimization/native-stages.json), [Mono stages](hardware-optimization/mono-stages.json), [rejected split](hardware-optimization/mono-rejected-split.json) and [store probes](hardware-optimization/store-probes.json) retain all comparison groups.
+Initial window 1-300, Step ms. Stage 5 is the retained production implementation; the later split experiment is not included in it. Detailed native stages (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/native-stages.json`), Mono stages (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/mono-stages.json`), rejected split (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/mono-rejected-split.json`) and store probes (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/store-probes.json`) retain all comparison groups.
 
 | Stage | Native SECS | Mono AOT |
 | --- | ---: | ---: |
@@ -65,7 +65,7 @@ Canvas draw-only CPU submission at the same paused tick 300: before 5.369 ms [5.
 
 The experimental browser CoreCLR/R2R route has been retired and its host/tools removed. The paragraph and JSON below are retained unchanged as historical measurements, not a supported reproduction route. Production browser measurements use stable .NET 8 Mono AOT.
 
-Pinned .NET 11 RC1 crossgen2 partial R2R builds run in real Chromium. Three independent 120-tick replays after 120-tick warmup: ticks 1-60 Step 112.048 ms [109.488,123.055] → 88.062 ms [87.272, 89.478]; 61-120: 159.483 ms [158.798,172.423] → 130.892 ms [129.452,132.338]. Checkpoints/counters/populations match. CPU sampling on 120 ticks finds interpreter leaf samples 84.927% before and 82.179% at stage 5. This is mixed execution, not a compiled-hot-path speed upgrade; longer windows and interpreter-free R2R remain unverified. [Separate R2R measurements](hardware-optimization/r2r-stage5.json).
+Pinned .NET 11 RC1 crossgen2 partial R2R builds run in real Chromium. Three independent 120-tick replays after 120-tick warmup: ticks 1-60 Step 112.048 ms [109.488,123.055] → 88.062 ms [87.272, 89.478]; 61-120: 159.483 ms [158.798,172.423] → 130.892 ms [129.452,132.338]. Checkpoints/counters/populations match. CPU sampling on 120 ticks finds interpreter leaf samples 84.927% before and 82.179% at stage 5. This is mixed execution, not a compiled-hot-path speed upgrade; longer windows and interpreter-free R2R remain unverified. Separate R2R measurements (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/r2r-stage5.json`).
 
 A separate ComponentAccessor microprobe measured direct reads at 1.410 → 0.365 ms, but staged create/destroy at 9.322 → 10.669 ms, with an extra 49,152 accessor bytes at 4096 slots. The API was not adopted in production.
 

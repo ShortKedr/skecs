@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SKECS\SKECS.csproj" />
+    <ProjectReference Include="../benchmarks/SKECS.Benchmarks.Workloads/SKECS.Benchmarks.Workloads.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

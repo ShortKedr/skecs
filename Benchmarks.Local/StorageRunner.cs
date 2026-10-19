@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using SKECS;
 using SKECS.Benchmarks;
@@ -34,20 +35,25 @@ static class StorageRunner
             var archetypes = (IEnumerable)typeof(World).GetField("_archetypeList", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(world)!;
             var chunkCount = 0;
             long nativeBytes = 0;
+            var retained = new List<object>();
             foreach (var archetype in archetypes)
             {
                 var chunks = (IList)archetype.GetType().GetProperty("Chunks")!.GetValue(archetype)!;
                 var stride = (int)archetype.GetType().GetField("_stride", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(archetype)!;
                 chunkCount += chunks.Count;
                 nativeBytes += (long)stride * chunks.Count;
+                retained.Add(new { archetypeIndex = retained.Count, chunkCount = chunks.Count,
+                    chunkBytes = stride, nativeBytes = (long)stride * chunks.Count });
             }
-            samples.Add(new { pass, chunkCount, nativeBytes });
+            samples.Add(new { pass, chunkCount, nativeBytes, archetypes = retained });
             Console.WriteLine($"Storage pass {pass}: {chunkCount} chunks, {nativeBytes:N0} native bytes");
         }
         var output = args.FirstOrDefault(a => a.EndsWith(".json")) ?? "Benchmarks.Local/storage-optimized.json";
         File.WriteAllText(output, JsonSerializer.Serialize(new
         {
             metadata = new { entityCount = entities.Length, passes = 20, payloadBytes = 256,
+                runtime = RuntimeInformation.FrameworkDescription, architecture = RuntimeInformation.ProcessArchitecture.ToString(),
+                machine = BenchmarkMachineLabel.Value, date = DateTimeOffset.Now.ToString("O"),
                 revision = Environment.GetEnvironmentVariable("SKECS_BENCHMARK_REVISION") ?? "optimized working tree",
                 note = "Retained native column storage only, excluding managed arrays and allocator overhead; not timed" }, samples
         }, new JsonSerializerOptions { WriteIndented = true }));

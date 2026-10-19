@@ -39,7 +39,7 @@ Float reassociation, явный FMA и fast-math не добавлены. Сор
 
 ## Измерения По Этапам
 
-Начальное окно 1-300, Step ms. Этап 5 оставлен в production; более поздний split в него не включён. Подробные [native stages](hardware-optimization/native-stages.json), [Mono stages](hardware-optimization/mono-stages.json), [отклонённый split](hardware-optimization/mono-rejected-split.json) и [store probes](hardware-optimization/store-probes.json) сохраняют все группы сравнения.
+Начальное окно 1-300, Step ms. Этап 5 оставлен в production; более поздний split в него не включён. Подробные native stages (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/native-stages.json`), Mono stages (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/mono-stages.json`), отклонённый split (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/mono-rejected-split.json`) и store probes (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/store-probes.json`) сохраняют все группы сравнения.
 
 | Этап | Native SECS | Mono AOT |
 | --- | ---: | ---: |
@@ -65,7 +65,7 @@ Canvas draw-only CPU submission одного paused snapshot тика 300: до 
 
 Экспериментальный браузерный маршрут CoreCLR/R2R снят с поддержки, его хост и инструменты удалены. Абзац и JSON ниже сохранены без изменений как исторические измерения, а не поддерживаемый способ воспроизведения. Production-измерения браузера используют стабильный .NET 8 Mono AOT.
 
-Pinned .NET 11 RC1 crossgen2 partial R2R работает в реальном Chromium. Три независимых replay по 120 тиков после 120-тикового прогрева: тики 1-60 Step 112.048 ms [109.488,123.055] → 88.062 ms [87.272, 89.478]; 61-120: 159.483 ms [158.798,172.423] → 130.892 ms [129.452,132.338]. Checkpoints/counters/populations совпадают. CPU sampling 120 тиков: interpreter leaf samples 84.927% до и 82.179% на этапе 5. Это mixed execution, не compiled-hot-path upgrade; длинные окна и interpreter-free R2R не проверены. [Отдельные R2R измерения](hardware-optimization/r2r-stage5.json).
+Pinned .NET 11 RC1 crossgen2 partial R2R работает в реальном Chromium. Три независимых replay по 120 тиков после 120-тикового прогрева: тики 1-60 Step 112.048 ms [109.488,123.055] → 88.062 ms [87.272, 89.478]; 61-120: 159.483 ms [158.798,172.423] → 130.892 ms [129.452,132.338]. Checkpoints/counters/populations совпадают. CPU sampling 120 тиков: interpreter leaf samples 84.927% до и 82.179% на этапе 5. Это mixed execution, не compiled-hot-path upgrade; длинные окна и interpreter-free R2R не проверены. Отдельные R2R измерения (`artifacts/benchmarks/history/docs/space-battle/hardware-optimization/r2r-stage5.json`).
 
 Отдельный микротест ComponentAccessor: прямые чтения 1.410 → 0.365 ms, но поэтапное создание/уничтожение 9.322 → 10.669 ms и дополнительные 49,152 байта accessor при 4096 слотах. В рабочую реализацию API не включён.
 

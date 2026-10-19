@@ -3,19 +3,19 @@ English | [Русский](README.ru.md)
 # Local ECS Comparisons
 
 This directory is part of the public repository. It contains the reproducible
-five-framework comparison runner, adapters, scripts, and published measurements.
+five-framework comparison runner, adapters, and published reports.
 "Local" refers to running benchmarks on a machine; internal development notes
 belong in `../skecs-private/`.
 
 [Repository](../README.md) | [Benchmark report](../SKECS.Benchmarks/README.md) | [SpaceBattle report](../docs/space-battle/REPORT.md) | [Third-party notices](../THIRD_PARTY_NOTICES.md)
 
-This directory contains the five-framework Stopwatch comparison harness, its adapters, stress backends, retained JSON measurements, and plotting scripts. BenchmarkDotNet suites live separately in `SKECS.Benchmarks` and `SKECS.OtherBenchmarks` and measure SKECS, not all five frameworks.
+This directory contains the five-framework Stopwatch comparison harness, its adapters and stress backends. The portable [.NET tools](../tools/BenchmarkTools/README.md) build, validate, measure, verify and publish reports. BenchmarkDotNet suites live separately in `SKECS.Benchmarks` and `SKECS.OtherBenchmarks` and measure SKECS, not all five frameworks.
 
 ## Source Catalogue
 
 | Framework | Base workload implementation | Stress implementation | SpaceBattle native store | Runtime sources |
 | --- | --- | --- | --- | --- |
-| SKECS | [SkecsWorkload](Adapters.cs), wrapping [ComparisonWorkload](../SKECS.Benchmarks/ComparisonWorkload.cs) | [SkecsStressBackend](../SKECS.Benchmarks/SkecsStressBackend.cs) | [SkecsStore](../SpaceBattle.SKECS/SkecsStore.cs) | [SKECS](../SKECS/) |
+| SKECS | [SkecsWorkload](Adapters.cs), wrapping [ComparisonWorkload](../benchmarks/SKECS.Benchmarks.Workloads/ComparisonWorkload.cs) | [SkecsStressBackend](../benchmarks/SKECS.Benchmarks.Workloads/SkecsStressBackend.cs) | [SkecsStore](../SpaceBattle.SKECS/SkecsStore.cs) | [SKECS](../SKECS/) |
 | LeoECS Lite | [LiteWorkload](Adapters.cs) | [LiteStressBackend](StressAdapters.cs) | [LeoEcsLiteStore](../SpaceBattle.Adapters/LeoEcsLiteStore.cs) | [ecslite/src](vendor/ecslite/src/) |
 | LeoECS Classic | [ClassicWorkload](Adapters.cs) | [ClassicStressBackend](StressAdapters.cs) | [LeoEcsClassicStore](../SpaceBattle.Adapters/LeoEcsClassicStore.cs) | [ecs/src](vendor/ecs/src/) |
 | Morpeh | [MorpehWorkload](Adapters.cs) | [MorpehStressBackend](StressAdapters.cs) | [MorpehStore](../SpaceBattle.Adapters/MorpehStore.cs) | [Morpeh Core](vendor/morpeh/Scellecs.Morpeh/Core/) |
@@ -23,17 +23,19 @@ This directory contains the five-framework Stopwatch comparison harness, its ada
 
 Build definitions: [Comparison.csproj](Comparison.csproj), [StaticLibrary.csproj](StaticLibrary.csproj), [MorpehLibrary.csproj](MorpehLibrary.csproj), and [SpaceBattle.Adapters.csproj](../SpaceBattle.Adapters/SpaceBattle.Adapters.csproj). StaticPack supports StaticEcs; it is not a sixth compared framework. SpaceBattle stores share the [IEcsStore](../SpaceBattle.Core/EcsContract.cs) contract and [NativeStore](../SpaceBattle.Core/NativeStore.cs) identity layer; see the [adapter contract](../SpaceBattle.Adapters/README.md).
 
-The [vendor manifest](vendor-manifest.json) records pinned sources; [check_vendor.py](../tools/check_vendor.py) verifies the distributed inventory. The distribution contains runtime source subsets and exact upstream licenses, not upstream documentation/assets, binary NuGet caches, or generated build products. A normal clone includes these source subsets and needs no vendor download. [fetch.ps1](fetch.ps1) is an optional manifest-driven recovery step requiring network access, not a normal build prerequisite.
+The [vendor manifest](vendor-manifest.json) records pinned sources; `dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor` verifies the distributed inventory. The distribution contains runtime source subsets and exact upstream licenses, not upstream documentation/assets, binary NuGet caches, or generated build products. A normal clone includes these source subsets and needs no vendor download. `dotnet run --project tools/BenchmarkTools -c Release -- restore-vendor` optionally recovers missing files from pinned archives. [VendorRestore.cs](../tools/BenchmarkTools/VendorRestore.cs) checks lengths and hashes before installation and refuses to overwrite changed local sources; downloading requires network access.
 
 Licenses are not uniformly unrestricted MIT: LeoECS Classic offers proprietary or MIT-Red terms, LeoECS Lite uses MIT-Red, and Morpeh, StaticEcs, and StaticPack use MIT. Read the [licensing inventory](../THIRD_PARTY_NOTICES.md) and exact [Classic](vendor/ecs/LICENSE.md), [Lite](vendor/ecslite/LICENSE.md), [Morpeh](vendor/morpeh/LICENSE.md), [StaticEcs](vendor/StaticEcs/LICENSE.md), and [StaticPack](vendor/StaticPack/LICENSE.md) licenses before redistribution. This catalogue is not a legal guarantee.
 
 ## Shared Workloads
 
+The .NET 8 class library [SKECS.Benchmarks.Workloads](../benchmarks/SKECS.Benchmarks.Workloads/SKECS.Benchmarks.Workloads.csproj) supplies `ComparisonWorkload`, `StressContract`, `SkecsStressBackend`, `StressWorkload` and the generated scenario catalog to both this runner and BenchmarkDotNet. Both consumers use project references.
+
 [Program.cs](Program.cs) registers all five base adapters. At 1,000 and 100,000 entities it runs Create, Iterate, Churn, and Destroy: Position/Velocity each contain two floats; movement adds velocity to position; churn adds then removes a one-float Mass component.
 
 Validation checks every entity before timing. Setup, seeding, world disposal, and forced GC are outside timings; Morpeh commits are included. Each case warms for at least 400 ms and retains 20 samples. Create/Destroy use one fresh batch per sample; Iterate/Churn target 30 ms with at most 1,000 repetitions.
 
-[StressRunner.cs](StressRunner.cs), [StressContract.cs](../SKECS.Benchmarks/StressContract.cs), and [StressWorkload.cs](../SKECS.Benchmarks/StressWorkload.cs) share initialized data, shape masks, and seeded operation orders across all five backends. The normal matrix is 100,000/1,000,000 entities, seven workloads, eight samples per case, at least 300 ms warmup, and up to 16 repetitions targeting 30 ms. MixedFrames uses one invocation per sample.
+[StressRunner.cs](StressRunner.cs), [StressContract.cs](../benchmarks/SKECS.Benchmarks.Workloads/StressContract.cs), and [StressWorkload.cs](../benchmarks/SKECS.Benchmarks.Workloads/StressWorkload.cs) share initialized data, shape masks, and seeded operation orders across all five backends. The normal matrix is 100,000/1,000,000 entities, seven workloads, eight samples per case, at least 300 ms warmup, and up to 16 repetitions targeting 30 ms. MixedFrames uses one invocation per sample.
 
 | Stress scenario | One operation |
 | --- | --- |
@@ -62,42 +64,49 @@ prove that two runs came from the same host.
 
 ## Current campaign
 
-The canonical [current report](../docs/benchmarks/current/REPORT.md) links [base raw samples](../docs/benchmarks/current/base.json), [stress raw samples](../docs/benchmarks/current/stress.json), [source/runtime metadata](../docs/benchmarks/current/campaign.json) and three charts. This is the complete fresh five-framework matrix. Files in the directory root and `docs/benchmarks/updated` are retained history; they are not the current ranking.
+The [current report](../docs/benchmarks/current/REPORT.md) presents the complete five-framework base/stress matrix and SVG charts. The [supplement](../docs/benchmarks/current/SUPPLEMENT.md) covers all default SKECS and legacy BenchmarkDotNet cases plus API/storage diagnostics. Raw machine JSON, individual samples, tick CSV/gzip archives and BenchmarkDotNet exports stay in ignored `artifacts/benchmarks/current/`; published Markdown and SVG stay under `docs/`.
 
 ## Reproduce
 
-Run from the repository root, with .NET 8 runtime, an SDK supporting C# 13 (9.0 or newer), and the existing local NuGet cache. This offline command builds Release, validates all adapters, records source/assembly hashes, and runs base then stress with one measurement process at a time:
+Run from the repository root with the .NET 8 runtime and an SDK supporting C# 13 (9.0 or newer). The tool itself targets .NET 8 and uses only its standard library. Python, PowerShell, matplotlib and NumPy are unnecessary. Building the measured projects restores their declared NuGet dependencies; an offline build requires those packages to be cached.
 
-```powershell
-./Benchmarks.Local/run_campaign.ps1 -OutputDirectory Benchmarks.Local/repro-campaign
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- generate --check
+dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
+dotnet run --project tools/BenchmarkTools -c Release -- validate all
+dotnet run --project tools/BenchmarkTools -c Release -- run all
 ```
 
-Stop other benchmarks, game runtimes and builds before timing. `--no-restore` deliberately requires cached dependencies; if absent, populate them separately before measurement. `GeneratePackageOnBuild=false` avoids package generation. The script keeps .NET/NuGet/temp paths inside the project and disables tiering. `-SkipBuild` is intended only for a separately verified fresh Release build. Reproduction writes its own results and does not overwrite canonical published data.
+`run all` builds Release, validates contracts, then runs the five-framework comparison, full headless SpaceBattle and supplemental suites sequentially. It regenerates bilingual reports and SVG charts after each suite. Add `--include-desktop` to include the matched desktop startup study, or select `run desktop`; desktop measurement requires a working graphics device. Stop other builds, benchmarks, games and profilers before timing.
 
-Plot after all measurement processes finish. The plotting scripts require Python with compatible matplotlib/NumPy installations; use the same Python version as compiled packages in the local cache (currently Python 3.12):
-
-```powershell
-$env:PYTHONPATH = "$PWD/Benchmarks.Local/python-packages"
-$env:MPLCONFIGDIR = "$PWD/Benchmarks.Local/matplotlib-cache"
-python Benchmarks.Local/plot.py Benchmarks.Local/repro-campaign/base.json -o Benchmarks.Local/repro-campaign/comparison.png
-python Benchmarks.Local/plot_stress.py Benchmarks.Local/repro-campaign/stress.json --output-dir Benchmarks.Local/repro-campaign
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- run all --include-desktop
+dotnet run --project tools/BenchmarkTools -c Release -- report all
+dotnet run --project tools/BenchmarkTools -c Release -- verify all
 ```
 
-Standalone correctness checks after building:
+`report all` and `verify all` include desktop when its local dataset exists; `--include-desktop` requires it.
 
-```powershell
-dotnet Benchmarks.Local/bin/Release/net8.0/Comparison.dll --validate
-dotnet Benchmarks.Local/bin/Release/net8.0/Comparison.dll --validate-stress
+`report` regenerates published output from saved local inputs; `verify` checks those inputs without changing reports. Both reject missing or inconsistent evidence. The tools retain source, assembly and input hashes and configure project-local .NET/NuGet/temp directories. `--no-build` requires an unchanged build certified by a previous tool invocation.
+
+Use `run comparison`, `run supplement` or `run space-battle` for an individual suite. Keep a reproduction separate from canonical output with `--output`; select its saved data later with `--data`:
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- run comparison --output artifacts/benchmarks/repro/micro
+dotnet run --project tools/BenchmarkTools -c Release -- report comparison --data artifacts/benchmarks/repro/micro --output artifacts/benchmarks/repro/report
+dotnet run --project tools/BenchmarkTools -c Release -- verify comparison --data artifacts/benchmarks/repro/micro
 ```
 
-Base validation checks entity data and lifetime at both measured entity counts. Stress preflight uses 257/4,097 entities, seven scenarios repeated three times, payload round-trip and retired-handle checks. Every measured stress case also validates its full population after warmup and samples. These checks validate this repository's workload/adapter contract; they are not complete upstream test suites.
+For `run all --output <root>`, raw suites occupy `<root>/micro`, `<root>/space-battle` and, when requested, `<root>/desktop`; reports go under each suite's `reports/`. For `report all --data <root> --output <published-root>`, the tool reads those suite subdirectories and creates corresponding publication subdirectories. Raw `run --output` must stay under ignored `artifacts/`; `report --output` may select any directory inside this workspace. See the [CLI guide](../tools/BenchmarkTools/README.md) for defaults and all options.
 
-## All SKECS suites
+`hardware --output artifacts/benchmarks/repro/hardware.json` captures portable CPU/OS metadata and the GC available-memory limit, rather than physical RAM. `report composition` and `verify composition` process saved entity-composition diagnostics separately from timing measurements; see the [CLI guide](../tools/BenchmarkTools/README.md) for complete commands and paths.
 
-The [supplemental campaign](../docs/benchmarks/current/SUPPLEMENT.md) covers every default SKECS BenchmarkDotNet case, the legacy suite and direct API/storage diagnostics. Run `./Benchmarks.Local/run_supplement.ps1`, then `python Benchmarks.Local/report_supplement.py docs/benchmarks/current`. The runner uses the same project-local cache/temp paths and runs each workload sequentially; `supplement.json` records source and input hashes.
+Shared benchmark sources come from the [model](CodeGen/benchmark-model.json) and native API templates in [CodeGen](CodeGen/README.md). After editing inputs, run `dotnet run --project tools/BenchmarkTools -c Release -- generate`. `generate --check` accepts LF or CRLF checkouts, detects stale output without writing, and runs before measurement. Generated native loops preserve framework-specific queries and APIs.
+
+Base validation checks entity data and lifetime at both measured population sizes. Stress preflight uses 257/4,097 entities, all seven scenarios repeated three times, payload round-trips and retired-handle checks. Every measured stress case validates the full population after warmup and samples. These are workload/adapter contract checks, rather than complete upstream test suites.
 
 ## Retained experiments
 
-The [SECS optimization methodology](../docs/benchmarks/optimization-methodology.md) explains preserved baseline/optimized binaries and paired datasets. `results-all-updated.json` / `stress-all-updated.json` and `docs/benchmarks/updated` are the previous complete five-framework run. Other `results*.json`, storage/accessor experiments and BenchmarkDotNet smoke outputs retain their own metadata and scope. Do not mix competitor observations across campaigns or use Dry/smoke timings as a full performance ranking.
+The [optimization methodology](../docs/benchmarks/optimization-methodology.md) explains preserved baseline/optimized binaries and paired historical datasets. Earlier runs and charts retain their own metadata and scope; they do not describe the current ranking. Do not combine observations from different campaigns or use Dry/smoke timings as a full performance ranking.
 
-BenchmarkDotNet launch instructions are in [SKECS.Benchmarks](../SKECS.Benchmarks/README.md). The separate end-to-end simulation and its reproduction live in the [SpaceBattle report](../docs/space-battle/REPORT.md).
+[BenchmarkDotNet suites](../SKECS.Benchmarks/README.md) and the [SpaceBattle guide](../docs/space-battle/README.md) describe their separate workloads.

@@ -1,0 +1,12 @@
+{
+  "basicScenarios": ["Create", "Iterate", "Churn", "Destroy"],
+  "stressScenarios": ["DenseIteration", "SparseIteration", "WideIteration", "RandomLookup", "PayloadChurn", "Recycle10Percent", "MixedFrames"],
+  "shapeBits": 8,
+  "frameworks": [
+    { "name": "SKECS", "basic": "SkecsWorkload", "stress": "SkecsStressBackend" },
+    { "name": "LeoECS Lite", "basic": "LiteWorkload", "stress": "LiteStressBackend" },
+    { "name": "LeoECS Classic", "basic": "ClassicWorkload", "stress": "ClassicStressBackend" },
+    { "name": "Morpeh", "basic": "MorpehWorkload", "stress": "MorpehStressBackend" },
+    { "name": "StaticEcs", "basic": "StaticWorkload", "stress": "StaticStressBackend" }
+  ]
+}

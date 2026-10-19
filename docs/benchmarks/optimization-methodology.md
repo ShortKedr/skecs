@@ -90,19 +90,9 @@ deviation bars describe sample spread; they are not confidence intervals.
 
 ## Reproduction
 
-Run from the repository root with the local matplotlib environment:
+This is the archived 2026-10-11 comparison. Its raw inputs have moved to ignored `artifacts/benchmarks/history/Benchmarks.Local/`; the published `optimization.png` is retained. Exact reproduction requires the historical tools and preserved original baseline binary described above.
 
-```powershell
-$env:PYTHONPATH = (Resolve-Path Benchmarks.Local/python-packages).Path
-python Benchmarks.Local/plot_optimization.py
-```
-
-By default, the renderer reads the two fresh baseline-repeat files and the two
-optimized files named above, then writes `docs/benchmarks/optimization.png`.
-Use `--base-results`, `--base-stress`, `--optimized-results`, or
-`--optimized-stress` to select alternate inputs. It does not modify any result
-JSON. A SECS-only optimized result is sufficient; non-SECS rows are ignored.
-
+Current measurement campaigns and reports use the [.NET CLI](../../tools/BenchmarkTools/README.md): `dotnet run --project tools/BenchmarkTools -c Release -- run all`. The current campaign is a separate measurement from this archived comparison.
 ## Results
 
 ![Paired SECS measurements](optimization.png)

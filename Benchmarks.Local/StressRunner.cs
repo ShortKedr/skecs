@@ -5,14 +5,7 @@ using SKECS.Benchmarks;
 
 static class StressRunner
 {
-    private static readonly (string Name, Func<int, IStressBackend> Factory)[] Backends =
-    [
-        ("SKECS", n => new SkecsStressBackend(n)),
-        ("LeoECS Lite", n => new LiteStressBackend(n)),
-        ("LeoECS Classic", n => new ClassicStressBackend(n)),
-        ("Morpeh", n => new MorpehStressBackend(n)),
-        ("StaticEcs", n => new StaticStressBackend(n))
-    ];
+    private static readonly (string Name, Func<int, IStressBackend> Factory)[] Backends = BenchmarkRegistry.Stress;
 
     public static bool Handle(string[] args)
     {
@@ -80,7 +73,8 @@ static class StressRunner
             var stddev = Math.Sqrt(samples.Sum(x => (x - mean) * (x - mean)) / (sampleCount - 1));
             results.Add(new { framework = backend.Name, scenario, entityCount = count,
                 meanNs = mean, stddevNs = stddev, samplesNs = samples,
-                allocatedBytes = allocations.Average(), repetitions, invocations, checksum = workload.Checksum });
+                allocatedBytes = allocations.Average(), samplesAllocatedBytes = allocations,
+                repetitions, invocations, checksum = workload.Checksum });
             Console.WriteLine($"Stress {backend.Name,-16} {scenario,-16} N={count,7}: {mean / 1e6:F3} ms, SD={stddev / 1e6:F3}, validated {invocations} operations");
             Save(results, sampleCount, args);
         }

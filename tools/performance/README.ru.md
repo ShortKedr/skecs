@@ -2,6 +2,8 @@
 
 # Диагностические инструменты Space Battle
 
+> Устаревший отдельный исследовательский harness. Он не входит в текущий CI, benchmark-кампанию или программный harness проверки. Для текущих измерений используйте [BenchmarkTools](../BenchmarkTools/README.ru.md); статус инструментов указан в [каталоге](../README.ru.md).
+
 Протокол ниже воспроизводит снимки **2026-10-11** (`6150700`, `c51390c`, `d853ae7`) с прежней физикой Aether. Это не инструкция профилирования текущего circle-kernel; для него используйте [HardwareStudy](../HardwareStudy/README.ru.md) и [физические инструменты](../physics/README.ru.md).
 
 [Индекс исследований](../../docs/space-battle/RESEARCH.ru.md) | [Текущая кампания](../../docs/space-battle/REPORT.ru.md)

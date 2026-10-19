@@ -2,40 +2,43 @@
 
 # Бенчмарки SKECS
 
-[Обзор проекта](../README.ru.md) | [Отчёт SpaceBattle](../docs/space-battle/REPORT.ru.md) | [Раннер](../Benchmarks.Local/README.ru.md)
+[Обзор проекта](../README.ru.md) | [Отчёт SpaceBattle](../docs/space-battle/REPORT.ru.md) | [Раннер сравнения](../Benchmarks.Local/README.ru.md) | [Переносимые инструменты](../tools/BenchmarkTools/README.ru.md)
 
 ## Текущее сравнение
 
-[Отчёт текущей кампании](../docs/benchmarks/current/REPORT.ru.md) содержит свежее сравнение SKECS, LeoECS Lite, LeoECS Classic, Morpeh и StaticEcs: 40 базовых и 70 стресс-кейсов, полные сырые выборки, хеши исходников и три графика. Все пять фреймворков измерены заново по общему контракту нагрузки.
+[Текущий отчёт](../docs/benchmarks/current/REPORT.ru.md) сравнивает SKECS, LeoECS Lite, LeoECS Classic, Morpeh и StaticEcs: 40 базовых и 70 стресс-кейсов. Все пять фреймворков используют общий логический контракт нагрузки.
 
-![Базовое сравнение](../docs/benchmarks/current/comparison.png)
+![Базовое сравнение](../docs/benchmarks/current/comparison.svg)
 
-Базовая матрица измеряет Create, Iterate, Churn и Destroy при 1,000 и 100,000 сущностей. Стресс измеряет плотную/разреженную/широкую итерацию, случайный доступ, churn 256-байтового payload, переработку 10% и смешанный пакет из 120 кадров при 100,000 и 1,000,000 сущностей. [Отчёт](../docs/benchmarks/current/REPORT.ru.md) содержит время операций и ограничения измерений. [README раннера](../Benchmarks.Local/README.ru.md) описывает точные сценарии и воспроизведение.
+Create, Iterate, Churn и Destroy выполняются при 1,000 и 100,000 сущностей. Стресс включает плотную/разреженную/широкую итерацию, случайный доступ, churn 256-байтового payload, переработку 10% и смешанный пакет из 120 кадров при 100,000 и 1,000,000 сущностей. Сценарии и проверки описаны в [руководстве раннера](../Benchmarks.Local/README.ru.md).
 
-Это Stopwatch-замеры эквивалентной логической работы через выбранные адаптеры. Они характеризуют записанную машину и снимки исходников; они не устанавливают универсальный рейтинг или производительность Unity/IL2CPP. Погрешности показывают стандартное отклонение выборки. Управляемые аллокации в JSON исключают нативную память.
+Эти Stopwatch-замеры характеризуют записанную машину и снимки исходников. Они не устанавливают универсальный рейтинг или производительность Unity/IL2CPP. Погрешности — стандартное отклонение выборки; управляемые аллокации исключают нативную память. Сырые выборки, метаданные и хеши хранятся в игнорируемом `artifacts/benchmarks/current/micro`; Markdown и SVG публикуются в `docs/benchmarks/current`.
 
-## Наборы BenchmarkDotNet для SKECS
+## Наборы BenchmarkDotNet SKECS
 
-[ComparisonBenchmarks](ComparisonBenchmarks.cs) использует ту же [базовую нагрузку](ComparisonWorkload.cs), что и раннер пяти фреймворков. [StressBenchmarks](StressBenchmarks.cs) использует ту же [стресс-нагрузку](StressWorkload.cs). [OptimizedApiBenchmarks](OptimizedApiBenchmarks.cs) проверяет отдельные API factory/accessor SKECS; эти замеры не подставляются в общее сравнение. [Program.cs](Program.cs) также сохраняет исходные бенчмарки итерации/churn. `SKECS.OtherBenchmarks` содержит отдельный legacy-набор.
+[ComparisonBenchmarks](ComparisonBenchmarks.cs) и [StressBenchmarks](StressBenchmarks.cs), как и раннер пяти ECS, ссылаются на .NET 8 [библиотеку общих нагрузок](../benchmarks/SKECS.Benchmarks.Workloads/SKECS.Benchmarks.Workloads.csproj). Общие [базовая нагрузка](../benchmarks/SKECS.Benchmarks.Workloads/ComparisonWorkload.cs) и [стресс-нагрузка](../benchmarks/SKECS.Benchmarks.Workloads/StressWorkload.cs) имеют одну скомпилированную реализацию.
 
-BenchmarkDotNet здесь измеряет только SKECS. Быстрая проверка запуска после Release-сборки:
+[OptimizedApiBenchmarks](OptimizedApiBenchmarks.cs) проверяет отдельные factory/accessor API. [Program.cs](Program.cs) сохраняет исходные бенчмарки итерации/churn, а `SKECS.OtherBenchmarks` содержит legacy-набор. BenchmarkDotNet здесь измеряет SKECS; результаты оптимизированных API отделены от общего сравнения.
 
-```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
-dotnet build SKECS.Benchmarks/SKECS.Benchmarks.csproj -c Release --no-restore -p:GeneratePackageOnBuild=false -m:1
-dotnet SKECS.Benchmarks/bin/Release/net8.0/SKECS.Benchmarks.dll --filter '*ComparisonBenchmarks.Iterate*' --job Dry --inProcess --artifacts Benchmarks.Local/repro-bdn-smoke
+Запускайте из корня репозитория с runtime .NET 8 и SDK, поддерживающим C# 13 (9.0 или новее):
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- generate --check
+dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
+dotnet run --project tools/BenchmarkTools -c Release -- validate all
+dotnet run --project tools/BenchmarkTools -c Release -- run supplement
+dotnet run --project tools/BenchmarkTools -c Release -- report supplement
+dotnet run --project tools/BenchmarkTools -c Release -- verify supplement
 ```
 
-Dry job проверяет запуск и выполнение нагрузки. В [дополнительном отчёте](../docs/benchmarks/current/SUPPLEMENT.ru.md) — свежие замеры всех 34 стандартных кейсов этого набора и 51 legacy-кейса: Short/InProcess, три прогревочные и восемь измеряемых итераций. Там же десять кейсов прямого создания/аксессоров и диагностика сохранённого нативного хранилища. Воспроизводите их последовательно, отдельно от сравнения пяти ECS и SpaceBattle:
+[Дополнительный отчёт](../docs/benchmarks/current/SUPPLEMENT.ru.md) покрывает 34 стандартных кейса этого проекта и 51 legacy-кейс с Short/InProcess, тремя прогревочными и восемью измеряемыми итерациями, прямое создание/аксессоры и диагностику сохранённого хранилища. Переносимый .NET-инструмент собирает и запускает их последовательно и сохраняет полные экспорты BenchmarkDotNet локально. Отчётам и SVG не нужны Python или PowerShell.
 
-```powershell
-./Benchmarks.Local/run_supplement.ps1
-python Benchmarks.Local/report_supplement.py docs/benchmarks/current
-```
+`run all` также измеряет сравнение пяти ECS и полный headless SpaceBattle. Замер старта desktop включается явно: `run desktop` или `run all --include-desktop`. `report all` и `verify all` включают сохранённые desktop-данные при их наличии; `--include-desktop` требует их.
 
-Режим `SKECS_STRESS_EXTREME=1` с пятью миллионами сущностей — отдельная необязательная матрица. InProcess не требует restore сгенерированных дочерних проектов; изоляция процесса отличается от стандартного toolchain BenchmarkDotNet.
+Для отдельного вывода используйте `run supplement --output artifacts/benchmarks/repro/micro`, затем `report supplement --data artifacts/benchmarks/repro/micro --output artifacts/benchmarks/repro/report` и `verify supplement --data artifacts/benchmarks/repro/micro`. Перед каждым суффиксом укажите `dotnet run --project tools/BenchmarkTools -c Release --`. Все параметры — в [руководстве CLI](../tools/BenchmarkTools/README.ru.md).
+
+Матрица `SKECS_STRESS_EXTREME=1` на пять миллионов сущностей остаётся отдельным необязательным режимом. Изоляция InProcess отличается от стандартного toolchain BenchmarkDotNet. Dry/smoke проверяют запуск и выполнение, но не являются полным рейтингом производительности.
 
 ## Исторические эксперименты
 
-[Методология оптимизации от 2026-10-11](../docs/benchmarks/optimization-methodology.ru.md) описывает отдельный эксперимент SECS до/после и сохранённые бинарники для его интерпретации. [Предыдущая база](../Benchmarks.Local/results-all-updated.json) и [стресс](../Benchmarks.Local/stress-all-updated.json) доступны вместе с [предыдущими графиками](../docs/benchmarks/updated/comparison.png). Это сохранённая история, а не сегодняшний рейтинг. Пересборка текущих исходников не воспроизводит старый baseline-бинарник.
+[Методология оптимизации 2026-10-11](../docs/benchmarks/optimization-methodology.ru.md) описывает отдельный эксперимент SECS до/после и сохранённые бинарники для его интерпретации. [Прежние графики](../docs/benchmarks/updated/comparison.png) сохраняют исторический контекст. Сырые исторические замеры являются локальными артефактами; пересборка текущих исходников не воспроизводит старый baseline-бинарник.

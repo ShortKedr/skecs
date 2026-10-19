@@ -41,23 +41,32 @@ __pycache__/
 /Benchmarks.Local/test-results/
 /Benchmarks.Local/repro-*/
 
-# Current SpaceBattle report publishes JSON, summaries and tick-CSV hashes.
+# Generated benchmark inputs and raw exports are local artifacts, never documentation.
+/Benchmarks.Local/*.json
+!/Benchmarks.Local/vendor-manifest.json
+/docs/benchmarks/**/*.json
+/docs/benchmarks/**/bdn-raw/
+/docs/space-battle/current/*.json
+/docs/space-battle/desktop-current/*.json
+/docs/space-battle/composition/*.json
+/docs/space-battle/custom/*.json
+/docs/space-battle/finite-2026-10-14/*.json
+/docs/space-battle/game-current/*.json
+/docs/space-battle/hardware-optimization/*.json
+/docs/space-battle/performance-study/*.json
+/docs/space-battle/results/*.json
+/docs/space-battle/spatial-optimization/*.json
+/docs/space-battle/frontend.json
+/docs/space-battle/hardware.json
+/docs/space-battle/physics-experiment-summary.json
+/docs/space-battle/**/*.ticks.csv.gz
+/docs/space-battle/**/*.ticks.csv
 /docs/space-battle/current/*.ticks.csv
 /docs/space-battle/finite-2026-10-14/*.ticks.csv
 /docs/space-battle/game-current/*.ticks.csv
 /docs/space-battle/desktop-current/*.ticks.csv
 
-# Retain generated measurement tables, not the generated benchmark executables.
-!/Benchmarks.Local/bdn-*/
-/Benchmarks.Local/bdn-*/**
-!/Benchmarks.Local/bdn-*/results/
-!/Benchmarks.Local/bdn-*/results/*.md
-!/Benchmarks.Local/bdn-*/results/*.csv
-!/Benchmarks.Local/optimization-bdn-artifacts/
-/Benchmarks.Local/optimization-bdn-artifacts/**
-!/Benchmarks.Local/optimization-bdn-artifacts/results/
-!/Benchmarks.Local/optimization-bdn-artifacts/results/*.md
-!/Benchmarks.Local/optimization-bdn-artifacts/results/*.csv
+# BenchmarkDotNet intermediate tables and build outputs stay ignored.
 
 # Publish only the pinned runtime source subsets and their original licenses.
 # Keep all other upstream files locally, without distributing docs/assets/tools.

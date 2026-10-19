@@ -37,24 +37,36 @@ Tuning values are implementation choices, not proof of balanced matchups. A perf
 
 ## Benchmark Reproduction
 
-Run from the repository root. Build and validate before measurement; finish other builds, rendering, profilers and browser tests before timing. Do not mix configurations or revisions.
+Run from the repository root with the .NET 8 runtime and an SDK supporting C# 13 (9.0 or newer). The [portable .NET CLI](../../tools/BenchmarkTools/README.md) builds Release, validates adapters, measures sequentially and creates bilingual Markdown/SVG reports. Python and PowerShell are unnecessary; builds restore the measured projects' NuGet dependencies.
 
-Published JSON uses the anonymous `Machine` label `local-machine`; hardware
-details, runtime and source revisions remain recorded for interpretation.
-Use distinct neutral `SKECS_BENCHMARK_MACHINE_LABEL` values when combining runs
-from different computers; the default label does not establish host identity.
-
-The preserved benchmark artifacts predate the product rename. Their `SECS`
-framework labels, JSON/CSV names, chart labels, and source hashes identify the
-measured historical build and remain unchanged; current documentation calls the
-product SKECS.
-
-The current suite measures five ECS implementations on exactly one real game workload: profile `high`, preset `game`, and gameplay `ChurnMultiplier=2`. It adds no synthetic churn, diagnostic profiles, inert entity pool, or pre-Step churn hook. Each case measures 108000 ticks after 600 separate warmup ticks:
-
-```powershell
-./tools/space-battle/run-suite.ps1 -OutputDirectory docs/space-battle/current
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- generate --check
+dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
+dotnet run --project tools/BenchmarkTools -c Release -- validate space-battle
+dotnet run --project tools/BenchmarkTools -c Release -- run space-battle
+dotnet run --project tools/BenchmarkTools -c Release -- report space-battle
+dotnet run --project tools/BenchmarkTools -c Release -- verify space-battle
 ```
 
-`-SkipBuild` reuses the prepared Release host. Short `-Ticks`/`-Warmup` overrides are smoke checks; give them a separate output directory. The current report records full Step totals, nine stage means, 600-tick HUD windows, and short opening phases. The [previous game report](GAME_REPORT.md) and [finite battle report](REPORT_2026-10-14_FINITE.md) used a gameplay multiplier to vary churn, so their profile timings describe different battle trajectories.
+The current suite measures five ECS implementations on one real game workload: profile `high`, preset `game`, gameplay `ChurnMultiplier=2`, and 108000 measured ticks after 600 separate warmup ticks. It adds no synthetic churn or diagnostic entity pools. The report records full Step totals, nine stage means, 600-tick HUD windows and short opening phases.
+
+Raw JSON, tick CSV/gzip, metadata and hashes remain local in ignored `artifacts/benchmarks/current/space-battle`. Published Markdown reports and SVG charts live under `docs/space-battle`. `report` and `verify` validate archives and recompute complete tick evidence using .NET. A fresh clone can read publications; regenerating them requires retained local raw inputs.
+
+`run all` runs the headless collection: five-framework comparison, full headless SpaceBattle and supplemental microbenchmarks. Desktop measurement is explicit:
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- run desktop
+dotnet run --project tools/BenchmarkTools -c Release -- run all --include-desktop
+dotnet run --project tools/BenchmarkTools -c Release -- report all
+dotnet run --project tools/BenchmarkTools -c Release -- verify all
+```
+
+Desktop requires a working graphics device. `report all` and `verify all` include saved desktop data when present; `--include-desktop` requires it. Finish other builds, games, rendering, profilers and browser tests before timing. Keep configurations and revisions consistent.
+
+Use `run space-battle --output artifacts/benchmarks/repro/space-battle` for separate raw output, then `report space-battle --data artifacts/benchmarks/repro/space-battle --output artifacts/benchmarks/repro/report` and `verify space-battle --data artifacts/benchmarks/repro/space-battle`, each with the same `dotnet run --project tools/BenchmarkTools -c Release --` prefix. All paths stay inside this workspace. `--no-build` requires an unchanged certified build. Short `--ticks`/`--warmup` overrides are smoke checks with separate `--output`; they do not replace the full report.
+
+The `Machine` field uses the anonymous `local-machine` label; hardware, runtime and revisions remain recorded for interpretation. Assign distinct neutral `SKECS_BENCHMARK_MACHINE_LABEL` values when combining different computers; the default label does not establish host identity.
+
+Historical results retain their original `SECS` labels and hashes. The [previous game report](GAME_REPORT.md) and [finite battle report](REPORT_2026-10-14_FINITE.md) varied gameplay multipliers to change churn, so their profiles describe different battle trajectories.
 
 The [2026-10-11 report](REPORT_2026-10-11.md) preserves the `predictive-neutral-v1` Aether campaign, its measurements and analysis scope. Its source links navigate to current files; they do not restore the historical implementation. No verified source snapshot or command for an exact historical rerun is identified here, and current suite commands produce different workloads. See the [historical systems catalogue](SYSTEMS.md) for the measured composition. These results do not establish current-source performance. The [cover workflow](COVER.md) produces an illustration, not timing evidence.

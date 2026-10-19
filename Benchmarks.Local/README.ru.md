@@ -3,19 +3,19 @@
 # Локальные сравнения ECS
 
 Эта папка — часть публичного репозитория. Здесь находятся воспроизводимый
-раннер сравнения пяти ECS, адаптеры, скрипты и опубликованные замеры. `Local`
+раннер сравнения пяти ECS, адаптеры и опубликованные отчёты. `Local`
 относится к запуску бенчмарков на машине; внутренние заметки по разработке
 хранятся в `../skecs-private/`.
 
 [Репозиторий](../README.ru.md) | [Отчёт о бенчмарках](../SKECS.Benchmarks/README.ru.md) | [Отчёт SpaceBattle](../docs/space-battle/REPORT.ru.md) | [Уведомления о сторонних компонентах](../THIRD_PARTY_NOTICES.ru.md)
 
-Здесь находятся сравнительный Stopwatch-раннер пяти фреймворков, адаптеры, стресс-бэкенды, сохранённые JSON-замеры и скрипты графиков. Наборы BenchmarkDotNet расположены отдельно в `SKECS.Benchmarks` и `SKECS.OtherBenchmarks` и измеряют SKECS, а не все пять фреймворков.
+Здесь находятся сравнительный Stopwatch-раннер пяти фреймворков, адаптеры и стресс-бэкенды. Переносимые [.NET-инструменты](../tools/BenchmarkTools/README.ru.md) выполняют сборку, проверки, замеры и публикацию отчётов. Наборы BenchmarkDotNet расположены отдельно в `SKECS.Benchmarks` и `SKECS.OtherBenchmarks` и измеряют SKECS, а не все пять фреймворков.
 
 ## Каталог исходников
 
 | Фреймворк | Реализация базовой нагрузки | Стресс-реализация | Нативное хранилище SpaceBattle | Исходники runtime |
 | --- | --- | --- | --- | --- |
-| SKECS | [SkecsWorkload](Adapters.cs), обёртка [ComparisonWorkload](../SKECS.Benchmarks/ComparisonWorkload.cs) | [SkecsStressBackend](../SKECS.Benchmarks/SkecsStressBackend.cs) | [SkecsStore](../SpaceBattle.SKECS/SkecsStore.cs) | [SKECS](../SKECS/) |
+| SKECS | [SkecsWorkload](Adapters.cs), обёртка [ComparisonWorkload](../benchmarks/SKECS.Benchmarks.Workloads/ComparisonWorkload.cs) | [SkecsStressBackend](../benchmarks/SKECS.Benchmarks.Workloads/SkecsStressBackend.cs) | [SkecsStore](../SpaceBattle.SKECS/SkecsStore.cs) | [SKECS](../SKECS/) |
 | LeoECS Lite | [LiteWorkload](Adapters.cs) | [LiteStressBackend](StressAdapters.cs) | [LeoEcsLiteStore](../SpaceBattle.Adapters/LeoEcsLiteStore.cs) | [ecslite/src](vendor/ecslite/src/) |
 | LeoECS Classic | [ClassicWorkload](Adapters.cs) | [ClassicStressBackend](StressAdapters.cs) | [LeoEcsClassicStore](../SpaceBattle.Adapters/LeoEcsClassicStore.cs) | [ecs/src](vendor/ecs/src/) |
 | Morpeh | [MorpehWorkload](Adapters.cs) | [MorpehStressBackend](StressAdapters.cs) | [MorpehStore](../SpaceBattle.Adapters/MorpehStore.cs) | [Morpeh Core](vendor/morpeh/Scellecs.Morpeh/Core/) |
@@ -23,17 +23,19 @@
 
 Проекты сборки: [Comparison.csproj](Comparison.csproj), [StaticLibrary.csproj](StaticLibrary.csproj), [MorpehLibrary.csproj](MorpehLibrary.csproj) и [SpaceBattle.Adapters.csproj](../SpaceBattle.Adapters/SpaceBattle.Adapters.csproj). StaticPack обслуживает StaticEcs и не является шестым сравниваемым фреймворком. Хранилища SpaceBattle используют общий контракт [IEcsStore](../SpaceBattle.Core/EcsContract.cs) и слой идентичности [NativeStore](../SpaceBattle.Core/NativeStore.cs); см. [контракт адаптеров](../SpaceBattle.Adapters/README.ru.md).
 
-[Манифест vendor](vendor-manifest.json) фиксирует исходники; [check_vendor.py](../tools/check_vendor.py) проверяет распространяемый состав. Поставка содержит подмножества исходников runtime и точные upstream-лицензии, но не upstream-документацию/ассеты, бинарные NuGet-кэши или результаты сборки. Обычный клон уже содержит эти исходники и не требует скачивания vendor. [fetch.ps1](fetch.ps1) является необязательным восстановлением по манифесту с доступом к сети, а не обязательным этапом сборки.
+[Манифест vendor](vendor-manifest.json) фиксирует исходники; `dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor` проверяет распространяемый состав. Поставка содержит подмножества исходников runtime и точные upstream-лицензии, но не upstream-документацию/ассеты, бинарные NuGet-кэши или результаты сборки. Обычный клон уже содержит эти исходники и не требует скачивания vendor. `dotnet run --project tools/BenchmarkTools -c Release -- restore-vendor` необязательно восстанавливает отсутствующие файлы из закреплённых архивов. Реализация [VendorRestore.cs](../tools/BenchmarkTools/VendorRestore.cs) проверяет размеры и хеши до установки и отказывается перезаписывать изменённые локальные исходники; загрузка требует сети.
 
 Лицензии не являются единообразно неограниченными MIT: LeoECS Classic предлагает проприетарные условия или MIT-Red, LeoECS Lite использует MIT-Red, Morpeh, StaticEcs и StaticPack используют MIT. Перед распространением прочтите [лицензионный реестр](../THIRD_PARTY_NOTICES.ru.md) и точные лицензии [Classic](vendor/ecs/LICENSE.md), [Lite](vendor/ecslite/LICENSE.md), [Morpeh](vendor/morpeh/LICENSE.md), [StaticEcs](vendor/StaticEcs/LICENSE.md), [StaticPack](vendor/StaticPack/LICENSE.md). Этот каталог не является юридической гарантией.
 
 ## Общие нагрузки
 
+Библиотека .NET 8 [SKECS.Benchmarks.Workloads](../benchmarks/SKECS.Benchmarks.Workloads/SKECS.Benchmarks.Workloads.csproj) предоставляет `ComparisonWorkload`, `StressContract`, `SkecsStressBackend`, `StressWorkload` и сгенерированный каталог сценариев раннеру и BenchmarkDotNet. Оба используют ссылки на проект.
+
 [Program.cs](Program.cs) регистрирует все пять базовых адаптеров. На 1 000 и 100 000 сущностей выполняются Create, Iterate, Churn и Destroy: Position/Velocity содержат по два float; движение прибавляет скорость к позиции; churn добавляет и затем удаляет Mass с одним float.
 
 Перед замерами проверяются все сущности. Подготовка, заполнение мира, его освобождение и принудительный GC не измеряются; commit Morpeh включён. Каждый случай прогревается минимум 400 мс и сохраняет 20 выборок. Create/Destroy выполняют один свежий пакет на выборку; Iterate/Churn стремятся к 30 мс, максимум 1 000 повторов.
 
-[StressRunner.cs](StressRunner.cs), [StressContract.cs](../SKECS.Benchmarks/StressContract.cs) и [StressWorkload.cs](../SKECS.Benchmarks/StressWorkload.cs) используют одинаковые начальные данные, маски состава и порядки операций с фиксированным seed для всех пяти бэкендов. Обычная матрица: 100 000/1 000 000 сущностей, семь нагрузок, восемь выборок на случай, прогрев минимум 300 мс, до 16 повторов с целевыми 30 мс. MixedFrames выполняется один раз на выборку.
+[StressRunner.cs](StressRunner.cs), [StressContract.cs](../benchmarks/SKECS.Benchmarks.Workloads/StressContract.cs) и [StressWorkload.cs](../benchmarks/SKECS.Benchmarks.Workloads/StressWorkload.cs) используют одинаковые начальные данные, маски состава и порядки операций с фиксированным seed для всех пяти бэкендов. Обычная матрица: 100 000/1 000 000 сущностей, семь нагрузок, восемь выборок на случай, прогрев минимум 300 мс, до 16 повторов с целевыми 30 мс. MixedFrames выполняется один раз на выборку.
 
 | Стресс-сценарий | Одна операция |
 | --- | --- |
@@ -62,42 +64,49 @@ RNG, сортировка, подготовка, проверки, освобо�
 
 ## Текущая кампания
 
-Канонический [текущий отчёт](../docs/benchmarks/current/REPORT.ru.md) содержит [базовые сырые замеры](../docs/benchmarks/current/base.json), [стресс-замеры](../docs/benchmarks/current/stress.json), [метаданные исходников/runtime](../docs/benchmarks/current/campaign.json) и три графика. Это полная свежая матрица пяти фреймворков. Файлы в корне каталога и `docs/benchmarks/updated` — сохранённая история, а не текущий рейтинг.
+[Текущий отчёт](../docs/benchmarks/current/REPORT.ru.md) содержит полную базовую/стресс-матрицу пяти ECS и SVG-графики. [Дополнение](../docs/benchmarks/current/SUPPLEMENT.ru.md) покрывает все стандартные и legacy-кейсы BenchmarkDotNet SKECS и диагностику API/storage. Машинные JSON, отдельные выборки, tick CSV/gzip и экспорты BenchmarkDotNet хранятся в игнорируемом `artifacts/benchmarks/current/`; Markdown и SVG публикуются в `docs/`.
 
 ## Воспроизведение
 
-Запускайте из корня репозитория с runtime .NET 8, SDK с поддержкой C# 13 (9.0 или новее) и существующим локальным NuGet-кешем. Эта offline-команда собирает Release, проверяет все адаптеры, записывает хеши исходников/сборок и последовательно запускает базу и стресс с одним измерительным процессом одновременно:
+Запускайте из корня репозитория с runtime .NET 8 и SDK, поддерживающим C# 13 (9.0 или новее). Сам инструмент рассчитан на .NET 8 и использует только стандартную библиотеку. Python, PowerShell, matplotlib и NumPy не нужны. Сборка измеряемых проектов восстанавливает объявленные NuGet-зависимости; для offline-сборки пакеты должны быть в кеше.
 
-```powershell
-./Benchmarks.Local/run_campaign.ps1 -OutputDirectory Benchmarks.Local/repro-campaign
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- generate --check
+dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
+dotnet run --project tools/BenchmarkTools -c Release -- validate all
+dotnet run --project tools/BenchmarkTools -c Release -- run all
 ```
 
-Остановите другие бенчмарки, игровые runtime и сборки перед измерениями. `--no-restore` намеренно требует закешированные зависимости; при их отсутствии подготовьте их отдельно до измерений. `GeneratePackageOnBuild=false` отключает создание пакетов. Скрипт сохраняет .NET/NuGet/temp внутри проекта и отключает tiering. `-SkipBuild` предназначен только для отдельно проверенной свежей Release-сборки. Воспроизведение пишет собственные результаты и не перезаписывает канонические опубликованные данные.
+`run all` собирает Release, проверяет контракты и последовательно запускает сравнение пяти ECS, полный headless SpaceBattle и дополнительные наборы. После каждого набора создаются двуязычные отчёты и SVG. Добавьте `--include-desktop` для сопоставленного исследования старта desktop или выберите `run desktop`; desktop-замеру требуется рабочее графическое устройство. Перед замерами завершите другие сборки, бенчмарки, игры и профилировщики.
 
-Стройте графики после завершения всех измерительных процессов. Скриптам нужны Python с совместимыми matplotlib/NumPy; используйте ту же версию Python, для которой собраны пакеты в локальном кеше (сейчас Python 3.12):
-
-```powershell
-$env:PYTHONPATH = "$PWD/Benchmarks.Local/python-packages"
-$env:MPLCONFIGDIR = "$PWD/Benchmarks.Local/matplotlib-cache"
-python Benchmarks.Local/plot.py Benchmarks.Local/repro-campaign/base.json -o Benchmarks.Local/repro-campaign/comparison.png
-python Benchmarks.Local/plot_stress.py Benchmarks.Local/repro-campaign/stress.json --output-dir Benchmarks.Local/repro-campaign
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- run all --include-desktop
+dotnet run --project tools/BenchmarkTools -c Release -- report all
+dotnet run --project tools/BenchmarkTools -c Release -- verify all
 ```
 
-Отдельные проверки корректности после сборки:
+`report all` и `verify all` включают desktop при наличии локальных данных; `--include-desktop` требует их.
 
-```powershell
-dotnet Benchmarks.Local/bin/Release/net8.0/Comparison.dll --validate
-dotnet Benchmarks.Local/bin/Release/net8.0/Comparison.dll --validate-stress
+`report` заново создаёт публикации из локальных исходных данных; `verify` проверяет их без изменения отчётов. Обе команды отклоняют неполные и несогласованные данные. Инструменты сохраняют хеши исходников, сборок и входных файлов, настраивают локальные каталоги .NET/NuGet/temp. `--no-build` требует неизменённой сборки, подтверждённой предыдущим запуском инструмента.
+
+Отдельные наборы: `run comparison`, `run supplement`, `run space-battle`. Для отдельного воспроизведения задайте `--output`, затем читайте сохранённые данные через `--data`:
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- run comparison --output artifacts/benchmarks/repro/micro
+dotnet run --project tools/BenchmarkTools -c Release -- report comparison --data artifacts/benchmarks/repro/micro --output artifacts/benchmarks/repro/report
+dotnet run --project tools/BenchmarkTools -c Release -- verify comparison --data artifacts/benchmarks/repro/micro
 ```
 
-Базовая проверка проверяет данные и жизненный цикл при обоих измеряемых размерах популяции. Стресс-проверка использует 257/4,097 сущностей, семь сценариев по три повтора, добавление/удаление payload и устаревшие handles. Каждый измеренный стресс-кейс также проверяет всю популяцию после прогрева и замеров. Эти проверки подтверждают контракт нагрузки/адаптеров в этом репозитории; они не являются полными upstream-наборами тестов.
+При `run all --output <root>` данные находятся в `<root>/micro`, `<root>/space-battle` и, если запрошен, `<root>/desktop`, а отчёты — в `reports/` внутри каждого набора. `report all --data <root> --output <published-root>` читает эти подкаталоги и создаёт соответствующие каталоги публикаций. Сырые данные `run --output` должны находиться в игнорируемом `artifacts/`; публикации `report --output` могут находиться в любом каталоге внутри workspace. Значения по умолчанию и параметры описаны в [руководстве CLI](../tools/BenchmarkTools/README.ru.md).
 
-## Все наборы SKECS
+Команда `hardware --output artifacts/benchmarks/repro/hardware.json` сохраняет переносимые сведения о CPU/OS и доступном лимите памяти GC, а не физической RAM. `report composition` и `verify composition` обрабатывают сохранённую диагностику состава сущностей отдельно от замеров; полные команды и пути — в [руководстве CLI](../tools/BenchmarkTools/README.ru.md).
 
-[Дополнительная кампания](../docs/benchmarks/current/SUPPLEMENT.ru.md) покрывает все стандартные кейсы BenchmarkDotNet SKECS, legacy-набор и диагностику прямых API/storage. Запуск: `./Benchmarks.Local/run_supplement.ps1`, затем `python Benchmarks.Local/report_supplement.py docs/benchmarks/current`. Раннер использует локальные каталоги cache/temp проекта и выполняет нагрузки последовательно; `supplement.json` фиксирует хеши исходников и входных данных.
+Общие исходники создаются из [модели](CodeGen/benchmark-model.json) и шаблонов нативных API в [CodeGen](CodeGen/README.ru.md). После изменения входных файлов выполните `dotnet run --project tools/BenchmarkTools -c Release -- generate`. `generate --check` принимает LF и CRLF, обнаруживает устаревшие файлы без записи и выполняется перед замерами. Сгенерированные циклы сохраняют нативные запросы и API фреймворков.
+
+Базовая проверка проверяет данные и жизненный цикл при обоих размерах популяции. Стресс-проверка использует 257/4,097 сущностей, все семь сценариев по три повтора, добавление/удаление payload и устаревшие handles. Измеряемые стресс-кейсы проверяют всю популяцию после прогрева и выборок. Это проверки контракта нагрузки/адаптера, а не полные upstream-наборы тестов.
 
 ## Сохранённые эксперименты
 
-[Методология оптимизации SECS](../docs/benchmarks/optimization-methodology.ru.md) описывает сохранённые бинарники baseline/optimized и парные данные. `results-all-updated.json` / `stress-all-updated.json` и `docs/benchmarks/updated` — предыдущий полный прогон пяти фреймворков. Остальные `results*.json`, эксперименты storage/accessor и BenchmarkDotNet smoke сохраняют свои метаданные и границы применимости. Не смешивайте наблюдения конкурентов из разных кампаний и не используйте времена Dry/smoke как полный рейтинг производительности.
+[Методология оптимизации](../docs/benchmarks/optimization-methodology.ru.md) объясняет сохранённые baseline/optimized-бинарники и парные исторические данные. Прежние прогоны и графики сохраняют собственные метаданные и границы применимости; они не описывают текущий рейтинг. Не смешивайте наблюдения из разных кампаний и не используйте Dry/smoke как полный рейтинг.
 
-Инструкции запуска BenchmarkDotNet находятся в [SKECS.Benchmarks](../SKECS.Benchmarks/README.ru.md). Отдельная сквозная симуляция и её воспроизведение — в [отчёте SpaceBattle](../docs/space-battle/REPORT.ru.md).
+Отдельные нагрузки описаны в руководствах [BenchmarkDotNet](../SKECS.Benchmarks/README.ru.md) и [SpaceBattle](../docs/space-battle/README.ru.md).

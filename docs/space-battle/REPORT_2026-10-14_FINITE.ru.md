@@ -276,29 +276,16 @@ Mean HUD усредняет последние до 600 тиков, тогда �
 
 - CPU: AMD Ryzen 9 9900X 12-Core Processor; RAM: 61.49 GiB.
 - Runtime: .NET 8.0.32; OS: Microsoft Windows 10.0.26200; tiered compilation: `0`.
-- Base commit: `ed0f4841a3b597e8f7ee7251b3d7e982b43d676a`; measured source SHA256: [finite-2026-10-14/manifest.json](finite-2026-10-14/manifest.json).
-- [JSON](finite-2026-10-14/), [summary.csv](finite-2026-10-14/summary.csv), [hardware.json](finite-2026-10-14/hardware.json).
+- Base commit: `ed0f4841a3b597e8f7ee7251b3d7e982b43d676a`; measured source SHA256: finite-2026-10-14/manifest.json (`artifacts/benchmarks/history/docs/space-battle/finite-2026-10-14/manifest.json`).
+- `artifacts/benchmarks/history/docs/space-battle/finite-2026-10-14/`, [summary.csv](finite-2026-10-14/summary.csv), hardware.json (`artifacts/benchmarks/history/docs/space-battle/finite-2026-10-14/hardware.json`).
 
 Манифест фиксирует исходники и хеши входных файлов; каждый JSON — точные upstream pins и SHA256 всех измеряемых DLL. Поле Provenance.Sources.SECS в старом headless host содержит описательную историческую строку; точная ревизия и исходники этой кампании задаются манифестом.
 
 ## Воспроизведение
 
-Из корня проекта, с .NET 8, SDK с поддержкой C# 13 (9.0 или новее) и доступным кешем NuGet. Для графиков нужны Python 3.12 и matplotlib. Запускайте измерения последовательно, без другой нагрузочной работы. Команда перезаписывает указанный OutputDirectory; для собственных экспериментов задайте другую директорию внутри проекта.
+Это архивный эксперимент: для точного воспроизведения нужны исходники, бинарники и инструменты зафиксированной исторической ревизии. Его JSON, манифесты и сырые CSV теперь хранятся только локально в `artifacts/benchmarks/history/docs/space-battle/`; в репозитории остаются отчёты и графики.
 
-```powershell
-$env:DOTNET_CLI_HOME = "$PWD/Benchmarks.Local/.dotnet"
-$env:NUGET_PACKAGES = "$PWD/Benchmarks.Local/nuget-packages"
-$env:MSBuildEnableWorkloadResolver = 'false'
-dotnet build SpaceBattle.Headless/SpaceBattle.Headless.csproj -c Release --no-restore -m:1 -p:GeneratePackageOnBuild=false
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate-adapters
-dotnet SpaceBattle.Headless/bin/Release/net8.0/SpaceBattle.Headless.dll --validate-ports
-./tools/space-battle/run-suite.ps1 -SkipBuild -Preset benchmark -OutputDirectory docs/space-battle/finite-2026-10-14
-python tools/space-battle/analyze_current.py --data-dir docs/space-battle/finite-2026-10-14 --preset benchmark --report-base REPORT --verify-ticks
-```
-
-Без --verify-ticks анализатор проверяет опубликованные JSON и хеши и строит тот же отчёт без требования локальных CSV. Длинные CSV остаются локально; опубликованных JSON достаточно для сводных таблиц и графиков.
-
+Для текущей нагрузки используйте [.NET-инструменты бенчмарков](../../tools/BenchmarkTools/README.ru.md) и команду `dotnet run --project tools/BenchmarkTools -c Release -- run space-battle`. Она записывает сырые данные в игнорируемую директорию `artifacts/benchmarks/current/space-battle` и строит текущий отчёт. Эта команда не воспроизводит исторические профили из данного документа.
 ## История и связанные документы
 
 - [Архив измерений 2026-10-11](REPORT_2026-10-11.ru.md): predictive-neutral-v1, Aether, старый frontend replay и состав сущностей. Его цифры не сравниваются с этой кампанией: изменились правила игры, физика и нагрузка.

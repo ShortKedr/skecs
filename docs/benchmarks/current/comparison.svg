@@ -1,0 +1,406 @@
+<svg viewBox="0 0 1200 1210" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>ECS base comparison</title>
+  <rect width="100%" height="100%" fill="white" />
+  <text x="24" y="32" font-family="Arial, sans-serif" font-size="21" fill="#20252b">ECS base comparison</text>
+  <text x="20" y="65" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Churn · N=1,000</text>
+  <line x1="145" y1="80" x2="145" y2="259" stroke="#e0e4e9" />
+  <text x="145" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">0.369</text>
+  <line x1="255" y1="80" x2="255" y2="259" stroke="#e0e4e9" />
+  <text x="255" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">2.84</text>
+  <line x1="365" y1="80" x2="365" y2="259" stroke="#e0e4e9" />
+  <text x="365" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">21.8</text>
+  <line x1="475" y1="80" x2="475" y2="259" stroke="#e0e4e9" />
+  <text x="475" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">168</text>
+  <text x="20" y="102" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="145" y="88" width="296.36" height="20" fill="#c93637">
+    <title>SKECS: 89.903966480446925 ± 3.2883034759420871</title>
+  </rect>
+  <line x1="439.351" y1="98" x2="443.298" y2="98" stroke="#30343b" />
+  <line x1="439.351" y1="94" x2="439.351" y2="102" stroke="#30343b" />
+  <line x1="443.298" y1="94" x2="443.298" y2="102" stroke="#30343b" />
+  <text x="448.298" y="102" font-family="Arial, sans-serif" font-size="11" fill="#20252b">89.9</text>
+  <text x="20" y="136" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="145" y="122" width="175.432" height="20" fill="#c93637">
+    <title>LeoECS Lite: 9.5507750000000033 ± 0.1320067417536735</title>
+  </rect>
+  <line x1="319.681" y1="132" x2="321.172" y2="132" stroke="#30343b" />
+  <line x1="319.681" y1="128" x2="319.681" y2="136" stroke="#30343b" />
+  <line x1="321.172" y1="128" x2="321.172" y2="136" stroke="#30343b" />
+  <text x="326.172" y="136" font-family="Arial, sans-serif" font-size="11" fill="#20252b">9.551</text>
+  <text x="20" y="170" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="145" y="156" width="202.305" height="20" fill="#c93637">
+    <title>LeoECS Classic: 15.719235000000001 ± 0.038975853186029752</title>
+  </rect>
+  <line x1="347.171" y1="166" x2="347.439" y2="166" stroke="#30343b" />
+  <line x1="347.171" y1="162" x2="347.171" y2="170" stroke="#30343b" />
+  <line x1="347.439" y1="162" x2="347.439" y2="170" stroke="#30343b" />
+  <text x="352.439" y="170" font-family="Arial, sans-serif" font-size="11" fill="#20252b">15.72</text>
+  <text x="20" y="204" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="145" y="190" width="214.904" height="20" fill="#c93637">
+    <title>Morpeh: 19.8552 ± 1.0464511309534161</title>
+  </rect>
+  <line x1="356.983" y1="200" x2="362.674" y2="200" stroke="#30343b" />
+  <line x1="356.983" y1="196" x2="356.983" y2="204" stroke="#30343b" />
+  <line x1="362.674" y1="196" x2="362.674" y2="204" stroke="#30343b" />
+  <text x="367.674" y="204" font-family="Arial, sans-serif" font-size="11" fill="#20252b">19.86</text>
+  <text x="20" y="238" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="145" y="224" width="15.654" height="20" fill="#2e9b50">
+    <title>StaticEcs: 0.49371999999999999 ± 0.032039968460461504</title>
+  </rect>
+  <line x1="157.035" y1="234" x2="164.045" y2="234" stroke="#30343b" />
+  <line x1="157.035" y1="230" x2="157.035" y2="238" stroke="#30343b" />
+  <line x1="164.045" y1="230" x2="164.045" y2="238" stroke="#30343b" />
+  <text x="169.045" y="238" font-family="Arial, sans-serif" font-size="11" fill="#20252b">0.4937</text>
+  <text x="145" y="302" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="620" y="65" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Create · N=1,000</text>
+  <line x1="745" y1="80" x2="745" y2="259" stroke="#e0e4e9" />
+  <text x="745" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">2.47</text>
+  <line x1="855" y1="80" x2="855" y2="259" stroke="#e0e4e9" />
+  <text x="855" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">12.8</text>
+  <line x1="965" y1="80" x2="965" y2="259" stroke="#e0e4e9" />
+  <text x="965" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">66.6</text>
+  <line x1="1075" y1="80" x2="1075" y2="259" stroke="#e0e4e9" />
+  <text x="1075" y="278" font-family="Arial, sans-serif" font-size="10" fill="#20252b">346</text>
+  <text x="620" y="102" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="745" y="88" width="257.024" height="20" fill="#c93637">
+    <title>SKECS: 115.90000000000001 ± 76.168366137130704</title>
+  </rect>
+  <line x1="930.539" y1="98" x2="1035.752" y2="98" stroke="#30343b" />
+  <line x1="930.539" y1="94" x2="930.539" y2="102" stroke="#30343b" />
+  <line x1="1035.752" y1="94" x2="1035.752" y2="102" stroke="#30343b" />
+  <text x="1040.752" y="102" font-family="Arial, sans-serif" font-size="11" fill="#20252b">115.9</text>
+  <text x="620" y="136" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="745" y="122" width="156.175" height="20" fill="#c93637">
+    <title>LeoECS Lite: 25.594999999999999 ± 3.3254164756977591</title>
+  </rect>
+  <line x1="891.882" y1="132" x2="909.332" y2="132" stroke="#30343b" />
+  <line x1="891.882" y1="128" x2="891.882" y2="136" stroke="#30343b" />
+  <line x1="909.332" y1="128" x2="909.332" y2="136" stroke="#30343b" />
+  <text x="914.332" y="136" font-family="Arial, sans-serif" font-size="11" fill="#20252b">25.59</text>
+  <text x="620" y="170" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="745" y="156" width="183.722" height="20" fill="#c93637">
+    <title>LeoECS Classic: 38.664999999999999 ± 5.7830309845634629</title>
+  </rect>
+  <line x1="917.904" y1="166" x2="938.029" y2="166" stroke="#30343b" />
+  <line x1="917.904" y1="162" x2="917.904" y2="170" stroke="#30343b" />
+  <line x1="938.029" y1="162" x2="938.029" y2="170" stroke="#30343b" />
+  <text x="943.029" y="170" font-family="Arial, sans-serif" font-size="11" fill="#20252b">38.66</text>
+  <text x="620" y="204" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="745" y="190" width="166.276" height="20" fill="#c93637">
+    <title>Morpeh: 29.774999999999999 ± 8.7794541851685572</title>
+  </rect>
+  <line x1="887.949" y1="200" x2="928.53" y2="200" stroke="#30343b" />
+  <line x1="887.949" y1="196" x2="887.949" y2="204" stroke="#30343b" />
+  <line x1="928.53" y1="196" x2="928.53" y2="204" stroke="#30343b" />
+  <text x="933.53" y="204" font-family="Arial, sans-serif" font-size="11" fill="#20252b">29.77</text>
+  <text x="620" y="238" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="745" y="224" width="33.151" height="20" fill="#2e9b50">
+    <title>StaticEcs: 4.0549999999999997 ± 0.9697937925146769</title>
+  </rect>
+  <line x1="759.9" y1="234" x2="792.469" y2="234" stroke="#30343b" />
+  <line x1="759.9" y1="230" x2="759.9" y2="238" stroke="#30343b" />
+  <line x1="792.469" y1="230" x2="792.469" y2="238" stroke="#30343b" />
+  <text x="797.469" y="238" font-family="Arial, sans-serif" font-size="11" fill="#20252b">4.055</text>
+  <text x="745" y="302" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="20" y="340" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Destroy · N=1,000</text>
+  <line x1="145" y1="355" x2="145" y2="534" stroke="#e0e4e9" />
+  <text x="145" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">1.48</text>
+  <line x1="255" y1="355" x2="255" y2="534" stroke="#e0e4e9" />
+  <text x="255" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">5.24</text>
+  <line x1="365" y1="355" x2="365" y2="534" stroke="#e0e4e9" />
+  <text x="365" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">18.6</text>
+  <line x1="475" y1="355" x2="475" y2="534" stroke="#e0e4e9" />
+  <text x="475" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">65.7</text>
+  <text x="20" y="377" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="145" y="363" width="247.167" height="20" fill="#c93637">
+    <title>SKECS: 25.355 ± 1.0782417461580194</title>
+  </rect>
+  <line x1="388.384" y1="373" x2="395.792" y2="373" stroke="#30343b" />
+  <line x1="388.384" y1="369" x2="388.384" y2="377" stroke="#30343b" />
+  <line x1="395.792" y1="369" x2="395.792" y2="377" stroke="#30343b" />
+  <text x="400.792" y="377" font-family="Arial, sans-serif" font-size="11" fill="#20252b">25.36</text>
+  <text x="20" y="411" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="145" y="397" width="261.65" height="20" fill="#c93637">
+    <title>LeoECS Lite: 29.945 ± 6.5355284085487204</title>
+  </rect>
+  <line x1="385.217" y1="407" x2="423.835" y2="407" stroke="#30343b" />
+  <line x1="385.217" y1="403" x2="385.217" y2="411" stroke="#30343b" />
+  <line x1="423.835" y1="403" x2="423.835" y2="411" stroke="#30343b" />
+  <text x="428.835" y="411" font-family="Arial, sans-serif" font-size="11" fill="#20252b">29.95</text>
+  <text x="20" y="445" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="145" y="431" width="271.985" height="20" fill="#c93637">
+    <title>LeoECS Classic: 33.719999999999999 ± 0.92996887327649735</title>
+  </rect>
+  <line x1="414.551" y1="441" x2="419.353" y2="441" stroke="#30343b" />
+  <line x1="414.551" y1="437" x2="414.551" y2="445" stroke="#30343b" />
+  <line x1="419.353" y1="437" x2="419.353" y2="445" stroke="#30343b" />
+  <text x="424.353" y="445" font-family="Arial, sans-serif" font-size="11" fill="#20252b">33.72</text>
+  <text x="20" y="479" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="145" y="465" width="218.545" height="20" fill="#c93637">
+    <title>Morpeh: 18.25 ± 3.6140806503685581</title>
+  </rect>
+  <line x1="344.335" y1="475" x2="379.272" y2="475" stroke="#30343b" />
+  <line x1="344.335" y1="471" x2="344.335" y2="479" stroke="#30343b" />
+  <line x1="379.272" y1="471" x2="379.272" y2="479" stroke="#30343b" />
+  <text x="384.272" y="479" font-family="Arial, sans-serif" font-size="11" fill="#20252b">18.25</text>
+  <text x="20" y="513" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="145" y="499" width="45.506" height="20" fill="#2e9b50">
+    <title>StaticEcs: 2.5 ± 0.64726143745866138</title>
+  </rect>
+  <line x1="164.424" y1="509" x2="210.548" y2="509" stroke="#30343b" />
+  <line x1="164.424" y1="505" x2="164.424" y2="513" stroke="#30343b" />
+  <line x1="210.548" y1="505" x2="210.548" y2="513" stroke="#30343b" />
+  <text x="215.548" y="513" font-family="Arial, sans-serif" font-size="11" fill="#20252b">2.5</text>
+  <text x="145" y="577" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="620" y="340" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Iterate · N=1,000</text>
+  <line x1="745" y1="355" x2="745" y2="534" stroke="#e0e4e9" />
+  <text x="745" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">0.407</text>
+  <line x1="855" y1="355" x2="855" y2="534" stroke="#e0e4e9" />
+  <text x="855" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">0.978</text>
+  <line x1="965" y1="355" x2="965" y2="534" stroke="#e0e4e9" />
+  <text x="965" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">2.35</text>
+  <line x1="1075" y1="355" x2="1075" y2="534" stroke="#e0e4e9" />
+  <text x="1075" y="553" font-family="Arial, sans-serif" font-size="10" fill="#20252b">5.64</text>
+  <text x="620" y="377" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="745" y="363" width="39.129" height="20" fill="#2e9b50">
+    <title>SKECS: 0.55599999999999994 ± 0.047164315234920422</title>
+  </rect>
+  <line x1="773.005" y1="373" x2="794.348" y2="373" stroke="#30343b" />
+  <line x1="773.005" y1="369" x2="773.005" y2="377" stroke="#30343b" />
+  <line x1="794.348" y1="369" x2="794.348" y2="377" stroke="#30343b" />
+  <text x="799.348" y="377" font-family="Arial, sans-serif" font-size="11" fill="#20252b">0.556</text>
+  <text x="620" y="411" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="745" y="397" width="142.595" height="20" fill="#c93637">
+    <title>LeoECS Lite: 1.2679950000000004 ± 0.014540704210847842</title>
+  </rect>
+  <line x1="886.147" y1="407" x2="889.026" y2="407" stroke="#30343b" />
+  <line x1="886.147" y1="403" x2="886.147" y2="411" stroke="#30343b" />
+  <line x1="889.026" y1="403" x2="889.026" y2="411" stroke="#30343b" />
+  <text x="894.026" y="411" font-family="Arial, sans-serif" font-size="11" fill="#20252b">1.268</text>
+  <text x="620" y="445" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="745" y="431" width="140.878" height="20" fill="#c93637">
+    <title>LeoECS Classic: 1.2507649999999999 ± 0.016668699788273199</title>
+  </rect>
+  <line x1="884.194" y1="441" x2="887.539" y2="441" stroke="#30343b" />
+  <line x1="884.194" y1="437" x2="884.194" y2="445" stroke="#30343b" />
+  <line x1="887.539" y1="437" x2="887.539" y2="445" stroke="#30343b" />
+  <text x="892.539" y="445" font-family="Arial, sans-serif" font-size="11" fill="#20252b">1.251</text>
+  <text x="620" y="479" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="745" y="465" width="255.549" height="20" fill="#c93637">
+    <title>Morpeh: 3.1188649999999991 ± 0.017034308259942239</title>
+  </rect>
+  <line x1="999.862" y1="475" x2="1001.233" y2="475" stroke="#30343b" />
+  <line x1="999.862" y1="471" x2="999.862" y2="479" stroke="#30343b" />
+  <line x1="1001.233" y1="471" x2="1001.233" y2="479" stroke="#30343b" />
+  <text x="1006.233" y="479" font-family="Arial, sans-serif" font-size="11" fill="#20252b">3.119</text>
+  <text x="620" y="513" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="745" y="499" width="68.257" height="20" fill="#dc513c">
+    <title>StaticEcs: 0.70124500000000012 ± 0.11242053322002028</title>
+  </rect>
+  <line x1="791.328" y1="509" x2="831.917" y2="509" stroke="#30343b" />
+  <line x1="791.328" y1="505" x2="791.328" y2="513" stroke="#30343b" />
+  <line x1="831.917" y1="505" x2="831.917" y2="513" stroke="#30343b" />
+  <text x="836.917" y="513" font-family="Arial, sans-serif" font-size="11" fill="#20252b">0.7012</text>
+  <text x="745" y="577" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="20" y="615" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Churn · N=100,000</text>
+  <line x1="145" y1="630" x2="145" y2="809" stroke="#e0e4e9" />
+  <text x="145" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">0.357</text>
+  <line x1="255" y1="630" x2="255" y2="809" stroke="#e0e4e9" />
+  <text x="255" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">2.77</text>
+  <line x1="365" y1="630" x2="365" y2="809" stroke="#e0e4e9" />
+  <text x="365" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">21.5</text>
+  <line x1="475" y1="630" x2="475" y2="809" stroke="#e0e4e9" />
+  <text x="475" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">167</text>
+  <text x="20" y="652" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="145" y="638" width="296.756" height="20" fill="#c93637">
+    <title>SKECS: 89.946187499999994 ± 2.8886604467831121</title>
+  </rect>
+  <line x1="440.004" y1="648" x2="443.453" y2="648" stroke="#30343b" />
+  <line x1="440.004" y1="644" x2="440.004" y2="652" stroke="#30343b" />
+  <line x1="443.453" y1="644" x2="443.453" y2="652" stroke="#30343b" />
+  <text x="448.453" y="652" font-family="Arial, sans-serif" font-size="11" fill="#20252b">89.95</text>
+  <text x="20" y="686" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="145" y="672" width="175.49" height="20" fill="#c93637">
+    <title>LeoECS Lite: 9.3914484374999994 ± 0.22280187845498867</title>
+  </rect>
+  <line x1="319.201" y1="682" x2="321.748" y2="682" stroke="#30343b" />
+  <line x1="319.201" y1="678" x2="319.201" y2="686" stroke="#30343b" />
+  <line x1="321.748" y1="678" x2="321.748" y2="686" stroke="#30343b" />
+  <text x="326.748" y="686" font-family="Arial, sans-serif" font-size="11" fill="#20252b">9.391</text>
+  <text x="20" y="720" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="145" y="706" width="203.744" height="20" fill="#c93637">
+    <title>LeoECS Classic: 15.898460526315789 ± 0.14456355163790949</title>
+  </rect>
+  <line x1="348.253" y1="716" x2="349.229" y2="716" stroke="#30343b" />
+  <line x1="348.253" y1="712" x2="348.253" y2="720" stroke="#30343b" />
+  <line x1="349.229" y1="712" x2="349.229" y2="720" stroke="#30343b" />
+  <text x="354.229" y="720" font-family="Arial, sans-serif" font-size="11" fill="#20252b">15.9</text>
+  <text x="20" y="754" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="145" y="740" width="217.408" height="20" fill="#c93637">
+    <title>Morpeh: 20.508016666666666 ± 0.93998409086636714</title>
+  </rect>
+  <line x1="359.89" y1="750" x2="364.813" y2="750" stroke="#30343b" />
+  <line x1="359.89" y1="746" x2="359.89" y2="754" stroke="#30343b" />
+  <line x1="364.813" y1="746" x2="364.813" y2="754" stroke="#30343b" />
+  <text x="369.813" y="754" font-family="Arial, sans-serif" font-size="11" fill="#20252b">20.51</text>
+  <text x="20" y="788" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="145" y="774" width="14.271" height="20" fill="#2e9b50">
+    <title>StaticEcs: 0.46579909274193548 ± 0.019493125720921441</title>
+  </rect>
+  <line x1="156.976" y1="784" x2="161.471" y2="784" stroke="#30343b" />
+  <line x1="156.976" y1="780" x2="156.976" y2="788" stroke="#30343b" />
+  <line x1="161.471" y1="780" x2="161.471" y2="788" stroke="#30343b" />
+  <text x="166.471" y="788" font-family="Arial, sans-serif" font-size="11" fill="#20252b">0.4658</text>
+  <text x="145" y="852" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="620" y="615" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Create · N=100,000</text>
+  <line x1="745" y1="630" x2="745" y2="809" stroke="#e0e4e9" />
+  <text x="745" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">1.45</text>
+  <line x1="855" y1="630" x2="855" y2="809" stroke="#e0e4e9" />
+  <text x="855" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">7.51</text>
+  <line x1="965" y1="630" x2="965" y2="809" stroke="#e0e4e9" />
+  <text x="965" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">38.8</text>
+  <line x1="1075" y1="630" x2="1075" y2="809" stroke="#e0e4e9" />
+  <text x="1075" y="828" font-family="Arial, sans-serif" font-size="10" fill="#20252b">201</text>
+  <text x="620" y="652" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="745" y="638" width="282.784" height="20" fill="#c93637">
+    <title>SKECS: 99.133899999999997 ± 1.9899420753272932</title>
+  </rect>
+  <line x1="1026.427" y1="648" x2="1029.115" y2="648" stroke="#30343b" />
+  <line x1="1026.427" y1="644" x2="1026.427" y2="652" stroke="#30343b" />
+  <line x1="1029.115" y1="644" x2="1029.115" y2="652" stroke="#30343b" />
+  <text x="1034.115" y="652" font-family="Arial, sans-serif" font-size="11" fill="#20252b">99.13</text>
+  <text x="620" y="686" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="745" y="672" width="234.921" height="20" fill="#c93637">
+    <title>LeoECS Lite: 48.500749999999996 ± 2.3483918769861933</title>
+  </rect>
+  <line x1="976.598" y1="682" x2="983.086" y2="682" stroke="#30343b" />
+  <line x1="976.598" y1="678" x2="976.598" y2="686" stroke="#30343b" />
+  <line x1="983.086" y1="678" x2="983.086" y2="686" stroke="#30343b" />
+  <text x="988.086" y="686" font-family="Arial, sans-serif" font-size="11" fill="#20252b">48.5</text>
+  <text x="620" y="720" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="745" y="706" width="285.31" height="20" fill="#c93637">
+    <title>LeoECS Classic: 102.94540000000001 ± 8.5406372213886019</title>
+  </rect>
+  <line x1="1024.512" y1="716" x2="1035.646" y2="716" stroke="#30343b" />
+  <line x1="1024.512" y1="712" x2="1024.512" y2="720" stroke="#30343b" />
+  <line x1="1035.646" y1="712" x2="1035.646" y2="720" stroke="#30343b" />
+  <text x="1040.646" y="720" font-family="Arial, sans-serif" font-size="11" fill="#20252b">102.9</text>
+  <text x="620" y="754" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="745" y="740" width="268.121" height="20" fill="#c93637">
+    <title>Morpeh: 79.635599999999997 ± 22.050960820216812</title>
+  </rect>
+  <line x1="991.415" y1="750" x2="1029.486" y2="750" stroke="#30343b" />
+  <line x1="991.415" y1="746" x2="991.415" y2="754" stroke="#30343b" />
+  <line x1="1029.486" y1="746" x2="1029.486" y2="754" stroke="#30343b" />
+  <text x="1034.486" y="754" font-family="Arial, sans-serif" font-size="11" fill="#20252b">79.64</text>
+  <text x="620" y="788" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="745" y="774" width="22.091" height="20" fill="#2e9b50">
+    <title>StaticEcs: 2.0192999999999999 ± 0.20455165349458412</title>
+  </rect>
+  <line x1="759.94" y1="784" x2="773.551" y2="784" stroke="#30343b" />
+  <line x1="759.94" y1="780" x2="759.94" y2="788" stroke="#30343b" />
+  <line x1="773.551" y1="780" x2="773.551" y2="788" stroke="#30343b" />
+  <text x="778.551" y="788" font-family="Arial, sans-serif" font-size="11" fill="#20252b">2.019</text>
+  <text x="745" y="852" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="20" y="890" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Destroy · N=100,000</text>
+  <line x1="145" y1="905" x2="145" y2="1084" stroke="#e0e4e9" />
+  <text x="145" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">0.912</text>
+  <line x1="255" y1="905" x2="255" y2="1084" stroke="#e0e4e9" />
+  <text x="255" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">3.86</text>
+  <line x1="365" y1="905" x2="365" y2="1084" stroke="#e0e4e9" />
+  <text x="365" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">16.3</text>
+  <line x1="475" y1="905" x2="475" y2="1084" stroke="#e0e4e9" />
+  <text x="475" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">69.1</text>
+  <text x="20" y="927" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="145" y="913" width="250.356" height="20" fill="#c93637">
+    <title>SKECS: 24.316849999999999 ± 0.59728370011331522</title>
+  </rect>
+  <line x1="393.459" y1="923" x2="397.206" y2="923" stroke="#30343b" />
+  <line x1="393.459" y1="919" x2="393.459" y2="927" stroke="#30343b" />
+  <line x1="397.206" y1="919" x2="397.206" y2="927" stroke="#30343b" />
+  <text x="402.206" y="927" font-family="Arial, sans-serif" font-size="11" fill="#20252b">24.32</text>
+  <text x="20" y="961" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="145" y="947" width="269.855" height="20" fill="#c93637">
+    <title>LeoECS Lite: 31.40175 ± 6.9876210082733561</title>
+  </rect>
+  <line x1="395.66" y1="957" x2="430.176" y2="957" stroke="#30343b" />
+  <line x1="395.66" y1="953" x2="395.66" y2="961" stroke="#30343b" />
+  <line x1="430.176" y1="953" x2="430.176" y2="961" stroke="#30343b" />
+  <text x="435.176" y="961" font-family="Arial, sans-serif" font-size="11" fill="#20252b">31.4</text>
+  <text x="20" y="995" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="145" y="981" width="278.821" height="20" fill="#c93637">
+    <title>LeoECS Classic: 35.319949999999999 ± 1.010902695874492</title>
+  </rect>
+  <line x1="421.607" y1="991" x2="425.973" y2="991" stroke="#30343b" />
+  <line x1="421.607" y1="987" x2="421.607" y2="995" stroke="#30343b" />
+  <line x1="425.973" y1="987" x2="425.973" y2="995" stroke="#30343b" />
+  <text x="430.973" y="995" font-family="Arial, sans-serif" font-size="11" fill="#20252b">35.32</text>
+  <text x="20" y="1029" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="145" y="1015" width="223.891" height="20" fill="#c93637">
+    <title>Morpeh: 17.186499999999999 ± 2.6681991265547196</title>
+  </rect>
+  <line x1="356.025" y1="1025" x2="379.896" y2="1025" stroke="#30343b" />
+  <line x1="356.025" y1="1021" x2="356.025" y2="1029" stroke="#30343b" />
+  <line x1="379.896" y1="1021" x2="379.896" y2="1029" stroke="#30343b" />
+  <text x="384.896" y="1029" font-family="Arial, sans-serif" font-size="11" fill="#20252b">17.19</text>
+  <text x="20" y="1063" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="145" y="1049" width="22.188" height="20" fill="#2e9b50">
+    <title>StaticEcs: 1.22035 ± 0.080008733075965233</title>
+  </rect>
+  <line x1="162.017" y1="1059" x2="172.03" y2="1059" stroke="#30343b" />
+  <line x1="162.017" y1="1055" x2="162.017" y2="1063" stroke="#30343b" />
+  <line x1="172.03" y1="1055" x2="172.03" y2="1063" stroke="#30343b" />
+  <text x="177.03" y="1063" font-family="Arial, sans-serif" font-size="11" fill="#20252b">1.22</text>
+  <text x="145" y="1127" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="620" y="890" font-family="Arial, sans-serif" font-size="15" fill="#20252b">Iterate · N=100,000</text>
+  <line x1="745" y1="905" x2="745" y2="1084" stroke="#e0e4e9" />
+  <text x="745" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">0.44</text>
+  <line x1="855" y1="905" x2="855" y2="1084" stroke="#e0e4e9" />
+  <text x="855" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">1.03</text>
+  <line x1="965" y1="905" x2="965" y2="1084" stroke="#e0e4e9" />
+  <text x="965" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">2.42</text>
+  <line x1="1075" y1="905" x2="1075" y2="1084" stroke="#e0e4e9" />
+  <text x="1075" y="1103" font-family="Arial, sans-serif" font-size="10" fill="#20252b">5.68</text>
+  <text x="620" y="927" font-family="Arial, sans-serif" font-size="12" fill="#20252b">SKECS</text>
+  <rect x="745" y="913" width="36.238" height="20" fill="#2e9b50">
+    <title>SKECS: 0.58216850180505408 ± 0.032783596271611121</title>
+  </rect>
+  <line x1="773.766" y1="923" x2="788.301" y2="923" stroke="#30343b" />
+  <line x1="773.766" y1="919" x2="773.766" y2="927" stroke="#30343b" />
+  <line x1="788.301" y1="919" x2="788.301" y2="927" stroke="#30343b" />
+  <text x="793.301" y="927" font-family="Arial, sans-serif" font-size="11" fill="#20252b">0.5822</text>
+  <text x="620" y="961" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Lite</text>
+  <rect x="745" y="947" width="137.298" height="20" fill="#c93637">
+    <title>LeoECS Lite: 1.2749838912133888 ± 0.01840301342660151</title>
+  </rect>
+  <line x1="880.424" y1="957" x2="884.145" y2="957" stroke="#30343b" />
+  <line x1="880.424" y1="953" x2="880.424" y2="961" stroke="#30343b" />
+  <line x1="884.145" y1="953" x2="884.145" y2="961" stroke="#30343b" />
+  <text x="889.145" y="961" font-family="Arial, sans-serif" font-size="11" fill="#20252b">1.275</text>
+  <text x="620" y="995" font-family="Arial, sans-serif" font-size="12" fill="#20252b">LeoECS Classic</text>
+  <rect x="745" y="981" width="140.004" height="20" fill="#c93637">
+    <title>LeoECS Classic: 1.3020305907172993 ± 0.062294630840831207</title>
+  </rect>
+  <line x1="878.684" y1="991" x2="891.029" y2="991" stroke="#30343b" />
+  <line x1="878.684" y1="987" x2="878.684" y2="995" stroke="#30343b" />
+  <line x1="891.029" y1="987" x2="891.029" y2="995" stroke="#30343b" />
+  <text x="896.029" y="995" font-family="Arial, sans-serif" font-size="11" fill="#20252b">1.302</text>
+  <text x="620" y="1029" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Morpeh</text>
+  <rect x="745" y="1015" width="252.963" height="20" fill="#c93637">
+    <title>Morpeh: 3.1272579787234043 ± 0.030797552904558961</title>
+  </rect>
+  <line x1="996.687" y1="1025" x2="999.226" y2="1025" stroke="#30343b" />
+  <line x1="996.687" y1="1021" x2="996.687" y2="1029" stroke="#30343b" />
+  <line x1="999.226" y1="1021" x2="999.226" y2="1029" stroke="#30343b" />
+  <text x="1004.226" y="1029" font-family="Arial, sans-serif" font-size="11" fill="#20252b">3.127</text>
+  <text x="620" y="1063" font-family="Arial, sans-serif" font-size="12" fill="#20252b">StaticEcs</text>
+  <rect x="745" y="1049" width="50.706" height="20" fill="#c7df78">
+    <title>StaticEcs: 0.65130943181818179 ± 0.016552414167918833</title>
+  </rect>
+  <line x1="792.387" y1="1059" x2="798.941" y2="1059" stroke="#30343b" />
+  <line x1="792.387" y1="1055" x2="792.387" y2="1063" stroke="#30343b" />
+  <line x1="798.941" y1="1055" x2="798.941" y2="1063" stroke="#30343b" />
+  <text x="803.941" y="1063" font-family="Arial, sans-serif" font-size="11" fill="#20252b">0.6513</text>
+  <text x="745" y="1127" font-family="Arial, sans-serif" font-size="11" fill="#20252b">nanoseconds / entity (log scale)</text>
+  <text x="24" y="1180" font-family="Arial, sans-serif" font-size="12" fill="#20252b">Error bars: sample SD, not confidence intervals. Fixed lag scale: green ≤5%, yellow 15%, red ≥30%; grey ≤5% group.</text>
+</svg>

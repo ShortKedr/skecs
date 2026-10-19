@@ -85,7 +85,7 @@ dotnet Benchmarks.Local/tmp/spatial-verified/bin/SpaceBattle.Headless/release/Sp
 node --test tools/space-battle/test_summarize_spatial.mjs
 ```
 
-The [browser profiler](../../tools/web/profile-revisions.mjs) accepts `--sites` for two local published roots and closes its localhost servers afterwards. The [summary generator](../../tools/space-battle/summarize-spatial.mjs) refuses to summarize changed gameplay trajectories. Builds/raw scratch outputs remain under ignored `Benchmarks.Local/tmp`; the separate [summary evidence](spatial-optimization/summary.json) records independent means, ranges, native stages, counters and binary hashes.
+The [browser profiler](../../tools/web/profile-revisions.mjs) accepts `--sites` for two local published roots and closes its localhost servers afterwards. The [summary generator](../../tools/space-battle/summarize-spatial.mjs) refuses to summarize changed gameplay trajectories. Builds/raw scratch outputs remain under ignored `Benchmarks.Local/tmp`; the separate summary evidence (`artifacts/benchmarks/history/docs/space-battle/spatial-optimization/summary.json`) records independent means, ranges, native stages, counters and binary hashes.
 
 ## Remaining Costs
 

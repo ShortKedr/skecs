@@ -105,15 +105,15 @@ OpenGL и зависимости бенчмарков/тестов. Услови
 
 ## Проверка
 
-```powershell
-python tools/check_vendor.py
-python -m unittest discover -s tools -p 'test_check_vendor.py' -v
-python tools/check_docs.py
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- verify-vendor
+dotnet test tools/BenchmarkTools.Tests/BenchmarkTools.Tests.csproj -c Release
 ```
 
-Проверка контролирует хеши, наличие лицензий, точный регистр путей и совпадение
-публикуемого Git набора исходников с манифестом. [.gitattributes](.gitattributes)
-предотвращает преобразование переводов строк в проверяемых сторонних файлах.
-[fetch.ps1](Benchmarks.Local/fetch.ps1) позволяет восстановить отсутствующие файлы
-манифеста из закреплённых архивов, проверяет хеши до копирования и отказывается
-перезаписывать изменённые локальные исходники. Обычному клону этот шаг не нужен.
+[Нативная проверка](tools/BenchmarkTools/VendorVerifier.cs) сверяет размеры и SHA-256 всех файлов манифеста, включая лицензии, и отклоняет незакреплённые C#-файлы в распространяемых runtime-каталогах. [.gitattributes](.gitattributes) предотвращает преобразование переводов строк в проверяемых сторонних файлах.
+
+```sh
+dotnet run --project tools/BenchmarkTools -c Release -- restore-vendor
+```
+
+Необязательная [реализация восстановления](tools/BenchmarkTools/VendorRestore.cs) загружает закреплённые архивы, проверяет выбранные runtime-исходники и оригинальные лицензии до установки отсутствующих файлов и отказывается перезаписывать изменённые локальные файлы. Загрузка требует сети; удалённые репозитории не изменяются. Обычному клону этот шаг не нужен. Условия лицензирования выше сохраняются.
