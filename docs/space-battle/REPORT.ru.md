@@ -2,7 +2,7 @@
 
 # Бенчмарки Space Battle — игровой high
 
-Preset: `game`; profile: `high`; 2026-10-19T02:24:31.9630390+00:00 — 2026-10-19T02:35:04.3039312+00:00.
+Preset: `game`; profile: `high`; 2026-10-19T04:33:57.3983635+00:00 — 2026-10-19T04:44:30.9401893+00:00.
 
 Пять независимых нативных ECS-ядер, по 108 000 измеренных тиков и 600 отдельных тиков прогрева. Seed 7331, 96 эскортов и 3 носителя на сторону; ChurnMultiplier 2; бесконечные подкрепления включены.
 
@@ -22,7 +22,7 @@ Preset: `game`; profile: `high`; 2026-10-19T02:24:31.9630390+00:00 — 2026-10-1
 
 | ECS | Ревизия | Версия |
 | --- | --- | --- |
-| SKECS | `30817034464d5cd82b7495e8fff9a07c187c26ef` | 0.2.0 |
+| SKECS | `48347501a0d41b453768c456e582c75f6b37af77` | 0.2.0 |
 | LeoECSLite | `5053141d7d663c6b1855c8409ac93dfac807b239` | 2024.5.22 |
 | LeoECS Classic | `1213c31c9ef8325d48e74a52b345c4db242d038b` | 2023.6.22 |
 | Morpeh | `9f6369384792a01d74df24efd35b08ae313e4f12` | 2024.1.1 |
@@ -34,11 +34,11 @@ StaticPack: `7bfb6cf925901b9366dda884258d727a89fff76e`.
 
 | ECS | Mean ms | P95 ms | P99 ms | Max ms | >16.67 ms | Managed B/tick | Total outer s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SKECS | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.5508 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.9099 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 1.1657 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 3.5657 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 584.1 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 59.490215 |
-| LeoECSLite | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.5924 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.9639 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 1.2237 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 3.8661 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 666.8 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 63.975975 |
-| LeoECS Classic | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5692 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.9216 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 1.1699 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 3.4681 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 648.7 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 61.476601 |
-| Morpeh | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5702 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.9269 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 1.1865 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 3.8976 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 644.9 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 61.578307 |
-| StaticEcs 2.2.9 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.4968 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.8308 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 1.0710 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 3.6386 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 605.5 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 53.650141 |
+| SKECS | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.5442 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.8947 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 1.1407 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 3.6522 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 584.1 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 58.770956 |
+| LeoECSLite | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5908 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.9544 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 1.2083 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 5.7411 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 666.8 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 63.808179 |
+| LeoECS Classic | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.5715 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.9289 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 1.1744 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 3.5846 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 648.7 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 61.721136 |
+| Morpeh | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5784 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.9501 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 1.2273 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 3.8858 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 644.9 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 62.471811 |
+| StaticEcs 2.2.9 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.5084 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.8543 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 1.1080 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 3.9540 | ![Нейтрально](../benchmarks/heatmap/equal.svg) 0 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 605.5 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 54.904581 |
 
 ![Mean tick time](current/MeanMs.svg)
 
@@ -50,11 +50,11 @@ StaticPack: `7bfb6cf925901b9366dda884258d727a89fff76e`.
 
 | ECS | 1–600 ms | 1–2000 ms | 2001–108000 ms | Full ms |
 | --- | --- | --- | --- | --- |
-| SKECS | 0.6296 | 0.5724 | 0.5504 | 0.5508 |
-| LeoECSLite | 0.6715 | 0.6150 | 0.5919 | 0.5924 |
-| LeoECS Classic | 0.6711 | 0.5966 | 0.5687 | 0.5692 |
-| Morpeh | 0.6353 | 0.5858 | 0.5699 | 0.5702 |
-| StaticEcs 2.2.9 | 0.5902 | 0.5462 | 0.4958 | 0.4968 |
+| SKECS | 0.6207 | 0.5759 | 0.5436 | 0.5442 |
+| LeoECSLite | 0.7145 | 0.6241 | 0.5902 | 0.5908 |
+| LeoECS Classic | 0.6610 | 0.6004 | 0.5709 | 0.5715 |
+| Morpeh | 0.6517 | 0.6083 | 0.5779 | 0.5784 |
+| StaticEcs 2.2.9 | 0.5897 | 0.5274 | 0.5080 | 0.5084 |
 
 ![Opening windows](current/InitialWindows.svg)
 
@@ -64,31 +64,31 @@ StaticPack: `7bfb6cf925901b9366dda884258d727a89fff76e`.
 
 | Stage | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1417 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1468 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.1565 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.1574 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1431 |
-| ai | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0895 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.1031 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0827 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0889 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0828 |
-| thermal-inventory | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0066 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0080 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0061 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0060 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0055 |
-| steering | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0195 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0223 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0185 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0194 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0173 |
-| weapons | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0128 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0173 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0115 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0127 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0101 |
-| carriers | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0006 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0003 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 |
-| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0570 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0663 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0591 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0820 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0609 |
-| hits | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1848 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1957 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2060 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.1753 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1377 |
-| lifecycle | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0382 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0321 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0285 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0279 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0388 |
-| Battle.LastTickMs | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.5508 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.5923 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5692 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5701 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.4967 |
-| Outer tick | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.5508 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.5924 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5692 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5702 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.4968 |
+| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1400 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1453 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.1567 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.1586 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1455 |
+| ai | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0886 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.1032 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0833 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0904 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0847 |
+| thermal-inventory | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0065 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0080 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0062 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0062 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0058 |
+| steering | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0193 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0225 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0187 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0194 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0179 |
+| weapons | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0126 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0176 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0117 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0132 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0104 |
+| carriers | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0003 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 |
+| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0564 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0660 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0598 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0836 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0628 |
+| hits | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.1824 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1954 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2050 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.1767 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1408 |
+| lifecycle | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0378 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0322 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0298 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0297 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0399 |
+| Battle.LastTickMs | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.5441 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5907 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.5714 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5784 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.5083 |
+| Outer tick | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.5442 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5908 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.5715 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.5784 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.5084 |
 
 ### SKECS: стадии начала
 
 | Stage | 1–600 ms | 1–2000 ms | 2001–108000 ms | Full ms |
 | --- | --- | --- | --- | --- |
-| collect | 0.1567 | 0.1453 | 0.1417 | 0.1417 |
-| ai | 0.1216 | 0.0979 | 0.0894 | 0.0895 |
-| thermal-inventory | 0.0071 | 0.0064 | 0.0066 | 0.0066 |
-| steering | 0.0246 | 0.0201 | 0.0195 | 0.0195 |
-| weapons | 0.0165 | 0.0133 | 0.0128 | 0.0128 |
-| carriers | 0.0002 | 0.0003 | 0.0006 | 0.0006 |
-| physics | 0.0640 | 0.0569 | 0.0570 | 0.0570 |
-| hits | 0.1971 | 0.1933 | 0.1846 | 0.1848 |
-| lifecycle | 0.0417 | 0.0388 | 0.0382 | 0.0382 |
+| collect | 0.1541 | 0.1447 | 0.1399 | 0.1400 |
+| ai | 0.1208 | 0.0989 | 0.0884 | 0.0886 |
+| thermal-inventory | 0.0070 | 0.0064 | 0.0065 | 0.0065 |
+| steering | 0.0242 | 0.0205 | 0.0192 | 0.0193 |
+| weapons | 0.0164 | 0.0136 | 0.0126 | 0.0126 |
+| carriers | 0.0001 | 0.0003 | 0.0005 | 0.0005 |
+| physics | 0.0629 | 0.0585 | 0.0564 | 0.0564 |
+| hits | 0.1943 | 0.1940 | 0.1822 | 0.1824 |
+| lifecycle | 0.0407 | 0.0389 | 0.0377 | 0.0378 |
 
 ## Окна HUD: первое, второе и общее худшее
 
@@ -98,16 +98,16 @@ StaticPack: `7bfb6cf925901b9366dda884258d727a89fff76e`.
 
 | HUD / stage ms | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| HUD total | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.6295 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.6714 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.6710 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.6353 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.5902 |
-| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1567 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1616 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.1818 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.1718 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1591 |
-| ai | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1216 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.1349 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1208 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1185 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1199 |
-| thermal-inventory | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0071 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0082 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0069 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0062 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0061 |
-| steering | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0246 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0283 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0243 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0246 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0229 |
-| weapons | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0165 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0211 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0148 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0150 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0136 |
-| carriers | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0001 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0003 |
-| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0640 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0741 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0684 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0856 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0718 |
-| hits | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.1971 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2081 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2176 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.1849 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1557 |
-| lifecycle | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0417 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0348 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0361 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0286 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0408 |
+| HUD total | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.6206 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.7144 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.6609 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.6517 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.5897 |
+| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1541 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1657 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.1787 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.1766 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1588 |
+| ai | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1208 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.1430 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1178 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1190 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1190 |
+| thermal-inventory | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0070 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0089 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0076 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0064 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0057 |
+| steering | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0242 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0301 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0241 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0250 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0233 |
+| weapons | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0164 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0226 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0160 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0149 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0134 |
+| carriers | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0001 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0003 |
+| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0629 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0777 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0707 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0888 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0701 |
+| hits | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.1943 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2270 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2106 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.1912 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1588 |
+| lifecycle | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0407 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0391 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0351 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0295 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0403 |
 
 | Ships | Projectiles | Debris | Particles | Turrets |
 | --- | --- | --- | --- | --- |
@@ -117,39 +117,39 @@ StaticPack: `7bfb6cf925901b9366dda884258d727a89fff76e`.
 
 | HUD / stage ms | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| HUD total | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.7159 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.7800 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.7457 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.7508 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.7223 |
-| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1891 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1986 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.2105 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.2106 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.2042 |
-| ai | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1203 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.1408 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1137 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1224 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.1255 |
-| thermal-inventory | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0072 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0091 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0073 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0076 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0080 |
-| steering | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0228 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0265 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0221 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0240 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0234 |
-| weapons | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0144 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0191 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0132 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0145 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0132 |
-| carriers | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0002 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0007 |
-| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0737 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0884 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0787 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1070 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0904 |
-| hits | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.2386 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.2581 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2638 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.2297 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1993 |
-| lifecycle | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0494 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0389 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0362 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0347 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0576 |
+| HUD total | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.7225 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.7800 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.7668 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.7575 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.6641 |
+| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1893 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1962 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.2140 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.2120 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1915 |
+| ai | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1212 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.1438 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1158 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1228 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1133 |
+| thermal-inventory | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0072 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0093 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0075 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0076 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0068 |
+| steering | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0237 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0269 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.0232 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0235 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0210 |
+| weapons | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0146 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0197 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0143 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0151 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0116 |
+| carriers | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0003 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 |
+| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0760 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0868 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0818 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1077 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0817 |
+| hits | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.2404 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2579 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2675 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.2320 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1863 |
+| lifecycle | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0499 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0390 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0424 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0363 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0514 |
 
 | Ships | Projectiles | Debris | Particles | Turrets |
 | --- | --- | --- | --- | --- |
 | 100.58 | 970.01 | 1513.26 | 1386.75 | 44.51 |
 
-### Худшее: 75601–76200
+### Худшее: 80401–81000
 
 | HUD / stage ms | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| HUD total | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.6081 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.8055 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.6504 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.6805 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.5741 |
-| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1475 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.1737 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.1688 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.1728 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1553 |
-| ai | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1111 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1539 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1052 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.1199 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1074 |
-| thermal-inventory | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0074 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0124 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0075 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0073 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0063 |
-| steering | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0245 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0339 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0246 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0257 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0230 |
-| weapons | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0138 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0252 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0128 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0153 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0112 |
-| carriers | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0006 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0002 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0004 |
-| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0702 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1019 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0742 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1032 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0758 |
-| hits | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.1922 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2472 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2239 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1981 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1510 |
-| lifecycle | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.0409 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0568 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0331 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0377 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0437 |
+| HUD total | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.6399 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.6773 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.6743 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.8305 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.5797 |
+| collect | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1763 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1782 | ![Отставание между 5% и 30%](../benchmarks/heatmap/good.svg) 0.1929 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.2121 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1767 |
+| ai | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.1009 | ![Отставание между 5% и 30%](../benchmarks/heatmap/poor.svg) 0.1166 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0979 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1290 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0959 |
+| thermal-inventory | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0066 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0082 | ![Отставание между 5% и 30%](../benchmarks/heatmap/fair.svg) 0.0066 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0092 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0059 |
+| steering | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0190 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0229 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0194 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0264 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0179 |
+| weapons | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0150 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0185 | ![Отставание между 5% и 30%](../benchmarks/heatmap/weak.svg) 0.0128 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0213 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0107 |
+| carriers | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0003 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0012 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0005 |
+| physics | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0627 | ![Отставание между 5% и 30%](../benchmarks/heatmap/middle.svg) 0.0722 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0662 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.1258 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0674 |
+| hits | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2138 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2241 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2395 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.2487 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.1592 |
+| lifecycle | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0451 | ![Отставание до 5%](../benchmarks/heatmap/best.svg) 0.0360 | ![Отставание между 5% и 30%](../benchmarks/heatmap/strong.svg) 0.0386 | ![Отставание от 30%](../benchmarks/heatmap/worst.svg) 0.0569 | ![Отставание между 5% и 30%](../benchmarks/heatmap/bad.svg) 0.0454 |
 
 | Ships | Projectiles | Debris | Particles | Turrets |
 | --- | --- | --- | --- | --- |
-| 98.75 | 777.02 | 1179.82 | 1219.71 | 46.11 |
+| 85.66 | 716.35 | 1336.79 | 1462.78 | 46.07 |
 
 ## Игровое совпадение, census и тактические счётчики
 
@@ -199,11 +199,11 @@ Checksum: `80F8AC31F06DDEBA`.
 
 | ECS | Managed heap MiB | Working set MiB | Private MiB | Native MiB | Accessor MiB | Entities final | Archetypes final | Chunks final |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SKECS | 42.90 | 90.62 | 73.23 | 7.04 | 0.00 | 3820 | 81 | 119 |
-| LeoECSLite | 47.78 | 86.41 | 72.56 | n/a | n/a | 3820 | n/a | n/a |
-| LeoECS Classic | 47.66 | 91.75 | 68.54 | n/a | n/a | 3820 | n/a | n/a |
-| Morpeh | 47.38 | 96.93 | 75.75 | n/a | n/a | 3820 | n/a | n/a |
-| StaticEcs 2.2.9 | 44.22 | 91.67 | 66.03 | n/a | n/a | 3820 | n/a | n/a |
+| SKECS | 42.92 | 91.98 | 70.48 | 7.04 | 0.00 | 3820 | 81 | 119 |
+| LeoECSLite | 47.78 | 85.46 | 65.01 | n/a | n/a | 3820 | n/a | n/a |
+| LeoECS Classic | 47.65 | 89.81 | 68.75 | n/a | n/a | 3820 | n/a | n/a |
+| Morpeh | 47.38 | 98.11 | 76.66 | n/a | n/a | 3820 | n/a | n/a |
+| StaticEcs 2.2.9 | 44.22 | 90.27 | 65.11 | n/a | n/a | 3820 | n/a | n/a |
 
 ### Поминутная численность
 
@@ -244,7 +244,7 @@ Checksum: `80F8AC31F06DDEBA`.
 
 Runtime: .NET 8.0.32; OS: Microsoft Windows 10.0.26200; tiered compilation `0`.
 
-Base commit: `30817034464d5cd82b7495e8fff9a07c187c26ef`. Source and loaded DLL hashes describe the measured working tree.
+Base commit: `48347501a0d41b453768c456e582c75f6b37af77`. Source and loaded DLL hashes describe the measured working tree.
 
 
 Полные CSV сохранены локально без потерь в gzip; SHA256 архива и распакованного файла записаны в локальном манифесте. Анализатор читает gzip напрямую и требует только .NET 8.
@@ -258,6 +258,6 @@ dotnet run --project SpaceBattle.Benchmarks -- report space-battle --data artifa
 [Desktop timing](DESKTOP_TIMING.ru.md) · [Architecture](ARCHITECTURE.ru.md)
 
 Локальные входы измерения: `artifacts/benchmarks/current/space-battle`.
-Базовый commit: `30817034464d5cd82b7495e8fff9a07c187c26ef`.
+Базовый commit: `48347501a0d41b453768c456e582c75f6b37af77`.
 GC total available memory limit; not physical RAM: 61.49 GiB.
 CPU: AMD Ryzen 9 9900X 12-Core Processor.

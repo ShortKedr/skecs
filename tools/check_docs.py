@@ -14,7 +14,6 @@ DOCUMENTS = [
     'README.md',
     'SKECS.Benchmarks/CodeGen/README.md',
     'SKECS.Benchmarks/README.md',
-    'SpaceBattle.Adapters/README.md',
     'SpaceBattle.Benchmarks/README.md',
     'SpaceBattle.Game/Assets/PROVENANCE.md',
     'SpaceBattle.Game/DEVELOPMENT.md',

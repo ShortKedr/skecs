@@ -1,3 +1,6 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using SpatialPointIndex = SpaceBattle.Simulations.Skecs.SpatialPointIndex;
+using Squad = SpaceBattle.Simulations.Skecs.Squad;
 using System.Collections;
 using System.Numerics;
 using System.Reflection;
@@ -6,7 +9,7 @@ using SpaceBattle;
 internal static partial class Validation
 {
     private const BindingFlags PrivateInstance = BindingFlags.NonPublic | BindingFlags.Instance;
-    private static readonly Type BattleType = typeof(Battle<SkecsStore>);
+    private static readonly Type BattleType = typeof(Battle);
     private readonly record struct Row(EntityKey Entity, Identity Id, Transform Transform, Hull Hull,
         Shield Shield, Heat Heat, Weapon Primary, Weapon Secondary, Brain Brain, CombatState Combat, float Radius, bool Docked);
 
@@ -185,9 +188,9 @@ internal static partial class Validation
         Require(Cover(battle, index) == cover, "cover broadphase includes ally radius beyond 48");
     }
 
-    private static Battle<SkecsStore> CreateBattle()
+    private static Battle CreateBattle()
     {
-        var battle = new Battle<SkecsStore>(new(), new BattleConfig { ShipsPerTeam = 16, Seed = 27,
+        var battle = new Battle(new BattleConfig { ShipsPerTeam = 16, Seed = 27,
             Tactics = new TacticsSettings { MemberCandidates = 64 } });
         var frame = new BattleFrame(); battle.Capture(frame);
         foreach (var ship in frame.Ships)
@@ -201,7 +204,7 @@ internal static partial class Validation
         return battle;
     }
 
-    private static EntityKey Spawn(Battle<SkecsStore> battle, int team, Vector2 position, bool formation)
+    private static EntityKey Spawn(Battle battle, int team, Vector2 position, bool formation)
     {
         var e = battle.SpawnShip(team, ShipClass.Fighter, position, EntityKey.None);
         battle.Store.Get<Brain>(e) = new Brain { Mode = BrainMode.Attack, NextDecisionTick = formation ? 0 : int.MaxValue,
@@ -212,17 +215,17 @@ internal static partial class Validation
         return e;
     }
 
-    private static void Prepare(Battle<SkecsStore> battle)
+    private static void Prepare(Battle battle)
     {
         battle.Store.Commit(); battle.Capture(new BattleFrame());
         BattleType.GetMethod("PrepareTactics", PrivateInstance)!.Invoke(battle, null);
     }
-    private static EntityKey Threat(Battle<SkecsStore> battle, int index) =>
+    private static EntityKey Threat(Battle battle, int index) =>
         (EntityKey)BattleType.GetMethod("FindThreat", PrivateInstance)!.Invoke(battle, [index])!;
-    private static EntityKey Cover(Battle<SkecsStore> battle, int index) =>
+    private static EntityKey Cover(Battle battle, int index) =>
         (EntityKey)BattleType.GetMethod("FindCover", PrivateInstance)!.Invoke(battle, [index])!;
 
-    private static List<Row> Rows(Battle<SkecsStore> battle)
+    private static List<Row> Rows(Battle battle)
     {
         var result = new List<Row>();
         foreach (var value in (IEnumerable)BattleType.GetField("aiRows", PrivateInstance)!.GetValue(battle)!)
@@ -235,7 +238,7 @@ internal static partial class Validation
         return result;
     }
 
-    private static void CompareSnapshot(Battle<SkecsStore> battle)
+    private static void CompareSnapshot(Battle battle)
     {
         var rows = Rows(battle);
         for (var i = 0; i < rows.Count; i++)

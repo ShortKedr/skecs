@@ -5,6 +5,7 @@ public sealed partial class Battle
     private int entityCount;
     public string Name => "SKECS";
     private readonly global::SKECS.World world = new();
+    internal global::SKECS.World NativeWorld => world;
     private void InitializeNative() { }
     private void DisposeNative() => world.Dispose();
     public EntityKey Create() { var e = world.CreateEntity(); entityCount++; return new(e.Id, e.Version); }

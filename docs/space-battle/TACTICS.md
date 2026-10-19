@@ -70,7 +70,7 @@ determinism and a win in every scenario are not claimed.
 [Squad tests](../../SpaceBattle.Benchmarks/Measurement/SquadCompositionValidation.cs) cover
 composition, compatibility, leases, death repair, cover, lanes and dense budgets.
 [Scoring tests](../../SpaceBattle.Benchmarks/Measurement/TacticalScoringValidation.cs) cover
-layer/arrival/heat estimates. These focused fixtures exercise retained compatibility code; [concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare every tick with SKECS.
+layer/arrival/heat estimates. These focused mechanics fixtures run on the native SKECS core; [concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare the other native cores with SKECS at initial state and after every tick.
 
 
 Run the complete native validation with the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md). Current workload performance is published in the [benchmark report](REPORT.md).

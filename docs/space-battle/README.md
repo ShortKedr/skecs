@@ -14,7 +14,6 @@ SpaceBattle is an AI fleet battle and a realistic ECS comparison workload. SKECS
 | Run desktop and learn its controls | [Desktop client](../../SpaceBattle.Game/README.md) |
 | Read the single high game workload comparison | [Current benchmark report](REPORT.md) |
 | Understand the current stages, components and mutation boundaries | [Current architecture](ARCHITECTURE.md) |
-| Inspect retained compatibility-store fixtures | [Legacy adapters](../../SpaceBattle.Adapters/README.md) |
 | Find and record real combat moments | [Scene search and capture](../../tools/space-battle/scenes/README.md) |
 
 ## Current Gameplay

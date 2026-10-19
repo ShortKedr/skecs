@@ -25,8 +25,14 @@ Private repository: [ShortKedr/skecs-private](https://github.com/ShortKedr/skecs
 SpaceBattle runs a separate concrete simulation in
 `SpaceBattle.Simulations/{Skecs,LeoEcsLite,LeoEcsClassic,Morpeh,StaticEcs}`. Each implementation owns its framework's
 native entities, components, queries, systems, physics and lifecycle. Do not
-route production simulation through `Battle<TStore>`, `IEcsStore`, adapters,
-shared generic systems, or a common simulation implementation.
+route simulation through `Battle<TStore>`, `IEcsStore`, adapters,
+shared generic systems, or a common simulation implementation. Do not retain or
+reintroduce a legacy shared SpaceBattle engine, adapter stores or duplicated
+legacy simulation helpers for tests, compatibility or reference. Keep
+`SpaceBattle.Core` limited to shared data/configuration and presentation contracts.
+Detailed mechanics tests target the native SKECS core. Validate the other native
+cores externally against SKECS at initial state and after every tick instead of
+maintaining a parallel mechanics-test suite or legacy test engine.
 
 Keep gameplay exactly equivalent across all five cores. **A logic change in one
 core must be applied to every core, and the matching desktop, web and headless

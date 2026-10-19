@@ -1,3 +1,8 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using SpatialPointIndex = SpaceBattle.Simulations.Skecs.SpatialPointIndex;
+using EntityIndexTable = SpaceBattle.Simulations.Skecs.EntityIndexTable;
+using AiShipSnapshot = SpaceBattle.Simulations.Skecs.AiShipSnapshot;
+using Squad = SpaceBattle.Simulations.Skecs.Squad;
 using System.Numerics;
 using System.Reflection;
 using SpaceBattle;
@@ -8,21 +13,20 @@ internal static class SquadCompositionValidation
     public static void Run()
     {
         BoundedIndex();
-        Run(static () => new SkecsStore()); Run(static () => new LeoEcsLiteStore());
-        Run(static () => new LeoEcsClassicStore()); Run(static () => new MorpehStore());
-        Run(static () => new StaticEcsStore());
-        Console.WriteLine("PASS: useful mixed/homogeneous squads, compatibility, phase leases, death repair, screen/recovery, lane geometry, dense budgets and warmed phase allocations on five adapters.");
+        RunNative();
+
+        Console.WriteLine("PASS: useful mixed/homogeneous squads, compatibility, phase leases, death repair, screen/recovery, lane geometry, dense budgets and warmed phase allocations on SKECS native core.");
     }
-    private static void Run<T>(Func<T> factory) where T : IEcsStore
+    private static void RunNative()
     {
-        Composition(factory, 120, 120, WeaponKind.Cannon, WeaponKind.Plasma);
-        Composition(factory, 400, 15, WeaponKind.Plasma, WeaponKind.Plasma);
-        Composition(factory, 0, 400, WeaponKind.Cannon, WeaponKind.Cannon);
-        Compatibility(factory); DistantProbes(factory); LeasesAndDeaths(factory); ExternalRoster(factory); ScreenAndRecovery(factory); DenseProgress(factory); DenseAndAllocations(factory);
+        Composition(120, 120, WeaponKind.Cannon, WeaponKind.Plasma);
+        Composition(400, 15, WeaponKind.Plasma, WeaponKind.Plasma);
+        Composition(0, 400, WeaponKind.Cannon, WeaponKind.Cannon);
+        Compatibility(); DistantProbes(); LeasesAndDeaths(); ExternalRoster(); ScreenAndRecovery(); DenseProgress(); DenseAndAllocations();
     }
-    private static void Composition<T>(Func<T> factory, float shield, float hull, WeaponKind leaderKind, WeaponKind preferred) where T : IEcsStore
+    private static void Composition(float shield, float hull, WeaponKind leaderKind, WeaponKind preferred)
     {
-        using var f = new Fixture<T>(factory());
+        using var f = new Fixture();
         var leader = f.Spawn(0, Vector2.Zero, leaderKind);
         var alternatives = new List<EntityKey>();
         for (var i = 0; i < 3; i++) alternatives.Add(f.Spawn(0, new(0, 5 + i * 3), preferred));
@@ -40,9 +44,9 @@ internal static class SquadCompositionValidation
         }
         Check(squad.Count is >= 2 and <= 4 && squad.Members[0] == f.Index(leader), "leader and bounded size");
     }
-    private static void Compatibility<T>(Func<T> factory) where T : IEcsStore
+    private static void Compatibility()
     {
-        using var f = new Fixture<T>(factory());
+        using var f = new Fixture();
         var leader = f.Spawn(0, Vector2.Zero, WeaponKind.Cannon);
         var slow = f.Spawn(0, new(0, 2), WeaponKind.Plasma); f.Store.Get<Motion>(slow).MaxSpeed = 3;
         var shortRange = f.Spawn(0, new(0, 4), WeaponKind.Plasma); f.Store.Get<Weapon>(shortRange).Range = 12;
@@ -55,9 +59,9 @@ internal static class SquadCompositionValidation
         foreach (var e in new[] { slow, shortRange, delayed, big })
             Check(f.Store.Get<Brain>(e).SquadLeader != leader, "incompatible speed/range/readiness/class excluded");
     }
-    private static void DistantProbes<T>(Func<T> factory) where T : IEcsStore
+    private static void DistantProbes()
     {
-        using var f = new Fixture<T>(factory());
+        using var f = new Fixture();
         for (var i = 0; i < 20; i++) f.Spawn(1, new(1000 + i * 20, 1000), WeaponKind.Cannon, false);
         var leader = f.Spawn(0, Vector2.Zero, WeaponKind.Cannon);
         var ally = f.Spawn(0, new(0, 6), WeaponKind.Plasma);
@@ -66,9 +70,9 @@ internal static class SquadCompositionValidation
         Check(f.Store.Get<Brain>(ally).SquadLeader == leader && f.Store.Get<Brain>(ally).Target == nearby,
             "unreachable lower-serial probes cannot crowd accessible formation targets");
     }
-    private static void LeasesAndDeaths<T>(Func<T> factory) where T : IEcsStore
+    private static void LeasesAndDeaths()
     {
-        using var f = new Fixture<T>(factory());
+        using var f = new Fixture();
         var ships = new[] { f.Spawn(0, Vector2.Zero, WeaponKind.Plasma), f.Spawn(0, new(0, 6), WeaponKind.Cannon),
             f.Spawn(0, new(0, 12), WeaponKind.Cannon), f.Spawn(0, new(0, 18), WeaponKind.Plasma) };
         var target = f.Spawn(1, new(50, 0), WeaponKind.Cannon, false); f.Health(target, 400, 1000);
@@ -92,9 +96,9 @@ internal static class SquadCompositionValidation
         f.Kill(target); f.Refresh();
         Check(f.Store.Get<Brain>(survivors[0]).Target == next, "target death releases lease immediately");
     }
-    private static void ScreenAndRecovery<T>(Func<T> factory) where T : IEcsStore
+    private static void ScreenAndRecovery()
     {
-        using var f = new Fixture<T>(factory());
+        using var f = new Fixture();
         var wounded = f.Spawn(0, new(-4, 0), WeaponKind.Cannon);
         var healthy = f.Spawn(0, Vector2.Zero, WeaponKind.Cannon);
         var target = f.Spawn(1, new(-45, 0), WeaponKind.Cannon, false); f.Health(target, 1000, 10000);
@@ -109,16 +113,16 @@ internal static class SquadCompositionValidation
         f.Store.Set(wounded, new Overheated()); f.Store.Get<Heat>(wounded).Value = 105; f.Refresh();
         Check(f.Store.Get<Brain>(healthy).SquadLeader == leader, "temporary heat does not churn useful group");
     }
-    private static void ExternalRoster<T>(Func<T> factory) where T : IEcsStore
+    private static void ExternalRoster()
     {
-        using var f = new Fixture<T>(factory());
+        using var f = new Fixture();
         var ships = Enumerable.Range(0, 4).Select(i => f.Spawn(0, new(0, i * 6), WeaponKind.Cannon)).ToArray();
         f.Spawn(1, new(50, 0), WeaponKind.Cannon, false);
         for (var i = 0; i < 4; i++) { f.Store.Get<Brain>(ships[i]).SquadLeader = ships[i < 2 ? 0 : 2]; f.Store.Get<Brain>(ships[i]).SquadSize = 2; }
         f.Store.Get<Brain>(ships[0]).SquadLeader = ships[2];
         f.Refresh();
-        var buffers = (Squad[])typeof(Battle<T>).GetField("squadBuffers", Hidden)!.GetValue(f.Battle)!;
-        var count = (int)typeof(Battle<T>).GetField("squadCount", Hidden)!.GetValue(f.Battle)!;
+        var buffers = (Squad[])typeof(Battle).GetField("squadBuffers", Hidden)!.GetValue(f.Battle)!;
+        var count = (int)typeof(Battle).GetField("squadCount", Hidden)!.GetValue(f.Battle)!;
         var seen = new HashSet<int>();
         foreach (var squad in buffers.Take(count).Where(s => s.Count >= 2))
             for (var s = 0; s < squad.Count; s++) Check(seen.Add(squad.Members[s]), "external reparent cannot insert leader into two groups");
@@ -126,9 +130,9 @@ internal static class SquadCompositionValidation
         var leader = f.Store.Get<Brain>(ships[1]).SquadLeader;
         Check(leader.IsNone || f.Store.Get<Identity>(leader).Team == 1, "external team edit cannot retain hostile group leader");
     }
-    private static void DenseAndAllocations<T>(Func<T> factory) where T : IEcsStore
+    private static void DenseAndAllocations()
     {
-        using var f = new Fixture<T>(factory(), new TacticsSettings { MaximumSpatialWorkPerTick = 32,
+        using var f = new Fixture(new TacticsSettings { MaximumSpatialWorkPerTick = 32,
             MaximumScoreEvaluationsPerTick = 16, MaximumFormationEvaluationsPerReview = 8 });
         var own = Enumerable.Range(0, 64).Select(i => f.Spawn(0, new(i % 8, i / 8), (i & 1) == 0 ? WeaponKind.Cannon : WeaponKind.Plasma)).ToArray();
         f.Spawn(1, new(60, 0), WeaponKind.Cannon, false);
@@ -140,13 +144,27 @@ internal static class SquadCompositionValidation
         Check(f.Battle.Tactics.SpatialWork - spatial <= 32 && f.Battle.Tactics.ScoreEvaluations - scores <= 16 &&
             f.Battle.Tactics.BudgetFallbacks > 0, "dense work respects budgets with explicit fallback");
         Check(own.Take(4).All(e => f.Store.Get<Brain>(e).SquadLeader == own[0]), "budget exhaustion retains existing group");
+        // The short setup above establishes the gameplay assertions. Exercise the
+        // same cached delegate and native phase substantially before measuring so
+        // one-time generic/delegate/tiered-runtime initialization stays in setup.
+        // There are no retries or accepted allocation budget in the measured block.
+        for (var i = 0; i < 1024; i++) f.Prepare();
+        var samples = new long[256];
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 100; i++) f.Prepare();
-        Check(GC.GetAllocatedBytesForCurrentThread() == before, typeof(T).Name + " reserved tactical phase has no new allocations");
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var start = GC.GetAllocatedBytesForCurrentThread();
+            f.Prepare();
+            samples[i] = GC.GetAllocatedBytesForCurrentThread() - start;
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        if (allocated != 0)
+            throw new InvalidOperationException("SKECS reserved tactical phase has no new allocations: " + allocated +
+                " bytes; per-call=" + string.Join(",", samples.Select((bytes, index) => (bytes, index)).Where(s => s.bytes != 0)));
     }
-    private static void DenseProgress<T>(Func<T> factory) where T : IEcsStore
+    private static void DenseProgress()
     {
-        using var f = new Fixture<T>(factory());
+        using var f = new Fixture();
         var ships = Enumerable.Range(0, 32).Select(i => f.Spawn(0, new(i % 8, i / 8), WeaponKind.Cannon)).ToArray();
         f.Spawn(1, new(60, 0), WeaponKind.Cannon, false); f.Refresh();
         Check(ships.All(e => !f.Store.Get<Brain>(e).SquadLeader.IsNone), "assigned prefix cannot starve later dense eligible ships");
@@ -164,18 +182,18 @@ internal static class SquadCompositionValidation
         Check(GC.GetAllocatedBytesForCurrentThread() == before, "bounded huge query zero allocation");
         work = 0; grid.QueryLimited(Vector2.Zero, 48, output, 16, ref work); Check(output.Count == 0, "empty exhausted query");
     }
-    private sealed class Fixture<T> : IDisposable where T : IEcsStore
+    private sealed class Fixture : IDisposable
     {
-        public readonly Battle<T> Battle; public T Store => Battle.Store;
+        public readonly Battle Battle; public Battle Store => Battle.Store;
         public readonly Action Prepare, Collect;
         private readonly Action flush;
-        public List<AiShipSnapshot> Rows => (List<AiShipSnapshot>)typeof(Battle<T>).GetField("aiRows", Hidden)!.GetValue(Battle)!;
-        public Fixture(T store, TacticsSettings? settings = null)
+        public List<AiShipSnapshot> Rows => (List<AiShipSnapshot>)typeof(Battle).GetField("aiRows", Hidden)!.GetValue(Battle)!;
+        public Fixture(TacticsSettings? settings = null)
         {
-            Battle = new(store, new BattleConfig { ShipsPerTeam = 8, Seed = 61012, Tactics = settings ?? new() });
-            Prepare = typeof(Battle<T>).GetMethod("PrepareTactics", Hidden)!.CreateDelegate<Action>(Battle);
-            Collect = typeof(Battle<T>).GetMethod("Collect", Hidden)!.CreateDelegate<Action>(Battle);
-            flush = typeof(Battle<T>).GetMethod("FlushLifecycle", Hidden)!.CreateDelegate<Action>(Battle);
+            Battle = new(new BattleConfig { ShipsPerTeam = 8, Seed = 61012, Tactics = settings ?? new() });
+            Prepare = typeof(Battle).GetMethod("PrepareTactics", Hidden)!.CreateDelegate<Action>(Battle);
+            Collect = typeof(Battle).GetMethod("Collect", Hidden)!.CreateDelegate<Action>(Battle);
+            flush = typeof(Battle).GetMethod("FlushLifecycle", Hidden)!.CreateDelegate<Action>(Battle);
             var frame = new BattleFrame(); Battle.Capture(frame);
             foreach (var row in frame.Ships) { Battle.TryFindShip(row.Serial, out var e); Store.Set(e, new Docked { Carrier = EntityKey.None }); Store.Get<Brain>(e).NextDecisionTick = int.MaxValue; }
         }
@@ -196,13 +214,13 @@ internal static class SquadCompositionValidation
         public int Index(EntityKey e) => Rows.FindIndex(row => row.Entity == e);
         public Squad Squad(EntityKey e)
         {
-            var indexes = (EntityIndexTable)typeof(Battle<T>).GetField("squadIndexes", Hidden)!.GetValue(Battle)!;
-            var buffers = (Squad[])typeof(Battle<T>).GetField("squadBuffers", Hidden)!.GetValue(Battle)!;
+            var indexes = (EntityIndexTable)typeof(Battle).GetField("squadIndexes", Hidden)!.GetValue(Battle)!;
+            var buffers = (Squad[])typeof(Battle).GetField("squadBuffers", Hidden)!.GetValue(Battle)!;
             return buffers[indexes[Store.Get<Brain>(e).SquadLeader]];
         }
-        public void SetTick(int value) => typeof(Battle<T>).GetField("<Tick>k__BackingField", Hidden)!.SetValue(Battle, value);
+        public void SetTick(int value) => typeof(Battle).GetField("<Tick>k__BackingField", Hidden)!.SetValue(Battle, value);
         public void Kill(EntityKey e) { Battle.Damage(e, 100000, false, false); flush(); }
-        public Vector2 Steering(EntityKey e) => (Vector2)typeof(Battle<T>).GetMethod("FormationSteering", Hidden)!.Invoke(Battle,
+        public Vector2 Steering(EntityKey e) => (Vector2)typeof(Battle).GetMethod("FormationSteering", Hidden)!.Invoke(Battle,
             [e, Store.Get<Brain>(e), Store.Get<Transform>(e).Position, Store.Get<Motion>(e).MaxSpeed])!;
         public void Dispose() => Battle.Dispose();
     }

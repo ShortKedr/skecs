@@ -1,3 +1,8 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using AiShipSnapshot = SpaceBattle.Simulations.Skecs.AiShipSnapshot;
+using Squad = SpaceBattle.Simulations.Skecs.Squad;
+using TacticalEstimate = SpaceBattle.Simulations.Skecs.TacticalEstimate;
+using ActorScoring = SpaceBattle.Simulations.Skecs.ActorScoring;
 using System.Numerics;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -10,24 +15,21 @@ internal static partial class AiLocalityValidation
 
     public static void Run()
     {
-        Run(static () => new SkecsStore());
-        Run(static () => new LeoEcsLiteStore());
-        Run(static () => new LeoEcsClassicStore());
-        Run(static () => new MorpehStore());
-        Run(static () => new StaticEcsStore());
-        Console.WriteLine("PASS: AI locality independent readiness/arrival scoring/selection bit parity, lazy gates, serial ties, global search, snapshot rebuilds and copy-free hot-path IL (five adapters).");
+        RunNative();
+
+        Console.WriteLine("PASS: AI locality independent readiness/arrival scoring/selection bit parity, lazy gates, serial ties, global search, snapshot rebuilds and copy-free hot-path IL (SKECS native core).");
     }
 
-    public static void Run<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void RunNative()
     {
-        FocusedChecks(factory);
-        CorpusChecks(factory);
-        CopyChecks<TStore>();
+        FocusedChecks();
+        CorpusChecks();
+        CopyChecks();
     }
 
-    private static void FocusedChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void FocusedChecks()
     {
-        using var f = new Fixture<TStore>(factory());
+        using var f = new Fixture();
         var actor = f.Spawn(0, ShipClass.Corvette, Vector2.Zero);
         var first = f.Spawn(1, ShipClass.Fighter, new(60, 0));
         var tied = f.Spawn(1, ShipClass.Fighter, new(60, 0));
@@ -117,9 +119,9 @@ internal static partial class AiLocalityValidation
         Check(f.Count(0) == -1 && f.Count(1) == -1, "empty phase needs no target preparation");
     }
 
-    private static void CorpusChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void CorpusChecks()
     {
-        using var f = new Fixture<TStore>(factory());
+        using var f = new Fixture();
         var random = new Random(61012); var actors = new List<EntityKey>();
         for (var i = 0; i < 22; i++)
         {
@@ -198,15 +200,15 @@ internal static partial class AiLocalityValidation
             "weapon gate leaves DPS and speed unevaluated");
     }
 
-    private static void CheckIndex<TStore>(Fixture<TStore> f, int team) where TStore : IEcsStore
+    private static void CheckIndex(Fixture f, int team)
     {
         var expected = Enumerable.Range(0, f.Rows.Count).Where(i => !f.Rows[i].Docked && f.Rows[i].Id.Team != team);
         Check(f.Count(team) >= 0 && f.Buffer(team).Take(f.Count(team)).SequenceEqual(expected),
             "enemy list skips only docked/same-team and retains snapshot serial order");
     }
 
-    private static void CheckSelection<TStore>(Fixture<TStore> f, ScoringOracle oracle, int actor,
-        Squad? squad, Brain brain, EntityKey? expected = null) where TStore : IEcsStore
+    private static void CheckSelection(Fixture f, ScoringOracle oracle, int actor,
+        Squad? squad, Brain brain, EntityKey? expected = null)
     {
         var before = f.Battle.Tactics.TargetRetentions;
         var reference = oracle.Select(actor, squad, brain, out var referenceCost, out var retained);
@@ -226,15 +228,15 @@ internal static partial class AiLocalityValidation
         if (!success) throw new InvalidOperationException("AI locality: " + message);
     }
 
-    private sealed class Fixture<TStore> : IDisposable where TStore : IEcsStore
+    private sealed class Fixture : IDisposable
     {
-        private static readonly Type Type = typeof(Battle<TStore>);
-        public readonly Battle<TStore> Battle;
+        private static readonly Type Type = typeof(Battle);
+        public readonly Battle Battle;
         public List<AiShipSnapshot> Rows => Field<List<AiShipSnapshot>>("aiRows");
-        public Fixture(TStore store, BattleConfig? config = null, bool completeSelection = true)
+        public Fixture(BattleConfig? config = null, bool completeSelection = true)
         {
             var settings = config ?? new BattleConfig { ShipsPerTeam = 8, Seed = 61012, ChurnMultiplier = 1.37f };
-            Battle = new(store, completeSelection ? settings with { Tactics = settings.Tactics with { LocalTargetCandidates = 64,
+            Battle = new(completeSelection ? settings with { Tactics = settings.Tactics with { LocalTargetCandidates = 64,
                 GlobalTargetProbes = 64, MaximumSpatialWorkPerTick = 1048576, MaximumScoreEvaluationsPerTick = 1048576 } } : settings);
             var frame = new BattleFrame(); Battle.Capture(frame);
             foreach (var ship in frame.Ships)
@@ -285,12 +287,12 @@ internal static partial class AiLocalityValidation
         public void Dispose() => Battle.Dispose();
     }
 
-    private static void CopyChecks<TStore>() where TStore : IEcsStore
+    private static void CopyChecks()
     {
         var opcodes = typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static)
             .Where(f => f.FieldType == typeof(OpCode)).Select(f => (OpCode)f.GetValue(null)!)
             .ToDictionary(op => unchecked((ushort)op.Value));
-        var type = typeof(Battle<TStore>);
+        var type = typeof(Battle);
         foreach (var name in new[] { "PrepareTactics", "NewSquad", "TargetAvailable", "SelectTarget", "TargetCost",
                      "EstimateTarget", "WeaponArrival", "AddMemberStreams", "AddStream", "MemberEngageSeconds", "WorkingRange",
                      "PrepareThreatIndex", "CoverVelocity", "FormationSteering" })

@@ -1,3 +1,5 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using PhysicsService = SpaceBattle.Simulations.Skecs.PhysicsService;
 using System.Numerics;
 using SpaceBattle;
 

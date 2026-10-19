@@ -1,69 +1,40 @@
 using SpaceBattle;
+using SkecsBattle = SpaceBattle.Simulations.Skecs.Battle;
 
 namespace BenchmarkTools.Tests;
 
 public sealed class NativeCoreReplayTests
 {
-    [Fact]
-    public void StaticEcsBrowserBatchDeletionSelectsOnlyOneEntityAcrossBlockSegmentAndChunkBoundaries()
-    {
-        using var battle = new SpaceBattle.Simulations.StaticEcs.Battle(Config);
-        var gameplay = new List<EntityKey>(); battle.CopyEntityKeys(gameplay);
-        var extras = new List<EntityKey>();
-        for (var i = 0; i < 4200; i++)
-        {
-            var e = battle.Create(); battle.Set(e, new Lifetime { EndTick = i + 10000 }); extras.Add(e);
-        }
-        var destroy = typeof(SpaceBattle.Simulations.StaticEcs.Battle).GetMethod("DestroyBrowserEntity",
-            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
-        var deleted = new HashSet<EntityKey>();
-        foreach (var id in new[] { 127, 128, 255, 256, 4095, 4096 })
-        {
-            var e = extras.Single(e => e.Id == id);
-            destroy.Invoke(null, new object[] { e });
-            deleted.Add(e);
-            Assert.False(battle.Alive(e));
-        }
-        for (var i = 0; i < extras.Count; i++)
-        {
-            var e = extras[i];
-            Assert.Equal(!deleted.Contains(e), battle.Alive(e));
-            if (!deleted.Contains(e)) Assert.Equal(i + 10000, battle.Get<Lifetime>(e).EndTick);
-        }
-        foreach (var e in gameplay) Assert.True(battle.Alive(e));
-    }
-
-    [Theory]
-    [InlineData("", "D41D8CD98F00B204E9800998ECF8427E")]
-    [InlineData("a", "0CC175B9C0F1B6A831C399E269772661")]
-    [InlineData("abc", "900150983CD24FB0D6963F7D28E17F72")]
-    [InlineData("message digest", "F96B697D7CB7938D525A2F31AAF161D0")]
-    [InlineData("abcdefghijklmnopqrstuvwxyz", "C3FCD3D76192E4007DFB496CCA67E13B")]
-    public void StaticEcsBrowserTypeGuidHashMatchesKnownMd5Vectors(string text, string expected)
-        => Assert.Equal(expected, Convert.ToHexString(SKECS.BenchmarkCompatibility.StaticEcsMd5.ComputeManaged(System.Text.Encoding.UTF8.GetBytes(text))));
-
-    [Fact]
-    public void StaticEcsBrowserTypeGuidHashMatchesBclAcrossPaddingAndBlockBoundaries()
-    {
-        var random = new Random(7331);
-        foreach (var length in new[] { 0, 1, 55, 56, 63, 64, 65, 119, 120, 127, 128, 4096 })
-        {
-            var bytes = new byte[length]; random.NextBytes(bytes);
-            Assert.Equal(System.Security.Cryptography.MD5.HashData(bytes), SKECS.BenchmarkCompatibility.StaticEcsMd5.ComputeManaged(bytes));
-            using var factory = SKECS.BenchmarkCompatibility.StaticEcsMd5.Create();
-            Assert.Equal(System.Security.Cryptography.MD5.HashData(bytes), factory.ComputeHash(bytes));
-        }
-    }
-
+    private const int CorpusTicks = 3000;
     private static BattleConfig Config => new() { ShipsPerTeam = 8, CarriersPerTeam = 2, ChurnMultiplier = 8, ParticleMultiplier = 1 };
 
+    // A finite regression corpus, not a proof for arbitrary configurations or platforms.
+    // Detailed mechanics/invariant tests belong to SKECS. Other frameworks are observed
+    // only through their externally hashed replay, with SKECS as the tick-by-tick oracle.
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ConcreteCoresMatchEveryTickAcrossLiveBattleCorpus(bool tactical)
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public void ConcreteCoresMatchSkecsAtEveryTickInFiniteReplayCorpus(bool tactical, bool contactCache)
     {
-        var config = Config with { Deployment = tactical ? FleetDeployment.Tactical : FleetDeployment.LegacyRandom, FleetComposition = tactical ? FleetComposition.LightSwarm : FleetComposition.Uniform, EndlessReinforcements = tactical };
-        using var skecs = new SpaceBattle.Simulations.Skecs.Battle(config);
+        var config = Config with
+        {
+            Seed = contactCache ? 27u : 7331u,
+            ShipsPerTeam = tactical ? 16 : 24,
+            ArenaHalfSize = tactical ? 110 : 100,
+            Deployment = tactical ? FleetDeployment.Tactical : FleetDeployment.LegacyRandom,
+            FleetComposition = tactical ? FleetComposition.LightSwarm : FleetComposition.Uniform,
+            EndlessReinforcements = tactical,
+            ReplenishCarriers = !tactical,
+            ReinforcementThresholdFraction = .5f,
+            ReinforcementCheckIntervalTicks = 12,
+            ReinforcementWarmupTicks = 12,
+            ReinforcementSpawnIntervalTicks = 2,
+            ReinforcementCooldownTicks = 60,
+            Physics = new PhysicsSettings { CacheContactCandidates = contactCache }
+        };
+        using var skecs = new SkecsBattle(config);
         using var leoecslite = new SpaceBattle.Simulations.LeoEcsLite.Battle(config);
         using var leoecsclassic = new SpaceBattle.Simulations.LeoEcsClassic.Battle(config);
         using var morpeh = new SpaceBattle.Simulations.Morpeh.Battle(config);
@@ -73,29 +44,66 @@ public sealed class NativeCoreReplayTests
         var leoecsclassicHash = new ReplayHash(leoecsclassic.CopyReplayState, leoecsclassic.Counters, leoecsclassic.Tactics);
         var morpehHash = new ReplayHash(morpeh.CopyReplayState, morpeh.Counters, morpeh.Tactics);
         var staticecsHash = new ReplayHash(staticecs.CopyReplayState, staticecs.Counters, staticecs.Tactics);
-        for (var tick = 0; tick <= 480; tick++)
+        var previousContacts = new HashSet<ulong>();
+        var sawContact = false;
+        var sawContactEnd = false;
+        var sawProjectiles = false;
+        var sawParticles = false;
+        for (var tick = 0; tick <= CorpusTicks; tick++)
         {
             var expected = skecsHash.Capture();
             ReplayHash.RequireMatch("LeoEcsLite", tick, expected, leoecsliteHash.Capture());
             ReplayHash.RequireMatch("LeoEcsClassic", tick, expected, leoecsclassicHash.Capture());
             ReplayHash.RequireMatch("Morpeh", tick, expected, morpehHash.Capture());
             ReplayHash.RequireMatch("StaticEcs", tick, expected, staticecsHash.Capture());
-            if (tick == 480) break;
+            // These SKECS-only assertions establish what the parity corpus exercises.
+            var contacts = ContactPairs(skecs);
+            sawContact |= contacts.Count > 0;
+            sawContactEnd |= previousContacts.Any(pair => !contacts.Contains(pair));
+            previousContacts.Clear();
+            previousContacts.UnionWith(contacts);
+            sawProjectiles |= skecs.ProjectileCount > 0;
+            sawParticles |= skecs.ParticleCount > 0;
+            if (tick == CorpusTicks) break;
             skecs.Step();
             leoecslite.Step();
             leoecsclassic.Step();
             morpeh.Step();
             staticecs.Step();
         }
-        Assert.True(skecs.Counters.Shots > 0, "The corpus must include weapons and moving entities.");
-        Assert.True(skecs.Counters.Builds > 0, "The corpus must include structural creation.");
+        Assert.True(sawProjectiles && skecs.Counters.Shots > 0, "The corpus must include live projectiles.");
+        Assert.True(sawParticles, "The corpus must include transient effect entities.");
+        Assert.True(skecs.Counters.Builds > 0 && skecs.Counters.ShipsDestroyed > 0, "The corpus must include ship creation and retirement.");
+        Assert.True(skecs.Counters.StructuralAdds > 0 && skecs.Counters.StructuralRemoves > 0, "The corpus must include component lifetime churn.");
+        Assert.True(sawContact && sawContactEnd, "The corpus must include contacts starting and ending.");
         Assert.True(skecs.Tactics.FormationReviews > 0, "The corpus must include tactical decisions.");
+        if (tactical)
+            Assert.True(skecs.Counters.ReinforcementWaves > 0 && skecs.Counters.ReinforcementShips > 0,
+                "The tactical corpus must include warp waves and actual arrivals.");
+    }
+
+    [Fact]
+    public void ReplayMismatchIdentifiesFrameworkTickExpectedAndActualHash()
+    {
+        ReplayHash.RequireMatch("same", 0, 0x1234UL, 0x1234UL);
+        var error = Assert.Throws<InvalidOperationException>(() => ReplayHash.RequireMatch("different", 3000, 0x1234UL, 0x5678UL));
+        Assert.Contains("different", error.Message);
+        Assert.Contains("tick 3000", error.Message);
+        Assert.Contains("0000000000001234", error.Message);
+        Assert.Contains("0000000000005678", error.Message);
+    }
+
+    private static HashSet<ulong> ContactPairs(SkecsBattle battle)
+    {
+        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var physics = typeof(SkecsBattle).GetField("physics", flags)!.GetValue(battle)!;
+        return (HashSet<ulong>)physics.GetType().GetField("currentPairs", flags)!.GetValue(physics)!;
     }
 
     [Fact]
     public void SkecsHashDetectsComponentTagCounterAndTacticalMutations()
     {
-        using var battle = new SpaceBattle.Simulations.Skecs.Battle(Config);
+        using var battle = new SkecsBattle(Config);
         Assert.True(battle.TryFindShip(1, out var ship));
         var hash = new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics);
         AssertMutation(hash, () => battle.Store.Get<Heat>(ship).Value += 1);
@@ -107,91 +115,7 @@ public sealed class NativeCoreReplayTests
     [Fact]
     public void SkecsRecycledNativeIdentityCannotResurrectStaleHandle()
     {
-        using var battle = new SpaceBattle.Simulations.Skecs.Battle(Config);
-        AssertLifetime(battle.Create, battle.Destroy, battle.Alive, battle.Commit,
-            e => battle.Set(e, new Lifetime { EndTick = 123 }),
-            e => battle.Get<Lifetime>(e).EndTick);
-    }
-
-    [Fact]
-    public void LeoEcsLiteHashDetectsComponentTagCounterAndTacticalMutations()
-    {
-        using var battle = new SpaceBattle.Simulations.LeoEcsLite.Battle(Config);
-        Assert.True(battle.TryFindShip(1, out var ship));
-        var hash = new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics);
-        AssertMutation(hash, () => battle.Store.Get<Heat>(ship).Value += 1);
-        AssertMutation(hash, () => battle.Store.Set(ship, new Overheated { SinceTick = 1 }));
-        AssertMutation(hash, () => battle.Counters.StructuralAdds += 1L << 40);
-        AssertMutation(hash, () => battle.Tactics.TargetSwitches += 1L << 40);
-    }
-
-    [Fact]
-    public void LeoEcsLiteRecycledNativeIdentityCannotResurrectStaleHandle()
-    {
-        using var battle = new SpaceBattle.Simulations.LeoEcsLite.Battle(Config);
-        AssertLifetime(battle.Create, battle.Destroy, battle.Alive, battle.Commit,
-            e => battle.Set(e, new Lifetime { EndTick = 123 }),
-            e => battle.Get<Lifetime>(e).EndTick);
-    }
-
-    [Fact]
-    public void LeoEcsClassicHashDetectsComponentTagCounterAndTacticalMutations()
-    {
-        using var battle = new SpaceBattle.Simulations.LeoEcsClassic.Battle(Config);
-        Assert.True(battle.TryFindShip(1, out var ship));
-        var hash = new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics);
-        AssertMutation(hash, () => battle.Store.Get<Heat>(ship).Value += 1);
-        AssertMutation(hash, () => battle.Store.Set(ship, new Overheated { SinceTick = 1 }));
-        AssertMutation(hash, () => battle.Counters.StructuralAdds += 1L << 40);
-        AssertMutation(hash, () => battle.Tactics.TargetSwitches += 1L << 40);
-    }
-
-    [Fact]
-    public void LeoEcsClassicRecycledNativeIdentityCannotResurrectStaleHandle()
-    {
-        using var battle = new SpaceBattle.Simulations.LeoEcsClassic.Battle(Config);
-        AssertLifetime(battle.Create, battle.Destroy, battle.Alive, battle.Commit,
-            e => battle.Set(e, new Lifetime { EndTick = 123 }),
-            e => battle.Get<Lifetime>(e).EndTick);
-    }
-
-    [Fact]
-    public void MorpehHashDetectsComponentTagCounterAndTacticalMutations()
-    {
-        using var battle = new SpaceBattle.Simulations.Morpeh.Battle(Config);
-        Assert.True(battle.TryFindShip(1, out var ship));
-        var hash = new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics);
-        AssertMutation(hash, () => battle.Store.Get<Heat>(ship).Value += 1);
-        AssertMutation(hash, () => battle.Store.Set(ship, new Overheated { SinceTick = 1 }));
-        AssertMutation(hash, () => battle.Counters.StructuralAdds += 1L << 40);
-        AssertMutation(hash, () => battle.Tactics.TargetSwitches += 1L << 40);
-    }
-
-    [Fact]
-    public void MorpehRecycledNativeIdentityCannotResurrectStaleHandle()
-    {
-        using var battle = new SpaceBattle.Simulations.Morpeh.Battle(Config);
-        AssertLifetime(battle.Create, battle.Destroy, battle.Alive, battle.Commit,
-            e => battle.Set(e, new Lifetime { EndTick = 123 }),
-            e => battle.Get<Lifetime>(e).EndTick);
-    }
-
-    [Fact]
-    public void StaticEcsHashDetectsComponentTagCounterAndTacticalMutations()
-    {
-        using var battle = new SpaceBattle.Simulations.StaticEcs.Battle(Config);
-        Assert.True(battle.TryFindShip(1, out var ship));
-        var hash = new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics);
-        AssertMutation(hash, () => battle.Store.Get<Heat>(ship).Value += 1);
-        AssertMutation(hash, () => battle.Store.Set(ship, new Overheated { SinceTick = 1 }));
-        AssertMutation(hash, () => battle.Counters.StructuralAdds += 1L << 40);
-        AssertMutation(hash, () => battle.Tactics.TargetSwitches += 1L << 40);
-    }
-
-    [Fact]
-    public void StaticEcsRecycledNativeIdentityCannotResurrectStaleHandle()
-    {
-        using var battle = new SpaceBattle.Simulations.StaticEcs.Battle(Config);
+        using var battle = new SkecsBattle(Config);
         AssertLifetime(battle.Create, battle.Destroy, battle.Alive, battle.Commit,
             e => battle.Set(e, new Lifetime { EndTick = 123 }),
             e => battle.Get<Lifetime>(e).EndTick);
@@ -200,7 +124,7 @@ public sealed class NativeCoreReplayTests
     [Fact]
     public void SkecsHashIncludesPersistentContactCache()
     {
-        using var battle = new SpaceBattle.Simulations.Skecs.Battle(Config);
+        using var battle = new SkecsBattle(Config);
         var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
         // The first rows are ships. Force a real overlap to create contact history.
         battle.Get<Transform>(keys[1]) = battle.Get<Transform>(keys[0]);
@@ -209,192 +133,47 @@ public sealed class NativeCoreReplayTests
     }
 
     [Fact]
-    public void LeoEcsLiteHashIncludesPersistentContactCache()
+    public void SkecsSoftwareValidationRejectsInvalidComponentsAndMountRosters()
     {
-        using var battle = new SpaceBattle.Simulations.LeoEcsLite.Battle(Config);
+        using var battle = new SkecsBattle(Config);
         var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        // The first rows are ships. Force a real overlap to create contact history.
-        battle.Get<Transform>(keys[1]) = battle.Get<Transform>(keys[0]);
-        battle.Step();
-        AssertContactCacheMutation(battle, new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics));
+        var ships = keys.Where(e => battle.Has<Identity>(e)).Take(2).ToArray();
+        var ship = ships[0];
+        var gun = keys.First(e => battle.Has<MountedTurret>(e) && battle.Get<MountedTurret>(e).Parent == ship);
+        var hull = battle.Get<Hull>(ship);
+        var inventory = battle.Get<Inventory>(ship);
+        var mount = battle.Get<MountedTurret>(gun);
+        AssertRejectedThenRestored(battle.Validate,
+            () => battle.Get<Hull>(ship).Current = -1,
+            () => battle.Set(ship, hull), "Invalid ship state");
+        AssertRejectedThenRestored(battle.Validate,
+            () => battle.Get<Inventory>(ship).Items[0].Count = -1,
+            () => battle.Set(ship, inventory), "Negative inventory");
+        AssertRejectedThenRestored(battle.Validate,
+            () => battle.Get<MountedTurret>(gun).Parent = EntityKey.None,
+            () => battle.Set(gun, mount), "Invalid turret attachment");
+        // A valid live parent and slot cannot conceal the original ship's missing mount.
+        AssertRejectedThenRestored(battle.Validate,
+            () => battle.Get<MountedTurret>(gun).Parent = ships[1],
+            () => battle.Set(gun, mount), "Missing turret attachment");
     }
 
     [Fact]
-    public void LeoEcsClassicHashIncludesPersistentContactCache()
-    {
-        using var battle = new SpaceBattle.Simulations.LeoEcsClassic.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        // The first rows are ships. Force a real overlap to create contact history.
-        battle.Get<Transform>(keys[1]) = battle.Get<Transform>(keys[0]);
-        battle.Step();
-        AssertContactCacheMutation(battle, new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics));
-    }
+    public void SkecsComprehensiveMechanicsAndInvariantsPass()
+        => global::Validation.Run();
 
-    [Fact]
-    public void MorpehHashIncludesPersistentContactCache()
+    private static void AssertContactCacheMutation(SkecsBattle battle, ReplayHash hash)
     {
-        using var battle = new SpaceBattle.Simulations.Morpeh.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        // The first rows are ships. Force a real overlap to create contact history.
-        battle.Get<Transform>(keys[1]) = battle.Get<Transform>(keys[0]);
-        battle.Step();
-        AssertContactCacheMutation(battle, new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics));
-    }
-
-    [Fact]
-    public void StaticEcsHashIncludesPersistentContactCache()
-    {
-        using var battle = new SpaceBattle.Simulations.StaticEcs.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        // The first rows are ships. Force a real overlap to create contact history.
-        battle.Get<Transform>(keys[1]) = battle.Get<Transform>(keys[0]);
-        battle.Step();
-        AssertContactCacheMutation(battle, new ReplayHash(battle.CopyReplayState, battle.Counters, battle.Tactics));
-    }
-
-    private static void AssertContactCacheMutation(object battle, ReplayHash hash)
-    {
-        const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
-        var physics = battle.GetType().GetField("physics", flags)!.GetValue(battle)!;
-        var pairs = (HashSet<ulong>)physics.GetType().GetField("currentPairs", flags)!.GetValue(physics)!;
+        var pairs = ContactPairs(battle);
         Assert.NotEmpty(pairs);
         var before = hash.Capture();
         var contacts = pairs.ToArray();
         pairs.Remove(contacts[0]);
         Assert.NotEqual(before, hash.Capture());
         pairs.Clear();
-        // Hashing observes the logical set, independent of insertion/enumeration order.
+        // Hash logical membership, independently of insertion/enumeration order.
         foreach (var pair in contacts.Reverse()) pairs.Add(pair);
         Assert.Equal(before, hash.Capture());
-    }
-    [Fact]
-    public void SkecsSoftwareValidationRejectsInvalidComponentsAndMountRosters()
-    {
-        using var battle = new SpaceBattle.Simulations.Skecs.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        var ships = keys.Where(e => battle.Has<Identity>(e)).Take(2).ToArray();
-        var ship = ships[0];
-        var gun = keys.First(e => battle.Has<MountedTurret>(e) && battle.Get<MountedTurret>(e).Parent == ship);
-        var hull = battle.Get<Hull>(ship);
-        var inventory = battle.Get<Inventory>(ship);
-        var mount = battle.Get<MountedTurret>(gun);
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Hull>(ship).Current = -1,
-            () => battle.Set(ship, hull), "Invalid ship state");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Inventory>(ship).Items[0].Count = -1,
-            () => battle.Set(ship, inventory), "Negative inventory");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = EntityKey.None,
-            () => battle.Set(gun, mount), "Invalid turret attachment");
-        // A valid live parent and slot cannot conceal the original ship's missing mount.
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = ships[1],
-            () => battle.Set(gun, mount), "Missing turret attachment");
-    }
-
-    [Fact]
-    public void LeoEcsLiteSoftwareValidationRejectsInvalidComponentsAndMountRosters()
-    {
-        using var battle = new SpaceBattle.Simulations.LeoEcsLite.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        var ships = keys.Where(e => battle.Has<Identity>(e)).Take(2).ToArray();
-        var ship = ships[0];
-        var gun = keys.First(e => battle.Has<MountedTurret>(e) && battle.Get<MountedTurret>(e).Parent == ship);
-        var hull = battle.Get<Hull>(ship);
-        var inventory = battle.Get<Inventory>(ship);
-        var mount = battle.Get<MountedTurret>(gun);
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Hull>(ship).Current = -1,
-            () => battle.Set(ship, hull), "Invalid ship state");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Inventory>(ship).Items[0].Count = -1,
-            () => battle.Set(ship, inventory), "Negative inventory");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = EntityKey.None,
-            () => battle.Set(gun, mount), "Invalid turret attachment");
-        // A valid live parent and slot cannot conceal the original ship's missing mount.
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = ships[1],
-            () => battle.Set(gun, mount), "Missing turret attachment");
-    }
-
-    [Fact]
-    public void LeoEcsClassicSoftwareValidationRejectsInvalidComponentsAndMountRosters()
-    {
-        using var battle = new SpaceBattle.Simulations.LeoEcsClassic.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        var ships = keys.Where(e => battle.Has<Identity>(e)).Take(2).ToArray();
-        var ship = ships[0];
-        var gun = keys.First(e => battle.Has<MountedTurret>(e) && battle.Get<MountedTurret>(e).Parent == ship);
-        var hull = battle.Get<Hull>(ship);
-        var inventory = battle.Get<Inventory>(ship);
-        var mount = battle.Get<MountedTurret>(gun);
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Hull>(ship).Current = -1,
-            () => battle.Set(ship, hull), "Invalid ship state");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Inventory>(ship).Items[0].Count = -1,
-            () => battle.Set(ship, inventory), "Negative inventory");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = EntityKey.None,
-            () => battle.Set(gun, mount), "Invalid turret attachment");
-        // A valid live parent and slot cannot conceal the original ship's missing mount.
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = ships[1],
-            () => battle.Set(gun, mount), "Missing turret attachment");
-    }
-
-    [Fact]
-    public void MorpehSoftwareValidationRejectsInvalidComponentsAndMountRosters()
-    {
-        using var battle = new SpaceBattle.Simulations.Morpeh.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        var ships = keys.Where(e => battle.Has<Identity>(e)).Take(2).ToArray();
-        var ship = ships[0];
-        var gun = keys.First(e => battle.Has<MountedTurret>(e) && battle.Get<MountedTurret>(e).Parent == ship);
-        var hull = battle.Get<Hull>(ship);
-        var inventory = battle.Get<Inventory>(ship);
-        var mount = battle.Get<MountedTurret>(gun);
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Hull>(ship).Current = -1,
-            () => battle.Set(ship, hull), "Invalid ship state");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Inventory>(ship).Items[0].Count = -1,
-            () => battle.Set(ship, inventory), "Negative inventory");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = EntityKey.None,
-            () => battle.Set(gun, mount), "Invalid turret attachment");
-        // A valid live parent and slot cannot conceal the original ship's missing mount.
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = ships[1],
-            () => battle.Set(gun, mount), "Missing turret attachment");
-    }
-
-    [Fact]
-    public void StaticEcsSoftwareValidationRejectsInvalidComponentsAndMountRosters()
-    {
-        using var battle = new SpaceBattle.Simulations.StaticEcs.Battle(Config);
-        var keys = new List<EntityKey>(); battle.CopyEntityKeys(keys);
-        var ships = keys.Where(e => battle.Has<Identity>(e)).Take(2).ToArray();
-        var ship = ships[0];
-        var gun = keys.First(e => battle.Has<MountedTurret>(e) && battle.Get<MountedTurret>(e).Parent == ship);
-        var hull = battle.Get<Hull>(ship);
-        var inventory = battle.Get<Inventory>(ship);
-        var mount = battle.Get<MountedTurret>(gun);
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Hull>(ship).Current = -1,
-            () => battle.Set(ship, hull), "Invalid ship state");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<Inventory>(ship).Items[0].Count = -1,
-            () => battle.Set(ship, inventory), "Negative inventory");
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = EntityKey.None,
-            () => battle.Set(gun, mount), "Invalid turret attachment");
-        // A valid live parent and slot cannot conceal the original ship's missing mount.
-        AssertRejectedThenRestored(battle.Validate,
-            () => battle.Get<MountedTurret>(gun).Parent = ships[1],
-            () => battle.Set(gun, mount), "Missing turret attachment");
     }
 
     private static void AssertRejectedThenRestored(Action validate, Action mutate, Action restore, string reason)
@@ -406,6 +185,7 @@ public sealed class NativeCoreReplayTests
         restore();
         validate();
     }
+
     private static void AssertMutation(ReplayHash hash, Action mutate)
     {
         var before = hash.Capture();

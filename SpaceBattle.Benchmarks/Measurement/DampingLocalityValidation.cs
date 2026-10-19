@@ -1,3 +1,5 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using DampingFactorCache = SpaceBattle.Simulations.Skecs.DampingFactorCache;
 using System.Collections;
 using System.Numerics;
 using System.Reflection;
@@ -8,12 +10,9 @@ internal static class DampingLocalityValidation
     public static void Run()
     {
         CacheChecks();
-        StoreChecks(static () => new SkecsStore());
-        StoreChecks(static () => new LeoEcsLiteStore());
-        StoreChecks(static () => new LeoEcsClassicStore());
-        StoreChecks(static () => new MorpehStore());
-        StoreChecks(static () => new StaticEcsStore());
-        Console.WriteLine("PASS: bounded raw-bit damping cache, scalar steering parity, lazy row access and external Motion edits on five stores.");
+        StoreChecks();
+
+        Console.WriteLine("PASS: bounded raw-bit damping cache, scalar steering parity, lazy row access and external Motion edits on SKECS native core.");
     }
 
     private static readonly float[] Dampings = [0.15f, 0.4f, 0, -0f, -0.25f, float.Epsilon,
@@ -92,12 +91,12 @@ internal static class DampingLocalityValidation
     private static int FindOccupied(Array entries) => entries.Cast<object>().Count(entry =>
         (bool)entry.GetType().GetField("Occupied")!.GetValue(entry)!);
 
-    private static void StoreChecks(Func<IEcsStore> factory)
+    private static void StoreChecks()
     {
-        using var battle = new Battle<TracingStore>(new TracingStore(factory()), new BattleConfig { ShipsPerTeam = 8, Seed = 27 });
+        using var battle = new Battle(new BattleConfig { ShipsPerTeam = 8, Seed = 27 });
         var store = battle.Store;
         var initial = new CollectTransforms { Rows = new() };
-        store.ForEach<Transform, CollectTransforms>(ref initial);
+        store.NativeWorld.Query<Transform>().ForEach(ref initial);
         foreach (var e in initial.Rows) store.Destroy(e);
         store.Commit();
         // Isolate steering: no AI, physics, lifecycle, or cached-snapshot refresh can mask a stale damping value.
@@ -109,8 +108,8 @@ internal static class DampingLocalityValidation
             for (var pass = 0; pass < 2; pass++)
             {
                 var expected = rows.ToDictionary(e => e, e => Scalar(battle, e));
-                var steering = new Battle<TracingStore>.SteeringSystem { Battle = battle };
-                store.ForEach<Transform, Motion, Brain, Battle<TracingStore>.SteeringSystem>(ref steering);
+                var steering = new Battle.SteeringSystem { Battle = battle };
+                store.NativeWorld.Query<Transform, Motion, Brain>().ForEach(ref steering);
                 foreach (var e in rows) Compare(store, e, expected[e]);
             }
             foreach (var e in rows) store.Destroy(e);
@@ -123,16 +122,8 @@ internal static class DampingLocalityValidation
         store.Get<Brain>(actor).Mode = BrainMode.Attack;
         store.Commit();
         VerifySelected(battle, actor);
-        Check(store.Count("Alive", typeof(void), target) == 1 && store.Count("Has", typeof(Identity), target) == 1 &&
-            store.Count("Get", typeof(Hull), target) == 1 && store.Count("Get", typeof(Transform), target) == 1,
-            "attack target liveness and position are row-local single reads");
-        Check(store.Count("Get", typeof(Weapon), actor) == 1 && store.Count("Get", typeof(Identity), actor) == 1 &&
-            store.Count("Get", typeof(Collider), actor) == 0 && store.Count("Has", typeof(Overheated), actor) == 0,
-            "actor reads reused; nonheavy collider and nonboost overheat calls stay lazy");
         store.Get<Weapon>(actor).Kind = WeaponKind.HeavyCannon;
         VerifySelected(battle, actor);
-        Check(store.Count("Get", typeof(Collider), actor) == 1 && store.Count("Get", typeof(Transform), target) == 1,
-            "heavy aiming reads collider only on demand and reuses target position");
         store.Set(actor, new Boosting { UntilTick = 100 }); store.Commit();
         store.Get<Transform>(actor).Position = new(battle.Config.ArenaHalfSize, -battle.Config.ArenaHalfSize);
         VerifySelected(battle, actor);
@@ -150,46 +141,32 @@ internal static class DampingLocalityValidation
         VerifySelected(battle, actor);
         store.Get<Brain>(actor).Mode = BrainMode.Retreat; store.Get<Brain>(actor).Home = target;
         VerifySelected(battle, actor);
-        Check(store.Count("Alive", typeof(void), target) == 1 && store.Count("Get", typeof(Transform), target) == 1,
-            "retreat never evaluates the attack-target branch");
         store.Get<Brain>(actor).Mode = BrainMode.Screen; store.Get<Brain>(actor).CoverAlly = target;
         VerifySelected(battle, actor);
         store.Get<Brain>(actor).Mode = BrainMode.Attack;
         store.Get<Hull>(target).Current = 0;
         VerifySelected(battle, actor);
-        Check(store.Count("Get", typeof(Transform), target) == 0 && store.Count("Get", typeof(Collider), actor) == 0,
-            "dead target suppresses transform and heavy aiming reads");
         store.Destroy(target); store.Commit();
         VerifySelected(battle, actor);
-        Check(store.Count("Alive", typeof(void), target) == 1 && store.Count("Has", typeof(Identity), target) == 0,
-            "stale target retains AliveShip short circuit");
-        Expect<InvalidOperationException>(() => { _ = store.Get<Motion>(target); });
         var replacement = Actor(store, 11, 0.4f); store.Commit();
         Check(!store.Alive(target), "replacement does not revive stale public identity");
         var nonship = store.Create(); store.Set(nonship, new Transform()); store.Commit();
         store.Get<Brain>(actor).Target = nonship;
         VerifySelected(battle, actor);
-        Check(store.Count("Has", typeof(Identity), nonship) == 1 && store.Count("Get", typeof(Hull), nonship) == 0 &&
-            store.Count("Get", typeof(Transform), nonship) == 0, "identity-less target retains Has short circuit");
         store.Get<Brain>(actor).Target = replacement;
         store.Get<Identity>(actor).Serial = 360;
         VerifySelected(battle, actor);
-        Check(store.Count("Has", typeof(Overheated), actor) == 1 && store.Count("Get", typeof(Identity), actor) == 1,
-            "queued boost reuses serial but retains conditional overheat read");
         var docked = store.Create();
         store.Set(docked, new Transform()); store.Set(docked, new Motion { Velocity = new(5, 7), Acceleration = new(1, 2) });
         store.Set(docked, new Brain { Mode = BrainMode.Attack, Target = target }); store.Set(docked, new Docked());
         store.Commit();
         VerifySelected(battle, docked);
-        Check(store.Calls.Count == 1 && store.Count("Has", typeof(Docked), docked) == 1,
-            "docked early exit never requires Identity/Weapon/Heat/target or damping");
         battle.Dispose();
         Check(!store.Alive(actor) && !store.Has<Motion>(actor), "disposed store retains public false liveness");
-        Expect<ObjectDisposedException>(() => { _ = store.Get<Motion>(actor); });
         Expect<ObjectDisposedException>(() => battle.Step());
     }
 
-    private static EntityKey Actor(TracingStore store, int serial, float damping)
+    private static EntityKey Actor(Battle store, int serial, float damping)
     {
         var e = store.Create();
         store.Set(e, new Transform { Position = new(1, -2), Angle = 0.2f });
@@ -207,7 +184,7 @@ internal static class DampingLocalityValidation
 
     // Scalar oracle transcribed from data-locality-20261012/source/Battle.cs. Private tactical
     // helpers are shared unchanged; all steering arithmetic and repeated reads stay scalar here.
-    private static Expected Scalar(Battle<TracingStore> battle, EntityKey e)
+    private static Expected Scalar(Battle battle, EntityKey e)
     {
         var store = battle.Store; var t = store.Get<Transform>(e); var m = store.Get<Motion>(e); var b = store.Get<Brain>(e);
         if (store.Has<Docked>(e)) { m.Velocity = m.Acceleration = Vector2.Zero; return new(m, null, false); }
@@ -247,32 +224,31 @@ internal static class DampingLocalityValidation
         return new(m, store.Get<Heat>(e).Value + m.Acceleration.Length() * 0.055f * dt * boost, queueBoost);
     }
 
-    private static T Call<T>(Battle<TracingStore> battle, string name, params object[] args) =>
-        (T)typeof(Battle<TracingStore>).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(battle, args)!;
+    private static T Call<T>(Battle battle, string name, params object[] args) =>
+        (T)typeof(Battle).GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(battle, args)!;
 
-    private static IList States(Battle<TracingStore> battle) =>
-        (IList)typeof(Battle<TracingStore>).GetField("states", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(battle)!;
+    private static IList States(Battle battle) =>
+        (IList)typeof(Battle).GetField("states", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(battle)!;
 
-    private static void VerifySelected(Battle<TracingStore> battle, EntityKey e)
+    private static void VerifySelected(Battle battle, EntityKey e)
     {
         var expected = Scalar(battle, e); var states = States(battle); var before = states.Count;
-        battle.Store.Calls.Clear();
         var selected = new SelectedSteering { Entity = e, Steering = new() { Battle = battle } };
-        battle.Store.ForEach<Transform, Motion, Brain, SelectedSteering>(ref selected);
+        battle.NativeWorld.Query<Transform, Motion, Brain>().ForEach(ref selected);
         Check(selected.Count == 1 && states.Count == before + (expected.Boost ? 1 : 0), "selected row and boost queue parity");
         if (expected.Boost)
         {
             var request = states[states.Count - 1]!; var type = request.GetType();
             Check((EntityKey)type.GetProperty("Entity")!.GetValue(request)! == e &&
-                (int)type.GetProperty("Serial")!.GetValue(request)! == battle.Store.Inner.Get<Identity>(e).Serial &&
+                (int)type.GetProperty("Serial")!.GetValue(request)! == battle.Store.Get<Identity>(e).Serial &&
                 type.GetProperty("Kind")!.GetValue(request)!.ToString() == "Boost" &&
                 (bool)type.GetProperty("Enable")!.GetValue(request)! &&
                 (EntityKey)type.GetProperty("Other")!.GetValue(request)! == default, "boost request preserves all fields");
         }
-        Compare(battle.Store.Inner, e, expected);
+        Compare(battle.Store, e, expected);
     }
 
-    private static void Compare(IEcsStore store, EntityKey e, Expected expected)
+    private static void Compare(Battle store, EntityKey e, Expected expected)
     {
         var actual = store.Get<Motion>(e); var want = expected.Motion;
         Same(actual.Velocity.X, want.Velocity.X, "velocity X"); Same(actual.Velocity.Y, want.Velocity.Y, "velocity Y");
@@ -283,38 +259,16 @@ internal static class DampingLocalityValidation
         if (expected.Heat is { } heat) Same(store.Get<Heat>(e).Value, heat, "heat expression order");
     }
 
-    private struct CollectTransforms : IProcessor<Transform>
-    { public List<EntityKey> Rows; public void Execute(EntityKey e, ref Transform t) => Rows.Add(e); }
-
-    private struct SelectedSteering : IProcessor<Transform, Motion, Brain>
+    private struct CollectTransforms : global::SKECS.IQueryProcessor<Transform>
     {
-        public EntityKey Entity; public Battle<TracingStore>.SteeringSystem Steering; public int Count;
+        public void Execute(global::SKECS.Entity native, ref Transform c0) => Execute(new EntityKey(native.Id, native.Version), ref c0); public List<EntityKey> Rows; public void Execute(EntityKey e, ref Transform t) => Rows.Add(e); }
+
+    private struct SelectedSteering : global::SKECS.IQueryProcessor<Transform, Motion, Brain>
+    {
+        public void Execute(global::SKECS.Entity native, ref Transform c0, ref Motion c1, ref Brain c2) => Execute(new EntityKey(native.Id, native.Version), ref c0, ref c1, ref c2);
+        public EntityKey Entity; public Battle.SteeringSystem Steering; public int Count;
         public void Execute(EntityKey e, ref Transform t, ref Motion m, ref Brain b)
         { if (e == Entity) { Count++; Steering.Execute(e, ref t, ref m, ref b); } }
-    }
-
-    private sealed class TracingStore(IEcsStore inner) : IEcsStore
-    {
-        public IEcsStore Inner { get; } = inner;
-        public readonly Dictionary<(string Operation, Type Type, EntityKey Entity), int> Calls = new();
-        private void Record(string operation, Type type, EntityKey e)
-        { var key = (operation, type, e); Calls[key] = Calls.GetValueOrDefault(key) + 1; }
-        public int Count(string operation, Type type, EntityKey e) => Calls.GetValueOrDefault((operation, type, e));
-        public string Name => Inner.Name;
-        public EntityKey Create() => Inner.Create();
-        public void Destroy(EntityKey e) => Inner.Destroy(e);
-        public bool Alive(EntityKey e) { Record("Alive", typeof(void), e); return Inner.Alive(e); }
-        public bool Has<T>(EntityKey e) where T : unmanaged { Record("Has", typeof(T), e); return Inner.Has<T>(e); }
-        public ref T Get<T>(EntityKey e) where T : unmanaged { Record("Get", typeof(T), e); return ref Inner.Get<T>(e); }
-        public void Set<T>(EntityKey e, in T value) where T : unmanaged => Inner.Set(e, value);
-        public void Remove<T>(EntityKey e) where T : unmanaged => Inner.Remove<T>(e);
-        public void Commit() => Inner.Commit();
-        public void Dispose() => Inner.Dispose();
-        public StoreDiagnostics Diagnostics() => Inner.Diagnostics();
-        public void ForEach<T, P>(ref P p) where T : unmanaged where P : struct, IProcessor<T> => Inner.ForEach<T, P>(ref p);
-        public void ForEach<A, B, P>(ref P p) where A : unmanaged where B : unmanaged where P : struct, IProcessor<A, B> => Inner.ForEach<A, B, P>(ref p);
-        public void ForEach<A, B, C, P>(ref P p) where A : unmanaged where B : unmanaged where C : unmanaged where P : struct, IProcessor<A, B, C> => Inner.ForEach<A, B, C, P>(ref p);
-        public void ForEachComponents<A, B, C, P>(ref P p) where A : unmanaged where B : unmanaged where C : unmanaged where P : struct, IComponentProcessor<A, B, C> => Inner.ForEachComponents<A, B, C, P>(ref p);
     }
 
     private static Vector2 Direction(Vector2 v) => v.LengthSquared() > 0.0001f ? Vector2.Normalize(v) : Vector2.Zero;

@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Numerics;
 using SpaceBattle;
 
@@ -18,9 +19,9 @@ internal static partial class Validation
         Console.WriteLine("PASS: tactical leases, meaningful upgrades, dead targets, carrier scoring/hits, bounded squads, cover steering/no fire/recovery and leader repair.");
     }
 
-    private static Battle<SkecsStore> TacticalBattle()
+    private static Battle TacticalBattle()
     {
-        var battle = new Battle<SkecsStore>(new(), new BattleConfig { ShipsPerTeam = 16, Seed = 27 });
+        var battle = new Battle(new BattleConfig { ShipsPerTeam = 16, Seed = 27 });
         var frame = FreezeBattle(battle);
         // Keep unrelated frozen ships out of both squad formation and target scoring.
         for (var i = 0; i < frame.Ships.Count; i++)
@@ -31,7 +32,7 @@ internal static partial class Validation
         return battle;
     }
 
-    private static EntityKey TacticalActor(Battle<SkecsStore> battle, int team, ShipClass kind, Vector2 position, bool active)
+    private static EntityKey TacticalActor(Battle battle, int team, ShipClass kind, Vector2 position, bool active)
     {
         var e = battle.SpawnShip(team, kind, position, EntityKey.None);
         battle.Store.Commit();
@@ -54,14 +55,14 @@ internal static partial class Validation
         return e;
     }
 
-    private static void TacticalPosition(Battle<SkecsStore> battle, EntityKey e, Vector2 position)
+    private static void TacticalPosition(Battle battle, EntityKey e, Vector2 position)
     {
         battle.Store.Get<Transform>(e).Position = position;
         battle.Store.Get<Transform>(e).Previous = position;
         battle.Store.Get<Motion>(e).Velocity = Vector2.Zero;
     }
 
-    private static void TacticalDurability(Battle<SkecsStore> battle, EntityKey e, float hull, float shield = 0, float armor = 0)
+    private static void TacticalDurability(Battle battle, EntityKey e, float hull, float shield = 0, float armor = 0)
     {
         battle.Store.Get<Hull>(e) = new Hull { Current = hull, Maximum = hull, Armor = armor };
         battle.Store.Get<Shield>(e).Current = shield;
@@ -69,13 +70,13 @@ internal static partial class Validation
         battle.Store.Get<Shield>(e).RegenPerSecond = 0;
     }
 
-    private static void TacticalDecide(Battle<SkecsStore> battle, params EntityKey[] actors)
+    private static void TacticalDecide(Battle battle, params EntityKey[] actors)
     {
         foreach (var e in actors) battle.Store.Get<Brain>(e).NextDecisionTick = 0;
         battle.Step();
     }
 
-    private static void TacticalAdvanceTo(Battle<SkecsStore> battle, int tick)
+    private static void TacticalAdvanceTo(Battle battle, int tick)
     {
         while (battle.Tick < tick) battle.Step();
     }

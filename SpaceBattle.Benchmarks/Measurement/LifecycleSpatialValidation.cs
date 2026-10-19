@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Numerics;
 using SpaceBattle;
 
@@ -5,23 +6,20 @@ internal static partial class Validation
 {
     private static void LifecycleSpatialChecks()
     {
-        LifecycleSpatialStoreChecks(static () => new SkecsStore());
-        LifecycleSpatialStoreChecks(static () => new LeoEcsLiteStore());
-        LifecycleSpatialStoreChecks(static () => new LeoEcsClassicStore());
-        LifecycleSpatialStoreChecks(static () => new MorpehStore());
-        LifecycleSpatialStoreChecks(static () => new StaticEcsStore());
+        LifecycleSpatialStoreChecks();
+
     }
 
-    private static void LifecycleSpatialStoreChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void LifecycleSpatialStoreChecks()
     {
-        LifecycleReparentChecks(factory);
-        LifecycleDockContentionChecks(factory, departuresFirst: true);
-        LifecycleDockContentionChecks(factory, departuresFirst: false);
+        LifecycleReparentChecks();
+        LifecycleDockContentionChecks(departuresFirst: true);
+        LifecycleDockContentionChecks(departuresFirst: false);
     }
 
-    private static Battle<TStore> LifecycleBattle<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static Battle LifecycleBattle()
     {
-        var battle = new Battle<TStore>(factory(), new BattleConfig
+        var battle = new Battle(new BattleConfig
         {
             ShipsPerTeam = 8, Seed = 27, ParticleMultiplier = 0, ReplenishCarriers = false
         });
@@ -37,7 +35,7 @@ internal static partial class Validation
         return battle;
     }
 
-    private static void LifecycleFreezeShip<TStore>(Battle<TStore> battle, EntityKey e) where TStore : IEcsStore
+    private static void LifecycleFreezeShip(Battle battle, EntityKey e)
     {
         battle.Store.Get<Motion>(e) = default;
         battle.Store.Get<Brain>(e) = new Brain
@@ -51,26 +49,27 @@ internal static partial class Validation
         if (battle.Store.Has<Carrier>(e)) battle.Store.Get<Carrier>(e).NextBuildTick = int.MaxValue;
     }
 
-    private static EntityKey LifecycleActor<TStore>(Battle<TStore> battle, ShipClass kind, Vector2 position)
-        where TStore : IEcsStore
+    private static EntityKey LifecycleActor(Battle battle, ShipClass kind, Vector2 position)
+
     {
         var e = battle.SpawnShip(0, kind, position, EntityKey.None);
         LifecycleFreezeShip(battle, e);
         return e;
     }
 
-    private static List<EntityKey> LifecycleMounts<TStore>(Battle<TStore> battle, EntityKey? parent = null)
-        where TStore : IEcsStore
+    private static List<EntityKey> LifecycleMounts(Battle battle, EntityKey? parent = null)
+
     {
         var collector = new LifecycleMountCollector { Parent = parent, Entities = new() };
-        battle.Store.ForEach<MountedTurret, LifecycleMountCollector>(ref collector);
+        battle.NativeWorld.Query<MountedTurret>().ForEach(ref collector);
         collector.Entities.Sort((a, b) => battle.Store.Get<MountedTurret>(a).Serial.CompareTo(
             battle.Store.Get<MountedTurret>(b).Serial));
         return collector.Entities;
     }
 
-    private struct LifecycleMountCollector : IProcessor<MountedTurret>
+    private struct LifecycleMountCollector : global::SKECS.IQueryProcessor<MountedTurret>
     {
+        public void Execute(global::SKECS.Entity native, ref MountedTurret c0) => Execute(new EntityKey(native.Id, native.Version), ref c0);
         public EntityKey? Parent;
         public List<EntityKey> Entities;
         public void Execute(EntityKey e, ref MountedTurret mount)
@@ -79,14 +78,14 @@ internal static partial class Validation
         }
     }
 
-    private static void LifecycleFreezeMounts<TStore>(Battle<TStore> battle) where TStore : IEcsStore
+    private static void LifecycleFreezeMounts(Battle battle)
     {
         foreach (var gun in LifecycleMounts(battle))
             battle.Store.Get<Weapon>(gun).NextFireTick = int.MaxValue;
     }
 
-    private static BattleFrame LifecycleFrameParity<TStore>(Battle<TStore> battle, string scenario)
-        where TStore : IEcsStore
+    private static BattleFrame LifecycleFrameParity(Battle battle, string scenario)
+
     {
         // Read the finalized cache before either the default capture or Validate can refresh it.
         var cached = new BattleFrame(); var queried = new BattleFrame();
@@ -99,9 +98,9 @@ internal static partial class Validation
         return cached;
     }
 
-    private static void LifecycleReparentChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void LifecycleReparentChecks()
     {
-        using var battle = LifecycleBattle(factory);
+        using var battle = LifecycleBattle();
         var first = LifecycleActor(battle, ShipClass.Frigate, new(-50, 0));
         var second = LifecycleActor(battle, ShipClass.Frigate, new(50, 0));
         battle.Store.Commit();
@@ -144,10 +143,10 @@ internal static partial class Validation
         Console.WriteLine($"PASS: {battle.Framework} swapped mount ownership, destruction, cached/default capture and Validate.");
     }
 
-    private static void LifecycleDockContentionChecks<TStore>(Func<TStore> factory, bool departuresFirst)
-        where TStore : IEcsStore
+    private static void LifecycleDockContentionChecks(bool departuresFirst)
+
     {
-        using var battle = LifecycleBattle(factory);
+        using var battle = LifecycleBattle();
         var home = LifecycleActor(battle, ShipClass.LightCarrier, Vector2.Zero);
         battle.Store.Get<Carrier>(home).RepairSlots = 2;
         var arrivals = new EntityKey[3];

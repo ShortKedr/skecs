@@ -1,3 +1,5 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using EntityIndexTable = SpaceBattle.Simulations.Skecs.EntityIndexTable;
 using System.Numerics;
 using System.Reflection;
 using SpaceBattle;
@@ -20,15 +22,14 @@ internal static class HardwareOptimizationValidation
         map.Add(first, 11);
         typeof(EntityIndexTable).GetField("epoch", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(map, uint.MaxValue);
         map.Clear(); Check(!map.TryGetValue(first, out _), "epoch wrap clears old generation");
-        ExternalEdits(static () => new SkecsStore()); ExternalEdits(static () => new LeoEcsLiteStore());
-        ExternalEdits(static () => new LeoEcsClassicStore()); ExternalEdits(static () => new MorpehStore());
-        ExternalEdits(static () => new StaticEcsStore());
-        Console.WriteLine("PASS: generation-aware snapshot IDs, reuse, growth, epoch wrap, bounded fallback and external/ref/transient edits on five ports.");
+        ExternalEdits();
+
+        Console.WriteLine("PASS: generation-aware snapshot IDs, reuse, growth, epoch wrap, bounded fallback and external/ref/transient edits on the SKECS native core.");
     }
 
-    private static void ExternalEdits<T>(Func<T> factory) where T : IEcsStore
+    private static void ExternalEdits()
     {
-        using var battle = new Battle<T>(factory(), new BattleConfig { ShipsPerTeam = 16, Seed = 27 });
+        using var battle = new Battle(new BattleConfig { ShipsPerTeam = 16, Seed = 27 });
         var frame = new BattleFrame(); battle.Capture(frame);
         var ship = frame.Ships[0]; Check(battle.TryFindShip(ship.Serial, out var e), "external fixture ship");
         var position = new Vector2(-250, 275);

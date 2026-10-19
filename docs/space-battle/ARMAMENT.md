@@ -88,7 +88,7 @@ trigger it. The existing 12-particle base budget, multiplier and particle cap
 remain in force; there is no added splash, debris, damage or camera shake.
 Particle state participates in checksums. [Heavy-impact checks](../../tools/web/check-heavy-impact.mjs)
 capture every tick of a real hit's lifetime and apply the existing contrast
-budgets; focused compatibility checks cover surviving/lethal hits across the five retained stores.
+budgets; focused native SKECS mechanics checks cover surviving/lethal hits.
 
 All guns retain deterministic 75/25 precise/spread decisions. Mounted rounds
 inherit parent linear velocity plus tangential mount velocity. Muzzles launch
@@ -111,6 +111,6 @@ Runtime source links show the SKECS core; the other four cores own matching impl
 
 ## Validation
 
-[Armament tests](../../SpaceBattle.Benchmarks/Measurement/ArmamentValidation.cs) cover seeded spawn-charge bounds, late births, first-shot deadlines, turret fire during heavy charge, independent targets/heat/cooldowns, rotating attachments, inherited projectile velocity, hull alignment and lifecycle cleanup. [Owner regressions](../../SpaceBattle.Benchmarks/Measurement/ProjectileOwnerValidation.cs) cover self-exclusion, stale owner keys and friendly fire across all five retained compatibility stores. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) separately compare every tick with SKECS.
+[Armament tests](../../SpaceBattle.Benchmarks/Measurement/ArmamentValidation.cs) cover seeded spawn-charge bounds, late births, first-shot deadlines, turret fire during heavy charge, independent targets/heat/cooldowns, rotating attachments, inherited projectile velocity, hull alignment and lifecycle cleanup. [Owner regressions](../../SpaceBattle.Benchmarks/Measurement/ProjectileOwnerValidation.cs) cover self-exclusion, stale owner keys and friendly fire on the native SKECS core. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare the other native cores with SKECS at initial state and after every tick.
 
 The [browser armament check](../../tools/web/check-armament.mjs) checks AOT heavy-round travel and independent swivel. The [opening cadence check](../../tools/web/check-heavy-cadence.mjs) checks all three AOT profiles, ordinary combat during initial charge, eventual heavy fire and reset replays. These verify implementation rather than matchup balance or performance.

@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Numerics;
 using SpaceBattle;
 
@@ -13,15 +14,9 @@ internal static class FleetDeploymentValidation
         Require(FleetDeploymentRules.EscortClearance == 2.4f && FleetDeploymentRules.CarrierClearance == 4,
             "deployment surface clearance contract");
         PlannerChecks();
-        var expected = PortChecks(static () => new SkecsStore());
-        Check(PortChecks(static () => new LeoEcsLiteStore()), "Lite");
-        Check(PortChecks(static () => new LeoEcsClassicStore()), "Classic");
-        Check(PortChecks(static () => new MorpehStore()), "Morpeh");
-        Check(PortChecks(static () => new StaticEcsStore()), "Static");
-        Console.WriteLine("PASS: tactical deployment geometry, reflection, fleet attributes, exact legacy positions and repeated 0/120/360/720 checkpoints across all five ports.");
+        PortChecks();
+        Console.WriteLine("PASS: tactical deployment geometry, reflection, fleet attributes, exact legacy positions and repeated 0/120/360/720 checkpoints on the SKECS native core.");
 
-        void Check(ulong[] actual, string name) => Require(expected.SequenceEqual(actual),
-            $"{name}: tactical replay matches SKECS at every checkpoint");
     }
 
     private static BattleConfig Config(int count, int carriers, FleetComposition composition, uint seed = 27) => new()
@@ -145,7 +140,7 @@ internal static class FleetDeploymentValidation
         }
     }
 
-    private static ulong[] PortChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static ulong[] PortChecks()
     {
         foreach (var composition in Compositions)
         foreach (var count in new[] { 8, 16, 96, 160 })
@@ -154,7 +149,7 @@ internal static class FleetDeploymentValidation
             var config = Config(count, carriers, composition);
             BattleFrame frame;
             InitialSnapshot attributes;
-            using (var tactical = new Battle<TStore>(factory(), config))
+            using (var tactical = new Battle(config))
             {
                 frame = Frame(tactical);
                 InitialChecks(tactical, frame, config);
@@ -167,7 +162,7 @@ internal static class FleetDeploymentValidation
                 ShipsPerTeam = count, CarriersPerTeam = carriers, FleetComposition = composition,
                 Seed = config.Seed, ParticleMultiplier = 0, ReplenishCarriers = false
             };
-            using var legacy = new Battle<TStore>(factory(), legacyConfig);
+            using var legacy = new Battle(legacyConfig);
             var old = Frame(legacy);
             LegacyPositions(old, legacyConfig);
             Attributes(attributes, Snapshot(legacy, old));
@@ -176,11 +171,11 @@ internal static class FleetDeploymentValidation
             legacy.Validate();
         }
         // Seed zero has special RandomStream semantics and must retain the original stream ordering.
-        using (var zero = new Battle<TStore>(factory(), new BattleConfig
+        using (var zero = new Battle(new BattleConfig
         {
             ShipsPerTeam = 16, CarriersPerTeam = 2, Seed = 0, ParticleMultiplier = 0, ReplenishCarriers = false
         })) LegacyPositions(Frame(zero), zero.Config);
-        using (var explicitLegacy = new Battle<TStore>(factory(), new BattleConfig
+        using (var explicitLegacy = new Battle(new BattleConfig
         {
             ShipsPerTeam = 16, Deployment = FleetDeployment.LegacyRandom, ParticleMultiplier = 0, ReplenishCarriers = false
         })) LegacyPositions(Frame(explicitLegacy), explicitLegacy.Config);
@@ -189,17 +184,17 @@ internal static class FleetDeploymentValidation
         foreach (var composition in Compositions)
         {
             var config = Config(96, 3, composition);
-            var first = Replay(factory, config);
-            var second = Replay(factory, config);
-            Require(first.SequenceEqual(second), $"{typeof(TStore).Name}/{composition}: two exact tactical replays");
+            var first = Replay(config);
+            var second = Replay(config);
+            Require(first.SequenceEqual(second), $"{"SKECS"}/{composition}: two exact tactical replays");
             hashes.AddRange(first);
         }
         return hashes.ToArray();
     }
 
-    private static ulong[] Replay<TStore>(Func<TStore> factory, BattleConfig config) where TStore : IEcsStore
+    private static ulong[] Replay(BattleConfig config)
     {
-        using var battle = new Battle<TStore>(factory(), config);
+        using var battle = new Battle(config);
         var result = new List<ulong>();
         foreach (var tick in Checkpoints)
         {
@@ -211,8 +206,8 @@ internal static class FleetDeploymentValidation
         return result.ToArray();
     }
 
-    private static void InitialChecks<TStore>(Battle<TStore> battle, BattleFrame frame, BattleConfig config)
-        where TStore : IEcsStore
+    private static void InitialChecks(Battle battle, BattleFrame frame, BattleConfig config)
+
     {
         var plan = FleetDeploymentRules.Create(config);
         Require(frame.Tick == 0 && frame.Ships.Count == 2 * (config.ShipsPerTeam + config.CarriersPerTeam),
@@ -286,8 +281,8 @@ internal static class FleetDeploymentValidation
         InventoryItem[] Items, Dictionary<Type, object> Components);
     private sealed record InitialSnapshot(ShipSnapshot[] Ships, MountSnapshot[] Mounts);
 
-    private static InitialSnapshot Snapshot<TStore>(Battle<TStore> battle, BattleFrame frame)
-        where TStore : IEcsStore
+    private static InitialSnapshot Snapshot(Battle battle, BattleFrame frame)
+
     {
         var rows = new List<ShipSnapshot>();
         foreach (var ship in frame.Ships)
@@ -335,9 +330,10 @@ internal static class FleetDeploymentValidation
     private readonly record struct MountSnapshot(int Serial, int ParentSerial, int Slot, Vector2 Offset,
         int NextDecisionTick, int LastFireTick, Weapon Weapon, Heat Heat);
 
-    private struct MountCollector : IProcessor<MountedTurret>
+    private struct MountCollector : global::SKECS.IQueryProcessor<MountedTurret>
     {
-        public IEcsStore Store;
+        public void Execute(global::SKECS.Entity native, ref MountedTurret c0) => Execute(new EntityKey(native.Id, native.Version), ref c0);
+        public Battle Store;
         public List<MountSnapshot> Rows;
         public void Execute(EntityKey e, ref MountedTurret mount)
         {
@@ -358,14 +354,14 @@ internal static class FleetDeploymentValidation
         }
     }
 
-    private static MountSnapshot[] Mounts(IEcsStore store)
+    private static MountSnapshot[] Mounts(Battle store)
     {
         var collector = new MountCollector { Store = store, Rows = new() };
-        store.ForEach<MountedTurret, MountCollector>(ref collector);
+        store.NativeWorld.Query<MountedTurret>().ForEach(ref collector);
         return collector.Rows.OrderBy(m => m.Serial).ToArray();
     }
 
-    private static int HomeSerial(IEcsStore store, EntityKey home) => home.IsNone ? -1 : store.Get<Identity>(home).Serial;
+    private static int HomeSerial(Battle store, EntityKey home) => home.IsNone ? -1 : store.Get<Identity>(home).Serial;
 
     private static void Geometry((Vector2 Position, float Radius)[] circles, float arena, string label)
     {
@@ -386,13 +382,13 @@ internal static class FleetDeploymentValidation
         }
     }
 
-    private static EntityKey Ship<TStore>(Battle<TStore> battle, int serial) where TStore : IEcsStore
+    private static EntityKey Ship(Battle battle, int serial)
     {
         Require(battle.TryFindShip(serial, out var entity), $"ship serial {serial} lookup");
         return entity;
     }
 
-    private static BattleFrame Frame<TStore>(Battle<TStore> battle) where TStore : IEcsStore
+    private static BattleFrame Frame(Battle battle)
     {
         var frame = new BattleFrame(); battle.Capture(frame); return frame;
     }

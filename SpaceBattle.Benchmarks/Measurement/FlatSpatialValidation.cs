@@ -1,3 +1,7 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using SpatialPointIndex = SpaceBattle.Simulations.Skecs.SpatialPointIndex;
+using SpatialBoundsIndex = SpaceBattle.Simulations.Skecs.SpatialBoundsIndex;
+using FlatGridLayout = SpaceBattle.Simulations.Skecs.FlatGridLayout;
 using System.Numerics;
 using SpaceBattle;
 

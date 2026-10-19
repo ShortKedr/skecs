@@ -53,7 +53,7 @@ URL репозиториев, полные commit ID, размеры файло�
 
 Сторонние исходники и лицензии не изменены. Наши [адаптеры микробенчмарков](SKECS.Benchmarks/Comparison/Adapters.cs),
 [статические адаптеры](SKECS.Benchmarks/Comparison/StaticAdapters.cs), [стресс-адаптеры](SKECS.Benchmarks/Comparison/StressAdapters.cs)
-и [хранилища SpaceBattle](SpaceBattle.Adapters/) являются отдельными сравнительными
+и [нативные ядра SpaceBattle](SpaceBattle.Simulations/) являются отдельными сравнительными
 интеграциями, а не реализациями upstream или одобренными авторами рекомендациями
 по производительности.
 

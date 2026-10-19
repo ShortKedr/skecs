@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Numerics;
 using SpaceBattle;
 
@@ -5,11 +6,8 @@ internal static partial class Validation
 {
     private static void ObservationChecks()
     {
-        ObservationReplay(static () => new SkecsStore());
-        ObservationReplay(static () => new LeoEcsLiteStore());
-        ObservationReplay(static () => new LeoEcsClassicStore());
-        ObservationReplay(static () => new MorpehStore());
-        ObservationReplay(static () => new StaticEcsStore());
+        ObservationReplay();
+
         foreach (var friendly in new[] { false, true })
         {
             using var battle = KernelBattle();
@@ -47,14 +45,14 @@ internal static partial class Validation
             battle.Damage(victim, 10000, false, true);
             Require(battle.ObservedDeath.Serial == serial && battle.ObservedDeath.KillerSerial == -1, "unattributed debris uses fallback");
         }
-        Console.WriteLine("PASS: observation checksum/counter neutrality across five stores, exact fatal owner including friendly fire, retained death notice, target and docked views.");
+        Console.WriteLine("PASS: observation checksum/counter neutrality across SKECS native core, exact fatal owner including friendly fire, retained death notice, target and docked views.");
     }
 
-    private static void ObservationReplay<T>(Func<T> factory) where T : IEcsStore
+    private static void ObservationReplay()
     {
         var config = new BattleConfig { ShipsPerTeam = 16, Seed = 27 };
         var expected = new ulong[30];
-        using (var plain = new Battle<T>(factory(), config))
+        using (var plain = new Battle(config))
         {
             for (var i = 0; i < 900; i++)
             {
@@ -63,7 +61,7 @@ internal static partial class Validation
             }
         }
         // StaticEcs has a single live-world contract; independent replays must run sequentially.
-        using (var watched = new Battle<T>(factory(), config))
+        using (var watched = new Battle(config))
         {
             var frame = new BattleFrame();
             for (var i = 0; i < 900; i++)

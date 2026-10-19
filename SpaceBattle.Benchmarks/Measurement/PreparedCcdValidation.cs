@@ -1,3 +1,5 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using CircleSweepMath = SpaceBattle.Simulations.Skecs.CircleSweepMath;
 using System.Numerics;
 using SpaceBattle;
 

@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Numerics;
 using SpaceBattle;
 
@@ -15,16 +16,13 @@ internal static partial class Validation
         OwnerMissingCheck(liveWithoutIdentity: true);
         OwnerMountedCheck();
         OwnerDebrisCheck();
-        OwnerStoreChecks(static () => new SkecsStore());
-        OwnerStoreChecks(static () => new LeoEcsLiteStore());
-        OwnerStoreChecks(static () => new LeoEcsClassicStore());
-        OwnerStoreChecks(static () => new MorpehStore());
-        OwnerStoreChecks(static () => new StaticEcsStore());
-        Console.WriteLine("PASS: all five projectile kinds exclude only owner, retain ally/enemy hits and lifetime; mounts own parent, debris stays neutral, absent/dead/stale owners and all-store generation reuse.");
+        OwnerStoreChecks();
+
+        Console.WriteLine("PASS: all projectile kinds exclude only owner, retain ally/enemy hits and lifetime; mounts own parent, debris stays neutral, absent/dead/stale owners and native generation reuse.");
     }
 
-    private static EntityKey OwnerRound<TStore>(Battle<TStore> battle, EntityKey owner, WeaponKind kind,
-        Vector2 position, Vector2 velocity, int expires = 100) where TStore : IEcsStore
+    private static EntityKey OwnerRound(Battle battle, EntityKey owner, WeaponKind kind,
+        Vector2 position, Vector2 velocity, int expires = 100)
     {
         // Synthetic serials belong only to disposable fixtures, not canonical replay validation.
         var e = battle.Store.Create();
@@ -37,8 +35,8 @@ internal static partial class Validation
         return e;
     }
 
-    private static EntityKey OwnerActor<TStore>(Battle<TStore> battle, int team, ShipClass kind, Vector2 position)
-        where TStore : IEcsStore
+    private static EntityKey OwnerActor(Battle battle, int team, ShipClass kind, Vector2 position)
+
     {
         var e = battle.SpawnShip(team, kind, position, EntityKey.None);
         LifecycleFreezeShip(battle, e);
@@ -150,9 +148,9 @@ internal static partial class Validation
             battle.Counters.FriendlyFireHits == 0 && battle.Counters.SelfHits == 0, "debris keeps separate neutral counters");
     }
 
-    private static void OwnerStoreChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void OwnerStoreChecks()
     {
-        using (var battle = LifecycleBattle(factory))
+        using (var battle = LifecycleBattle())
         {
             var stale = battle.Store.Create();
             battle.Store.Set(stale, new Identity { Serial = 777777, Team = 0, Class = ShipClass.Fighter });
@@ -168,7 +166,7 @@ internal static partial class Validation
             Require(battle.Counters.FriendlyFireHits == 0 && battle.Counters.SelfHits == 0,
                 battle.Framework + " stale owner cannot credit replacement team");
         }
-        using (var battle = LifecycleBattle(factory))
+        using (var battle = LifecycleBattle())
         {
             var owner = OwnerActor(battle, 0, ShipClass.Fighter, new(-100, 0));
             var victim = OwnerActor(battle, 1, ShipClass.Fighter, new(12, 0));

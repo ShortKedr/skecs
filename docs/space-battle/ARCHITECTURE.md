@@ -29,17 +29,17 @@ flowchart TB
 [`SpaceBattle.Simulations`](../../SpaceBattle.Simulations) has separate `Skecs`,
 `LeoEcsLite`, `LeoEcsClassic`, `Morpeh` and `StaticEcs` directories. Each owns its
 `Battle`, combat, AI, lifecycle, spatial structures, physics and `NativeWorld`
-implementation. There is no production `Battle<TStore>`, `IEcsStore` dispatch,
+implementation. There is no `Battle<TStore>`, `IEcsStore` dispatch,
 identity-remapping dictionary or shared simulation superclass. `EntityKey`
 contains a native identity and generation; stable gameplay serials define replay
 ordering independently of native IDs. Morpeh's native handle lookup is indexed
 by native ID; it does not assign another logical identity.
 
 [`SpaceBattle.Core`](../../SpaceBattle.Core) provides common configuration,
-component/data definitions, catalogues and presentation contracts. Its retained
-generic battle, [`SpaceBattle.SKECS`](../../SpaceBattle.SKECS) and
-[`SpaceBattle.Adapters`](../../SpaceBattle.Adapters/README.md) support focused
-compatibility/regression fixtures. Production hosts do not route ticks through them.
+component/data definitions, catalogues and presentation contracts. It contains no
+shared simulation engine or legacy simulation helpers. Detailed mechanics tests
+execute the native SKECS core; the other native cores are checked externally
+against SKECS at initial state and after every tick.
 
 [Headless runners](../../SpaceBattle.Benchmarks/Measurement/Headless) each call
 one concrete core directly. [Game](../../SpaceBattle.Game/README.md) has a separate
@@ -103,8 +103,7 @@ component references to its concrete processors. Systems update existing values
 and queue structural requests; shot flushing, hit effects, lifecycle and warp
 spawning apply those requests at explicit boundaries. Reacquire references after
 structural changes and never retain them across mutation or disposal. The
-production cores use native framework rules rather than the compatibility
-adapters' general mutation guards.
+cores follow their native framework mutation rules.
 
 Morpeh's `Commit` flushes staged changes before subsequent queries. Other cores
 apply native changes immediately. SKECS uses typed native queries; Lite uses
@@ -123,8 +122,10 @@ A logic change in any core must be applied to all five cores and their matching
 frontends. Update the corresponding headless, desktop and web implementations
 together, and keep configuration/contracts and replay exports synchronized.
 `measure --validate-ports` checks the concrete cores against SKECS at every tick;
-production headless measurements repeat this check outside the timers. Existing
-focused gameplay/adapter fixtures still exercise retained compatibility code and
-supplement these checks; they do not replace concrete-core replay and frontend validation.
+production headless measurements repeat this check outside the timers. Detailed
+mechanics fixtures target only the native SKECS implementation; initial-state
+and every-tick hash parity validate the other native cores externally. Do not
+retain a shared engine or adapter implementation for tests. Frontend checks
+exercise the matching concrete clients.
 
 For rule details see [tactics v3](TACTICS.md), [physics](PHYSICS.md), [armament](ARMAMENT.md), [damage](DAMAGE.md) and [reinforcements](REINFORCEMENTS.md). For capture/profiling scopes use the client engineering guides: [desktop](../../SpaceBattle.Game/DEVELOPMENT.md), [web](../../SpaceBattle.Web/DEVELOPMENT.md).

@@ -12,6 +12,14 @@ internal static class MeasurementProgram
         CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
         try
         {
+            string[] switches = ["--validate-deployment", "--validate-squads", "--validate-legacy-tactics", "--validate-damage", "--damage-study", "--validate", "--validate-ports", "--realtime"];
+            string[] values = ["--write-replay-oracle", "--config-json", "--framework", "--output", "--ticks", "--warmup", "--seconds", "--preset", "--seed", "--ships-per-team", "--churn", "--particles"];
+            for (var i = 0; i < args.Length; i++)
+            {
+                if (switches.Contains(args[i])) continue;
+                if (!values.Contains(args[i])) throw new ArgumentException("Unknown measurement option: " + args[i]);
+                if (++i == args.Length) throw new ArgumentException("Missing value: " + args[i - 1]);
+            }
             if (args.Contains("--write-replay-oracle")) { ReplayOracle.Write(args); return 0; }
             if (args.Contains("--validate-deployment")) { FleetDeploymentValidation.Run(); return 0; }
             if (args.Contains("--validate-squads")) { SquadCompositionValidation.Run(); TacticalScoringValidation.Run(); return 0; }
@@ -31,7 +39,6 @@ internal static class MeasurementProgram
                 return 0;
             }
             if (args.Contains("--validate")) { Validation.Run(); return 0; }
-            if (args.Contains("--validate-adapters")) { Console.WriteLine("PASS: " + string.Join(", ", AdapterValidation.RunAll())); return 0; }
             if (args.Contains("--validate-ports")) { NativeReplayValidation.Run(args); return 0; }
             var options = RunOptions.Parse(args);
             var frameworkIndex = Array.IndexOf(args, "--framework");

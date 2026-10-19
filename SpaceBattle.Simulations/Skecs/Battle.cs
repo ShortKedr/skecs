@@ -257,7 +257,7 @@ public sealed partial class Battle : IDisposable
         }
     }
 
-    private struct SteeringSystem : global::SKECS.IQueryProcessor<Transform, Motion, Brain>
+    internal struct SteeringSystem : global::SKECS.IQueryProcessor<Transform, Motion, Brain>
     {
         public void Execute(global::SKECS.Entity native, ref Transform c0, ref Motion c1, ref Brain c2) => Execute(new EntityKey(native.Id, native.Version), ref c0, ref c1, ref c2);
         public Battle Battle;

@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Numerics;
 using SpaceBattle;
 
@@ -5,13 +6,9 @@ internal static partial class Validation
 {
     private static void HeavyImpactChecks()
     {
-        var expected = HeavyImpactStoreChecks(static () => new SkecsStore());
-        Check(HeavyImpactStoreChecks(static () => new SkecsStore()), "SKECS repeat");
-        Check(HeavyImpactStoreChecks(static () => new LeoEcsLiteStore()), "Lite");
-        Check(HeavyImpactStoreChecks(static () => new LeoEcsClassicStore()), "Classic");
-        Check(HeavyImpactStoreChecks(static () => new MorpehStore()), "Morpeh");
-        Check(HeavyImpactStoreChecks(static () => new StaticEcsStore()), "Static");
-        Console.WriteLine("PASS: heavy swept impacts, visible core and dispersing sparks, separate death explosion, misses/owner exclusion, particle budgets, captured animation/expiry without splash, same-seed all-store parity.");
+        var expected = HeavyImpactStoreChecks();
+        Check(HeavyImpactStoreChecks(), "SKECS repeat");
+        Console.WriteLine("PASS: heavy swept impacts, visible core and dispersing sparks, separate death explosion, misses/owner exclusion, particle budgets, captured animation/expiry without splash, same-seed SKECS repeat parity.");
 
         void Check(HeavyImpactTrace actual, string name)
         {
@@ -29,29 +26,29 @@ internal static partial class Validation
         public List<RenderEntity[]> Frames { get; } = new();
     }
 
-    private static HeavyImpactTrace HeavyImpactStoreChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static HeavyImpactTrace HeavyImpactStoreChecks()
     {
-        foreach (var kind in Enum.GetValues<WeaponKind>()) HeavyImpactHitCheck(factory, kind, lethal: false);
-        HeavyImpactHitCheck(factory, WeaponKind.HeavyCannon, lethal: true);
-        HeavyImpactMissCheck(factory, expireOnSweep: false);
-        HeavyImpactMissCheck(factory, expireOnSweep: true);
-        HeavyImpactOwnerCheck(factory);
-        HeavyImpactBudgetCheck(factory, multiplier: 0, maxParticles: 1);
-        HeavyImpactBudgetCheck(factory, multiplier: 1, maxParticles: 1);
-        HeavyImpactBudgetCheck(factory, multiplier: 2, maxParticles: 32000);
-        return HeavyImpactAnimationCheck(factory);
+        foreach (var kind in Enum.GetValues<WeaponKind>()) HeavyImpactHitCheck(kind, lethal: false);
+        HeavyImpactHitCheck(WeaponKind.HeavyCannon, lethal: true);
+        HeavyImpactMissCheck(expireOnSweep: false);
+        HeavyImpactMissCheck(expireOnSweep: true);
+        HeavyImpactOwnerCheck();
+        HeavyImpactBudgetCheck(multiplier: 0, maxParticles: 1);
+        HeavyImpactBudgetCheck(multiplier: 1, maxParticles: 1);
+        HeavyImpactBudgetCheck(multiplier: 2, maxParticles: 32000);
+        return HeavyImpactAnimationCheck();
     }
 
-    private static Battle<TStore> HeavyImpactBattle<TStore>(Func<TStore> factory, int multiplier = 1,
-        int maxParticles = 32000) where TStore : IEcsStore
+    private static Battle HeavyImpactBattle(int multiplier = 1,
+        int maxParticles = 32000)
     {
         if (multiplier == 0)
         {
-            var quiet = LifecycleBattle(factory);
+            var quiet = LifecycleBattle();
             LifecycleFreezeMounts(quiet);
             return quiet;
         }
-        var battle = new Battle<TStore>(factory(), new BattleConfig
+        var battle = new Battle(new BattleConfig
         {
             ShipsPerTeam = 8, Seed = 27, ParticleMultiplier = multiplier,
             MaxParticles = maxParticles, ReplenishCarriers = false
@@ -70,7 +67,7 @@ internal static partial class Validation
         return battle;
     }
 
-    private static BattleFrame HeavyImpactFrame<TStore>(Battle<TStore> battle) where TStore : IEcsStore
+    private static BattleFrame HeavyImpactFrame(Battle battle)
     {
         var cached = new BattleFrame();
         var refreshed = new BattleFrame();
@@ -80,10 +77,10 @@ internal static partial class Validation
         return refreshed;
     }
 
-    private static void HeavyImpactHitCheck<TStore>(Func<TStore> factory, WeaponKind kind, bool lethal)
-        where TStore : IEcsStore
+    private static void HeavyImpactHitCheck(WeaponKind kind, bool lethal)
+
     {
-        using var battle = HeavyImpactBattle(factory);
+        using var battle = HeavyImpactBattle();
         var owner = OwnerActor(battle, 0, ShipClass.Fighter, new(-60, 0));
         var target = OwnerActor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         if (lethal) battle.Store.Get<Hull>(target).Current = 5;
@@ -119,10 +116,10 @@ internal static partial class Validation
         }
     }
 
-    private static void HeavyImpactMissCheck<TStore>(Func<TStore> factory, bool expireOnSweep)
-        where TStore : IEcsStore
+    private static void HeavyImpactMissCheck(bool expireOnSweep)
+
     {
-        using var battle = HeavyImpactBattle(factory);
+        using var battle = HeavyImpactBattle();
         var owner = OwnerActor(battle, 0, ShipClass.Fighter, new(-60, 0));
         var target = OwnerActor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         var y = expireOnSweep ? 0 : 30;
@@ -137,9 +134,9 @@ internal static partial class Validation
             battle.Store.Get<Hull>(target).Current == 10000, battle.Framework + " heavy miss expires without damage/effects");
     }
 
-    private static void HeavyImpactOwnerCheck<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void HeavyImpactOwnerCheck()
     {
-        using var battle = HeavyImpactBattle(factory);
+        using var battle = HeavyImpactBattle();
         var owner = OwnerActor(battle, 0, ShipClass.Frigate, Vector2.Zero);
         var round = OwnerRound(battle, owner, WeaponKind.HeavyCannon, new(-20, 0), new(2400, 0), expires: 3);
         battle.Step();
@@ -152,10 +149,10 @@ internal static partial class Validation
             battle.Framework + " owner-excluded heavy round expires quietly");
     }
 
-    private static void HeavyImpactBudgetCheck<TStore>(Func<TStore> factory, int multiplier, int maxParticles)
-        where TStore : IEcsStore
+    private static void HeavyImpactBudgetCheck(int multiplier, int maxParticles)
+
     {
-        using var battle = HeavyImpactBattle(factory, multiplier, maxParticles);
+        using var battle = HeavyImpactBattle(multiplier, maxParticles);
         var owner = OwnerActor(battle, 0, ShipClass.Fighter, new(-60, 0));
         var target = OwnerActor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         OwnerRound(battle, owner, WeaponKind.HeavyCannon, new(-20, 0), new(2400, 0));
@@ -179,9 +176,9 @@ internal static partial class Validation
         }
     }
 
-    private static HeavyImpactTrace HeavyImpactAnimationCheck<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static HeavyImpactTrace HeavyImpactAnimationCheck()
     {
-        using var battle = HeavyImpactBattle(factory);
+        using var battle = HeavyImpactBattle();
         var owner = OwnerActor(battle, 0, ShipClass.Fighter, new(-60, 0));
         var target = OwnerActor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         var behind = OwnerActor(battle, 1, ShipClass.Fighter, new(12, 0));
@@ -240,17 +237,18 @@ internal static partial class Validation
         return trace;
     }
 
-    private static List<(EntityKey Entity, Particle Value)> HeavyImpactParticles<TStore>(Battle<TStore> battle)
-        where TStore : IEcsStore
+    private static List<(EntityKey Entity, Particle Value)> HeavyImpactParticles(Battle battle)
+
     {
         var collector = new HeavyImpactParticleCollector { Values = new() };
-        battle.Store.ForEach<Particle, HeavyImpactParticleCollector>(ref collector);
+        battle.NativeWorld.Query<Particle>().ForEach(ref collector);
         collector.Values.Sort(static (a, b) => a.Value.Serial.CompareTo(b.Value.Serial));
         return collector.Values;
     }
 
-    private struct HeavyImpactParticleCollector : IProcessor<Particle>
+    private struct HeavyImpactParticleCollector : global::SKECS.IQueryProcessor<Particle>
     {
+        public void Execute(global::SKECS.Entity native, ref Particle c0) => Execute(new EntityKey(native.Id, native.Version), ref c0);
         public List<(EntityKey Entity, Particle Value)> Values;
         public void Execute(EntityKey e, ref Particle particle) => Values.Add((e, particle));
     }

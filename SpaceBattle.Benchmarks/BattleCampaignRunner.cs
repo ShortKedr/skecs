@@ -29,7 +29,7 @@ public sealed class BattleCampaignRunner(Workspace workspace)
         var projects = new List<string> { BattleProject };
         if (desktop) projects.Add(DesktopProject);
         await context.BuildAsync(projects, noBuild);
-        foreach (var flag in new[] { "--validate-adapters", "--validate-ports", "--validate" })
+        foreach (var flag in new[] { "--validate", "--validate-ports" })
             await context.Host.RunAsync("dotnet", context.FileFor(BattleProject), "measure", flag);
         context.AssertStable();
         if (validateOnly) { Console.WriteLine("PASS: SpaceBattle benchmark contracts validated."); return; }

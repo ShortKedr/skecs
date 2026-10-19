@@ -42,7 +42,7 @@ geometry or spawning overlaps. Increasing arena size helps up to the planning
 cap; extreme dense scenes remain available through the legacy configuration.
 
 `dotnet run --project SpaceBattle.Benchmarks -- measure --validate-deployment` checks placement and repeated replay
-on all five retained compatibility stores. `measure --validate-ports` checks the concrete cores against SKECS at every tick. `tools/web/check-deployment.mjs` verifies the production
+on the native SKECS core. `measure --validate-ports` compares the other native cores with SKECS at initial state and after every tick. `tools/web/check-deployment.mjs` verifies the production
 browser deployment, live engagement, reset/replay and desktop/mobile captures.
 
-Native validation covers geometry, irregularity and deterministic compatibility-store replays. Browser checks cover initial attributes, real combat, reset and self-hit exclusion on desktop and mobile viewports. Native/WASM bit-identical replay is not asserted.
+Native validation covers geometry, irregularity and deterministic replay on the native SKECS core. Browser checks cover initial attributes, real combat, reset and self-hit exclusion on desktop and mobile viewports. Native/WASM bit-identical replay is not asserted.

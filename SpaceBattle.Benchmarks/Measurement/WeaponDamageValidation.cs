@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Collections;
 using System.Numerics;
 using System.Reflection;
@@ -17,22 +18,14 @@ internal static class WeaponDamageValidation
         PureChecks();
         foreach (var settings in new[] { new DamageSettings(), Custom })
         {
-            var expected = Replay(static () => new SkecsStore(), settings);
-            CheckReplay(expected, Replay(static () => new SkecsStore(), settings), "SKECS repeat");
-            CheckPort(static () => new LeoEcsLiteStore());
-            CheckPort(static () => new LeoEcsClassicStore());
-            CheckPort(static () => new MorpehStore());
-            CheckPort(static () => new StaticEcsStore());
-            void CheckPort<T>(Func<T> factory) where T : IEcsStore
-            {
-                var first = Replay(factory, settings);
-                CheckReplay(expected, first, typeof(T).Name + " parity");
-                CheckReplay(first, Replay(factory, settings), typeof(T).Name + " repeat");
-            }
+            var expected = Replay(settings);
+            CheckReplay(expected, Replay(settings), "SKECS repeat");
+
+
         }
         RunAllocationChecks();
         StudyChecks();
-        Console.WriteLine("PASS: layered weapon rules, actual shield heat, legacy neutral/plasma semantics, all-store repeats, projectile/turret kind routing and warmed direct-damage allocations.");
+        Console.WriteLine("PASS: layered weapon rules, actual shield heat, legacy neutral/plasma semantics, SKECS repeats, projectile/turret kind routing and warmed direct-damage allocations.");
     }
 
     private static void PureChecks()
@@ -94,19 +87,19 @@ internal static class WeaponDamageValidation
     private readonly record struct Snapshot(string Label, int ShieldBits, int HullBits, int HeatBits,
         int LastHitTick, int LastDamageTick, EntityKey Attacker, long Hits, long PlasmaShieldHits, ulong Checksum);
 
-    private static Snapshot[] Replay<T>(Func<T> factory, DamageSettings settings) where T : IEcsStore
+    private static Snapshot[] Replay(DamageSettings settings)
     {
         var trace = new List<Snapshot>();
-        DirectChecks(factory, settings, trace);
-        ProjectileChecks(factory, settings, trace);
-        TurretCheck(factory, settings, WeaponKind.Plasma, WeaponKind.HeavyCannon, trace);
-        TurretCheck(factory, settings, WeaponKind.Cannon, WeaponKind.Plasma, trace);
+        DirectChecks(settings, trace);
+        ProjectileChecks(settings, trace);
+        TurretCheck(settings, WeaponKind.Plasma, WeaponKind.HeavyCannon, trace);
+        TurretCheck(settings, WeaponKind.Cannon, WeaponKind.Plasma, trace);
         return trace.ToArray();
     }
 
-    private static void DirectChecks<T>(Func<T> factory, DamageSettings settings, List<Snapshot> trace) where T : IEcsStore
+    private static void DirectChecks(DamageSettings settings, List<Snapshot> trace)
     {
-        using var battle = Fixture(factory, settings);
+        using var battle = Fixture(settings);
         var enemy = Actor(battle, 0, ShipClass.Fighter, new(-60, 0));
         var victim = Actor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         Call(battle, "Collect");
@@ -155,8 +148,8 @@ internal static class WeaponDamageValidation
         Check(battle.Counters.PlasmaShieldHits == plasmaHits && States(battle).Count == 0, "stale victim remains a no-op");
     }
 
-    private static void AssertDamage<T>(Battle<T> battle, EntityKey e, float shield, LayerDamage damage,
-        DamageProfile profile, long plasmaBefore, EntityKey attacker) where T : IEcsStore
+    private static void AssertDamage(Battle battle, EntityKey e, float shield, LayerDamage damage,
+        DamageProfile profile, long plasmaBefore, EntityKey attacker)
     {
         Same(battle.Store.Get<Shield>(e).Current, shield - damage.Shield, "integrated shield removal");
         Same(battle.Store.Get<Hull>(e).Current, MathF.Max(0, 10000 - damage.Hull), "integrated hull removal");
@@ -168,9 +161,9 @@ internal static class WeaponDamageValidation
             battle.Store.Get<Shield>(e).LastHitTick == battle.Tick, "damage tick and hostile attribution");
     }
 
-    private static void ProjectileChecks<T>(Func<T> factory, DamageSettings settings, List<Snapshot> trace) where T : IEcsStore
+    private static void ProjectileChecks(DamageSettings settings, List<Snapshot> trace)
     {
-        using var battle = Fixture(factory, settings);
+        using var battle = Fixture(settings);
         var owner = Actor(battle, 0, ShipClass.Fighter, new(-60, 0));
         var victim = Actor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         FillDebrisBudget(battle);
@@ -199,10 +192,10 @@ internal static class WeaponDamageValidation
         }
     }
 
-    private static void TurretCheck<T>(Func<T> factory, DamageSettings settings, WeaponKind gunKind,
-        WeaponKind parentKind, List<Snapshot> trace) where T : IEcsStore
+    private static void TurretCheck(DamageSettings settings, WeaponKind gunKind,
+        WeaponKind parentKind, List<Snapshot> trace)
     {
-        using var battle = Fixture(factory, settings);
+        using var battle = Fixture(settings);
         var parent = Actor(battle, 0, ShipClass.Frigate, new(-60, 0));
         var victim = Actor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         ResetTarget(battle, victim, 75); FillDebrisBudget(battle);
@@ -220,7 +213,7 @@ internal static class WeaponDamageValidation
         var offset = battle.Store.Get<Transform>(victim).Position - battle.Store.Get<Transform>(gun).Position;
         battle.Store.Get<Transform>(gun).Angle = MathF.Atan2(offset.Y, offset.X);
         Call(battle, "UpdateTurrets"); Call(battle, "FlushShots");
-        var rounds = new CollectProjectiles { Rows = new() }; battle.Store.ForEach<Projectile, CollectProjectiles>(ref rounds);
+        var rounds = new CollectProjectiles { Rows = new() }; battle.NativeWorld.Query<Projectile>().ForEach(ref rounds);
         Check(rounds.Rows.Count == 1 && battle.Counters.TurretShots == 1, "one actual turret emission");
         var round = rounds.Rows.Single(); var projectile = battle.Store.Get<Projectile>(round);
         Check(projectile.Kind == gunKind && projectile.Owner == parent && projectile.Damage == 100 && gunKind != parentKind,
@@ -237,14 +230,13 @@ internal static class WeaponDamageValidation
 
     public static void RunAllocationChecks()
     {
-        AllocationCheck(static () => new SkecsStore()); AllocationCheck(static () => new LeoEcsLiteStore());
-        AllocationCheck(static () => new LeoEcsClassicStore()); AllocationCheck(static () => new MorpehStore());
-        AllocationCheck(static () => new StaticEcsStore());
+        AllocationCheck();
+
     }
 
-    private static void AllocationCheck<T>(Func<T> factory) where T : IEcsStore
+    private static void AllocationCheck()
     {
-        using var battle = Fixture(factory, new DamageSettings());
+        using var battle = Fixture(new DamageSettings());
         var attacker = Actor(battle, 0, ShipClass.Fighter, new(-60, 0));
         var victim = Actor(battle, 1, ShipClass.Fighter, Vector2.Zero);
         var states = States(battle);
@@ -256,11 +248,11 @@ internal static class WeaponDamageValidation
         var before = GC.GetAllocatedBytesForCurrentThread();
         DamageBatch(battle, victim, attacker, count);
         var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
-        Check(bytes == 0, typeof(T).Name + " warmed DamageWeapon allocated " + bytes + " bytes");
+        Check(bytes == 0, "SKECS warmed DamageWeapon allocated " + bytes + " bytes");
         Check(states.Count == count + count / 2, "measured batch actually applies all hits and queues states");
     }
 
-    private static void DamageBatch<T>(Battle<T> battle, EntityKey victim, EntityKey attacker, int count) where T : IEcsStore
+    private static void DamageBatch(Battle battle, EntityKey victim, EntityKey attacker, int count)
     {
         for (var i = 0; i < count; i++)
         {
@@ -272,9 +264,9 @@ internal static class WeaponDamageValidation
         }
     }
 
-    private static Battle<T> Fixture<T>(Func<T> factory, DamageSettings settings) where T : IEcsStore
+    private static Battle Fixture(DamageSettings settings)
     {
-        var battle = new Battle<T>(factory(), new BattleConfig { ShipsPerTeam = 8, Seed = 27,
+        var battle = new Battle(new BattleConfig { ShipsPerTeam = 8, Seed = 27,
             Damage = settings, ParticleMultiplier = 0, MaxDebris = 1, ReplenishCarriers = false });
         var frame = new BattleFrame(); battle.Capture(frame);
         for (var i = 0; i < frame.Ships.Count; i++)
@@ -288,13 +280,13 @@ internal static class WeaponDamageValidation
         return battle;
     }
 
-    private static EntityKey Actor<T>(Battle<T> battle, int team, ShipClass kind, Vector2 position) where T : IEcsStore
+    private static EntityKey Actor(Battle battle, int team, ShipClass kind, Vector2 position)
     {
         var e = battle.SpawnShip(team, kind, position, EntityKey.None); Freeze(battle, e); ResetTarget(battle, e, 0);
         battle.Store.Commit(); return e;
     }
 
-    private static void Freeze<T>(Battle<T> battle, EntityKey e) where T : IEcsStore
+    private static void Freeze(Battle battle, EntityKey e)
     {
         battle.Store.Get<Motion>(e) = default;
         battle.Store.Get<Brain>(e) = new Brain { Mode = BrainMode.Patrol, NextDecisionTick = int.MaxValue,
@@ -305,7 +297,7 @@ internal static class WeaponDamageValidation
         if (battle.Store.Has<Carrier>(e)) battle.Store.Get<Carrier>(e).NextBuildTick = int.MaxValue;
     }
 
-    private static void ResetTarget<T>(Battle<T> battle, EntityKey e, float shield) where T : IEcsStore
+    private static void ResetTarget(Battle battle, EntityKey e, float shield)
     {
         battle.Store.Get<Hull>(e) = new Hull { Current = 10000, Maximum = 10000, Armor = 0.25f };
         battle.Store.Get<Shield>(e) = new Shield { Current = shield, Maximum = 1000, LastHitTick = -1000, RegenDelayTicks = int.MaxValue };
@@ -313,7 +305,7 @@ internal static class WeaponDamageValidation
         battle.Store.Get<CombatState>(e) = new CombatState { LastDamageTick = -1000, LastAttacker = EntityKey.None };
     }
 
-    private static void FillDebrisBudget<T>(Battle<T> battle) where T : IEcsStore
+    private static void FillDebrisBudget(Battle battle)
     {
         // A stationary, distant fragment occupies the one-slot budget so explosive primary
         // rounds cannot contaminate this layer-routing fixture with secondary neutral damage.
@@ -322,23 +314,25 @@ internal static class WeaponDamageValidation
         battle.Store.Set(e, new Debris { Serial = 2000000, ExpiresTick = int.MaxValue, Radius = 0.1f }); battle.Store.Commit();
     }
 
-    private static Snapshot Read<T>(Battle<T> battle, EntityKey e, string label) where T : IEcsStore
+    private static Snapshot Read(Battle battle, EntityKey e, string label)
     {
         var shield = battle.Store.Get<Shield>(e); var combat = battle.Store.Get<CombatState>(e);
         return new(label, Bits(shield.Current), Bits(battle.Store.Get<Hull>(e).Current), Bits(battle.Store.Get<Heat>(e).Value),
             shield.LastHitTick, combat.LastDamageTick, combat.LastAttacker, battle.Counters.Hits, battle.Counters.PlasmaShieldHits, battle.Checksum());
     }
 
-    private static IList States<T>(Battle<T> battle) where T : IEcsStore =>
-        (IList)typeof(Battle<T>).GetField("states", Hidden)!.GetValue(battle)!;
-    private static void Call<T>(Battle<T> battle, string method) where T : IEcsStore =>
-        typeof(Battle<T>).GetMethod(method, Hidden)!.Invoke(battle, null);
-    private static List<EntityKey> Mounts<T>(Battle<T> battle) where T : IEcsStore
-    { var query = new CollectMounts { Rows = new() }; battle.Store.ForEach<MountedTurret, CollectMounts>(ref query); return query.Rows; }
-    private struct CollectMounts : IProcessor<MountedTurret>
-    { public List<EntityKey> Rows; public void Execute(EntityKey e, ref MountedTurret mount) => Rows.Add(e); }
-    private struct CollectProjectiles : IProcessor<Projectile>
-    { public List<EntityKey> Rows; public void Execute(EntityKey e, ref Projectile p) => Rows.Add(e); }
+    private static IList States(Battle battle)  =>
+        (IList)typeof(Battle).GetField("states", Hidden)!.GetValue(battle)!;
+    private static void Call(Battle battle, string method)  =>
+        typeof(Battle).GetMethod(method, Hidden)!.Invoke(battle, null);
+    private static List<EntityKey> Mounts(Battle battle)
+    { var query = new CollectMounts { Rows = new() }; battle.NativeWorld.Query<MountedTurret>().ForEach(ref query); return query.Rows; }
+    private struct CollectMounts : global::SKECS.IQueryProcessor<MountedTurret>
+    {
+        public void Execute(global::SKECS.Entity native, ref MountedTurret c0) => Execute(new EntityKey(native.Id, native.Version), ref c0); public List<EntityKey> Rows; public void Execute(EntityKey e, ref MountedTurret mount) => Rows.Add(e); }
+    private struct CollectProjectiles : global::SKECS.IQueryProcessor<Projectile>
+    {
+        public void Execute(global::SKECS.Entity native, ref Projectile c0) => Execute(new EntityKey(native.Id, native.Version), ref c0); public List<EntityKey> Rows; public void Execute(EntityKey e, ref Projectile p) => Rows.Add(e); }
     private static void CheckReplay(Snapshot[] expected, Snapshot[] actual, string label) =>
         Check(expected.SequenceEqual(actual), label + " damage trace/checksum repeat");
 

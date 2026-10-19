@@ -1,7 +1,7 @@
 using System.Numerics;
 using System.Text.Json.Serialization;
 
-namespace SpaceBattle;
+namespace SpaceBattle.Simulations.Skecs;
 
 public sealed record SceneEvent
 {
@@ -44,7 +44,7 @@ public sealed record ScenePacket(int Schema, int Tick, List<SceneEvent> Events, 
 [JsonSerializable(typeof(ScenePacket))]
 public partial class SceneJsonContext : JsonSerializerContext { }
 
-public sealed partial class Battle<TStore>
+public sealed partial class Battle
 {
     private readonly List<SceneEvent> sceneEvents = new();
     private readonly List<SceneTactic> sceneTactics = new();

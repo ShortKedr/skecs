@@ -4,18 +4,18 @@
 <text x="24" y="32" font-size="22" font-weight="bold">SpaceBattle high: MeanMs</text>
 <text x="24" y="58" font-size="14">ms · lower is better · colour shows relative lag, not statistical significance</text>
 <text x="228" y="111" text-anchor="end" font-size="14">SKECS</text>
-<rect x="240" y="90" width="604.424397" height="30" fill="#91cb69"/>
-<text x="852.424397" y="111" font-size="14">0.550835</text>
+<rect x="240" y="90" width="598.686916" height="30" fill="#59b35d"/>
+<text x="846.686916" y="111" font-size="14">0.544176</text>
 <text x="228" y="155" text-anchor="end" font-size="14">LeoECSLite</text>
-<rect x="240" y="134" width="650" height="30" fill="#efad46"/>
-<text x="898" y="155" font-size="14">0.59237</text>
+<rect x="240" y="134" width="650" height="30" fill="#f2d85c"/>
+<text x="898" y="155" font-size="14">0.590816</text>
 <text x="228" y="199" text-anchor="end" font-size="14">LeoECS Classic</text>
-<rect x="240" y="178" width="624.606205" height="30" fill="#f2d85c"/>
-<text x="872.606205" y="199" font-size="14">0.569228</text>
+<rect x="240" y="178" width="628.73975" height="30" fill="#c7df78"/>
+<text x="876.73975" y="199" font-size="14">0.571492</text>
 <text x="228" y="243" text-anchor="end" font-size="14">Morpeh</text>
-<rect x="240" y="222" width="625.639548" height="30" fill="#f2d85c"/>
-<text x="873.639548" y="243" font-size="14">0.57017</text>
+<rect x="240" y="222" width="636.386712" height="30" fill="#f2d85c"/>
+<text x="884.386712" y="243" font-size="14">0.578443</text>
 <text x="228" y="287" text-anchor="end" font-size="14">StaticEcs 2.2.9</text>
-<rect x="240" y="266" width="545.088869" height="30" fill="#2e9b50"/>
-<text x="793.088869" y="287" font-size="14">0.496761</text>
+<rect x="240" y="266" width="559.300996" height="30" fill="#2e9b50"/>
+<text x="807.300996" y="287" font-size="14">0.508376</text>
 </g></svg>

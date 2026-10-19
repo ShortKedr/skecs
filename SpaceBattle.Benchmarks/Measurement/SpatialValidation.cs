@@ -1,3 +1,5 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using PhysicsService = SpaceBattle.Simulations.Skecs.PhysicsService;
 using System.Numerics;
 using SpaceBattle;
 
@@ -170,7 +172,7 @@ internal static partial class Validation
 
     private static void CollectionChecks()
     {
-        using var battle = new Battle<SkecsStore>(new(), new BattleConfig { ShipsPerTeam = 16, Seed = 27 });
+        using var battle = new Battle(new BattleConfig { ShipsPerTeam = 16, Seed = 27 });
         var cached = new BattleFrame(); var queried = new BattleFrame();
         for (var i = 0; i < 900; i++)
         {

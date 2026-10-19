@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using SpaceBattle;
 
 internal static partial class Validation
@@ -39,9 +40,9 @@ internal static partial class Validation
         var allocationStart = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 1000; i++) { stats.RecordTick(1, stage); stats.Refresh(); }
         Require(GC.GetAllocatedBytesForCurrentThread() == allocationStart, "no rolling statistics sample/refresh allocations");
-        using var observed = new Battle<SkecsStore>(new(), new BattleConfig { ShipsPerTeam = 8, Seed = 27 });
-        using var plain = new Battle<SkecsStore>(new(), observed.Config);
-        var liveStats = new SimulationStatistics(Battle<SkecsStore>.StageNames.Length);
+        using var observed = new Battle(new BattleConfig { ShipsPerTeam = 8, Seed = 27 });
+        using var plain = new Battle(observed.Config);
+        var liveStats = new SimulationStatistics(Battle.StageNames.Length);
         for (int i = 0; i < 180; i++)
         {
             observed.Step(); liveStats.RecordTick(observed.LastTickMs, observed.LastStageMs); plain.Step();

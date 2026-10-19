@@ -70,6 +70,6 @@ interactive hosts and current `game` benchmark preset. Desktop `--finite` disabl
 The [headless tests](../../SpaceBattle.Benchmarks/Measurement/WarpReinforcementValidation.cs) cover
 thresholds, timing, survivors, team/corner ownership, varied compositions, caps,
 blocked placement, cooldown, no per-carrier revival in endless mode, normal
-production, effects and deterministic replay across all five retained compatibility stores. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) separately compare every tick with SKECS.
+production, effects and deterministic replay on the native SKECS core. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare the other native cores with SKECS at initial state and after every tick.
 The [browser check](../../tools/web/check-warp-reinforcements.mjs) exercises actual
 simulation arrivals, atlas pixels, effect lifetime and fixed brightness budgets.

@@ -1,3 +1,5 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using PhysicsService = SpaceBattle.Simulations.Skecs.PhysicsService;
 using System.Numerics;
 using SpaceBattle;
 
@@ -453,15 +455,15 @@ internal static partial class Validation
         }
     }
 
-    private static Battle<SkecsStore> KernelBattle()
+    private static Battle KernelBattle()
     {
-        var battle = LifecycleBattle(static () => new SkecsStore());
+        var battle = LifecycleBattle();
         FreezeBattle(battle);
         LifecycleFreezeMounts(battle);
         return battle;
     }
 
-    private static EntityKey KernelBattleActor(Battle<SkecsStore> battle, Vector2 position, Vector2 velocity = default)
+    private static EntityKey KernelBattleActor(Battle battle, Vector2 position, Vector2 velocity = default)
     {
         var e = battle.SpawnShip(0, ShipClass.Fighter, position, EntityKey.None);
         LifecycleFreezeShip(battle, e);

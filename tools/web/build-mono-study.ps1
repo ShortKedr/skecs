@@ -33,7 +33,7 @@ if ($Variant -eq "Freeze") {
     $source = Join-Path $studyPath "source"
     New-Item -ItemType Directory -Path $source | Out-Null
     $manifest = @()
-    foreach ($project in @("SpaceBattle.Web", "SpaceBattle.Core", "SpaceBattle.SKECS", "SKECS")) {
+    foreach ($project in @("SpaceBattle.Web", "SpaceBattle.Core", "SpaceBattle.Simulations", "SpaceBattle.Replay", "SKECS", "SKECS.Benchmarks/Vendor")) {
         $directory = Join-Path $root $project
         foreach ($file in Get-ChildItem -LiteralPath $directory -Recurse -File) {
             $relative = [IO.Path]::GetRelativePath($root, $file.FullName)
@@ -51,7 +51,7 @@ if ($Variant -eq "Freeze") {
         Copy-Item -LiteralPath $file.FullName -Destination $target
         $manifest += @{ path = $relative; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash }
     }
-    foreach ($name in @("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "NuGet.Config", "nuget.config")) {
+    foreach ($name in @("LICENSE", "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "NuGet.Config", "nuget.config")) {
         $file = Join-Path $root $name
         if (Test-Path -LiteralPath $file -PathType Leaf) {
             Copy-Item -LiteralPath $file -Destination (Join-Path $source $name)

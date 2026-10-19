@@ -2,7 +2,8 @@ using SpaceBattle;
 
 internal static class NativeReplayValidation
 {
-    // Generate the SKECS oracle before warmup/timing. It never runs inside measured Step.
+    // SKECS owns detailed invariant tests; peers are checked only against its full tick replay.
+    // Generate the oracle before warmup/timing, never inside measured Step.
     public static ulong[] Reference(BattleConfig config, int ticks)
     {
         using var battle = new SpaceBattle.Simulations.Skecs.Battle(config);
@@ -62,7 +63,6 @@ internal static class NativeReplayValidation
             battle.Step();
             ReplayHash.RequireMatch(battle.Framework, tick, expected[tick], replay.Capture());
         }
-        battle.Validate();
         Console.WriteLine($"PASS: {battle.Framework}, {expected.Length - 1} ticks, deployment={config.Deployment}, hash={expected[^1]:X16}");
     }
 
@@ -76,7 +76,6 @@ internal static class NativeReplayValidation
             battle.Step();
             ReplayHash.RequireMatch(battle.Framework, tick, expected[tick], replay.Capture());
         }
-        battle.Validate();
         Console.WriteLine($"PASS: {battle.Framework}, {expected.Length - 1} ticks, deployment={config.Deployment}, hash={expected[^1]:X16}");
     }
 
@@ -90,7 +89,6 @@ internal static class NativeReplayValidation
             battle.Step();
             ReplayHash.RequireMatch(battle.Framework, tick, expected[tick], replay.Capture());
         }
-        battle.Validate();
         Console.WriteLine($"PASS: {battle.Framework}, {expected.Length - 1} ticks, deployment={config.Deployment}, hash={expected[^1]:X16}");
     }
 
@@ -104,7 +102,6 @@ internal static class NativeReplayValidation
             battle.Step();
             ReplayHash.RequireMatch(battle.Framework, tick, expected[tick], replay.Capture());
         }
-        battle.Validate();
         Console.WriteLine($"PASS: {battle.Framework}, {expected.Length - 1} ticks, deployment={config.Deployment}, hash={expected[^1]:X16}");
     }
 }

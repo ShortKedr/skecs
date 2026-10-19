@@ -7,6 +7,19 @@ namespace SKECS.BenchmarkTools.Tests;
 public sealed class TargetLayoutTests
 {
     [Fact]
+    public void SpaceBattleTargetsContainOnlyNativeSimulationImplementations()
+    {
+        foreach (var assembly in new[] { typeof(BattleCli).Assembly, typeof(SpaceBattle.Simulations.Skecs.Battle).Assembly, typeof(SpaceBattle.ReplayHash).Assembly })
+            Assert.DoesNotContain(assembly.GetReferencedAssemblies(), reference => reference.Name is "SpaceBattle.Adapters" or "SpaceBattle.SKECS");
+        var contracts = typeof(SpaceBattle.BattleConfig).Assembly;
+        Assert.DoesNotContain(contracts.GetTypes(), type => type.Name is "IEcsStore" or "PhysicsService" || type.Name.StartsWith("Battle`", StringComparison.Ordinal) || type.Name.StartsWith("NativeStore`", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnknownMeasurementOptionsCannotStartARealCampaign()
+        => Assert.Equal(1, global::MeasurementProgram.Run(["--unsupported"]));
+
+    [Fact]
     public void MergedBdnSuitesPreserveEveryCaseAndDoNotOverlap()
     {
         var standard = Cases("standard");

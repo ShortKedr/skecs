@@ -6,7 +6,9 @@ on:
     paths:
       - "SpaceBattle.Web/**"
       - "SpaceBattle.Core/**"
-      - "SpaceBattle.SKECS/**"
+      - "SpaceBattle.Simulations/**"
+      - "SpaceBattle.Replay/**"
+      - "SKECS.Benchmarks/Vendor/**"
       - "SKECS/**"
       - "SpaceBattle.Game/Assets/**"
       - "tools/build-space-battle-web.ps1"
@@ -17,7 +19,9 @@ on:
     paths:
       - "SpaceBattle.Web/**"
       - "SpaceBattle.Core/**"
-      - "SpaceBattle.SKECS/**"
+      - "SpaceBattle.Simulations/**"
+      - "SpaceBattle.Replay/**"
+      - "SKECS.Benchmarks/Vendor/**"
       - "SKECS/**"
       - "SpaceBattle.Game/Assets/**"
       - "tools/build-space-battle-web.ps1"
@@ -62,7 +66,7 @@ jobs:
         run: npm ci
       - name: Test offline atlases, cache identity and scene capture
         run: node --test tools/web/test-web-atlases.mjs tools/web/test-web-atlas-loader.mjs tools/web/test-finalize-web-site.mjs tools/web/test-ios-diagnostics.mjs tools/space-battle/scenes/test-*.mjs
-      - name: Publish shared C# simulation to WebAssembly
+      - name: Publish native C# simulations to WebAssembly
         shell: pwsh
         run: ./tools/build-space-battle-web.ps1 -BasePath "/${{ github.event.repository.name }}/"
       - name: Check bilingual documentation links
@@ -83,6 +87,8 @@ jobs:
         run: ./tools/web/test-build-mono-study.ps1
       - name: Validate browser simulation, controls and responsive rendering
         run: node tools/web/check-web.mjs --site artifacts/tooling/tmp/web-publish/wwwroot --base "/${{ github.event.repository.name }}/" --require-mode aot-binary
+      - name: Compare every native framework tick against SKECS
+        run: node SpaceBattle.Web/check-frameworks.mjs --site artifacts/tooling/tmp/web-publish/wwwroot --base "/${{ github.event.repository.name }}/" --ticks 1200 --require-mode aot-binary --output artifacts/tooling/tmp/web-framework-checks
       - name: Desktop WebKit bounded iOS regression smoke (not device verification)
         run: node tools/web/run-ios-smoke.mjs --site artifacts/tooling/tmp/web-publish/wwwroot --browser webkit --repeats 1 --ticks 24 --faults --retry reload --raf-faults --output artifacts/tooling/tmp/ios-webkit-smoke.json
       - name: Retain browser evidence
@@ -92,6 +98,7 @@ jobs:
           name: space-battle-browser-checks
           path: |
             artifacts/tooling/tmp/web-checks
+            artifacts/tooling/tmp/web-framework-checks
             artifacts/tooling/tmp/ios-webkit-smoke.json
             artifacts/tooling/tmp/ios-webkit-smoke.json.raf.json
           if-no-files-found: ignore

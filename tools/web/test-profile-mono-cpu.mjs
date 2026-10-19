@@ -32,7 +32,7 @@ test("known named frames classify conservatively, wrappers override own namespac
     ["mono_wasm_invoke_bound_function", "interop"], ["SpaceBattle_wrapper_managed_to_native_foo", "interop"],
     ["memcpy", "dispatch-runtime-helpers"], ["do_jit_call", "dispatch-runtime-helpers"],
     ["aot_instances_aot_wrapper_gsharedvt_out_sig", "dispatch-runtime-helpers"],
-    ["aot_instances_SpaceBattle_NativeStore_Alive", "managed-own-simulation"],
+    ["aot_instances_SpaceBattle_Simulations_Skecs_Battle_Alive", "managed-own-simulation"],
     ["corlib_System_Collections_Generic_List_MoveNext", "managed-library-compute"],
     ["unrecognized_native", "unknown"], ["wasm-function[17]", "unknown"],
   ]) assert.equal(classifyFrame({ name, wasm: true }), expected, name);

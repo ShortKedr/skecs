@@ -66,7 +66,7 @@ The common configuration contract defaults to `FleetComposition.Uniform`. Intera
 
 The [headless checks](../../SpaceBattle.Benchmarks/Measurement/FleetCompositionValidation.cs)
 cover weighted cycles, initial counts, production, varied reinforcements, caps
-and deterministic replay across retained compatibility stores. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare every tick with SKECS. The [browser checks](../../tools/web/check-web.mjs)
+and deterministic replay on the native SKECS core. [Concrete-core replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare the other native cores with SKECS at initial state and after every tick. The [browser checks](../../tools/web/check-web.mjs)
 verify the real AOT initial roster, combat, resets and controls. This is initial
 spectacle-oriented tuning, not proof of matchup balance or browser frame budgets:
 more rapid-fire ships can create more projectiles even at the same ship cap.

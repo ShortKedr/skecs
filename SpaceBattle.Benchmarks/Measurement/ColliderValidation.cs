@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using System.Numerics;
 using SpaceBattle;
 
@@ -52,24 +53,21 @@ internal static partial class Validation
             allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
             Require(allocated == 0, $"warmed reusable collider capture allocates zero bytes, got {allocated}");
         }
-        ColliderReplay(static () => new SkecsStore());
-        ColliderReplay(static () => new LeoEcsLiteStore());
-        ColliderReplay(static () => new LeoEcsClassicStore());
-        ColliderReplay(static () => new MorpehStore());
-        ColliderReplay(static () => new StaticEcsStore());
-        Console.WriteLine("PASS: exact collider geometry, docking/particle/turret exclusions, zero-allocation warmed capture and replay neutrality on five stores.");
+        ColliderReplay();
+
+        Console.WriteLine("PASS: exact collider geometry, docking/particle/turret exclusions, zero-allocation warmed capture and replay neutrality on SKECS native core.");
     }
 
-    private static void ColliderReplay<T>(Func<T> factory) where T : IEcsStore
+    private static void ColliderReplay()
     {
         var config = new BattleConfig { ShipsPerTeam = 16, Seed = 27 };
         ulong expected;
-        using (var plain = new Battle<T>(factory(), config))
+        using (var plain = new Battle(config))
         {
             for (var i = 0; i < 300; i++) plain.Step();
             expected = plain.Checksum();
         }
-        using var debug = new Battle<T>(factory(), config);
+        using var debug = new Battle(config);
         var rows = new List<DebugCollider>();
         for (var i = 0; i < 300; i++) { debug.Step(); debug.CaptureColliders(rows, refreshEntities: false); }
         Require(debug.Checksum() == expected, "collider debug leaves replay unchanged: " + debug.Framework);

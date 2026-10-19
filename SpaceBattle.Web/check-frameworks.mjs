@@ -1,25 +1,45 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+import http from "node:http";
 import { chromium } from "../tools/web/node_modules/playwright/index.mjs";
 
 const option = (name, fallback) => {
   const at = process.argv.indexOf(name);
   return at < 0 ? fallback : process.argv[at + 1];
 };
-const url = option("--url", "http://localhost:8000/");
+const site = option("--site", null);
+const base = option("--base", "/");
+const remote = option("--url", site ? null : "http://localhost:8000/");
+assert.match(base, /^\/([a-zA-Z0-9_-]+\/)*$/);
 const ticks = Number(option("--ticks", "120"));
 const requiredMode = option("--require-mode", null);
 assert.ok(Number.isInteger(ticks) && ticks > 0 && ticks <= 3600);
 const output = path.resolve(option("--output", "artifacts/tooling/tmp/web-framework-checks"));
 await fs.mkdir(output, { recursive: true });
-const browser = await chromium.launch({ headless: true });
+let browser, server;
 const errors = [], results = [];
 try {
+  if (!remote) {
+    const root = path.resolve(site);
+    const mime = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".wasm": "application/wasm", ".png": "image/png" };
+    server = http.createServer(async (request, response) => {
+      try {
+        const pathname = decodeURIComponent(new URL(request.url, "http://local").pathname);
+        if (!pathname.startsWith(base)) { response.writeHead(404).end(); return; }
+        const file = path.resolve(root, pathname.slice(base.length) || "index.html");
+        if (!file.startsWith(root + path.sep)) { response.writeHead(403).end(); return; }
+        const bytes = await fs.readFile(file);
+        response.writeHead(200, { "Content-Type": mime[path.extname(file)] || "application/octet-stream" }).end(bytes);
+      } catch { response.writeHead(404).end(); }
+    });
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  }
+  browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.on("pageerror", error => errors.push(String(error)));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-  const target = new URL(url);
+  const target = new URL(remote || `http://127.0.0.1:${server.address().port}${base}`);
   target.searchParams.set("test", "1");
   await page.goto(target.href);
   await page.waitForFunction(() => window.spaceBattle?.ready, undefined, { timeout: 180000 });
@@ -80,5 +100,6 @@ try {
   await fs.writeFile(path.join(output, "results.json"), JSON.stringify({ results, errors }, null, 2));
   console.log(`PASS: ${results.length} framework/profile runs, every tick 0..${ticks} matched SKECS; desktop/mobile controls verified.`);
 } finally {
-  await browser.close();
+  await browser?.close();
+  if (server) await new Promise(resolve => server.close(resolve));
 }

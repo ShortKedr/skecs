@@ -52,7 +52,7 @@ uniformly MIT-licensed. Obtain clarification from the rightsholder when needed.
 
 The upstream source files and licenses are unmodified. Our [microbenchmark
 adapters](SKECS.Benchmarks/Comparison/Adapters.cs), [static adapters](SKECS.Benchmarks/Comparison/StaticAdapters.cs),
-[stress adapters](SKECS.Benchmarks/Comparison/StressAdapters.cs), and [SpaceBattle stores](SpaceBattle.Adapters/)
+[stress adapters](SKECS.Benchmarks/Comparison/StressAdapters.cs), and [native SpaceBattle cores](SpaceBattle.Simulations/)
 are separate comparison integrations, not upstream implementations or endorsed
 performance recommendations.
 

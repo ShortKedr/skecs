@@ -30,7 +30,7 @@ dotnet "$driver/SpaceBattle.Benchmarks.dll" run space-battle
 
 The full campaign uses profile `high`, preset `game`, gameplay `ChurnMultiplier=2`, 108000 measured ticks after 600 separate warmup ticks, seed 7331 and 96 escorts per team. It adds no synthetic churn or diagnostic entity pools. The report preserves full Step totals, nine stage means, 600-tick HUD windows and opening phases.
 
-`validate` checks simulation and adapter contracts without a timing campaign. `run` builds, validates, measures and renders. `report` verifies local evidence and regenerates publications; `verify` validates without writing reports. `all` is the headless SpaceBattle suite; it does not run ECS microbenchmarks. Stop other measurements, builds, games, rendering, profilers and browser tests before timing.
+`validate` runs detailed mechanics checks on the native SKECS core and external initial-state/every-tick replay comparison for the other native cores without a timing campaign. `run` builds, validates, measures and renders. `report` verifies local evidence and regenerates publications; `verify` validates without writing reports. `all` is the headless SpaceBattle suite; it does not run ECS microbenchmarks. Stop other measurements, builds, games, rendering, profilers and browser tests before timing.
 
 ```sh
 dotnet run --project SpaceBattle.Benchmarks -c Release -- run desktop
@@ -73,7 +73,7 @@ Hardware capture records portable CPU/OS metadata and the GC available-memory li
 
 [Measurement](Measurement/) contains the headless host and simulation validation. [Analysis](Analysis/) owns full campaign, desktop and entity-composition reports. Composition verifies saved `low.json`, `nominal.json` and `high.json`, census/component conservation and available source hashes; it is local diagnostics outside `run all`. Its output stays under ignored artifacts and is not part of the current benchmark publication.
 
-[Native cores](../SpaceBattle.Simulations/) use pinned runtime sources owned by the ECS benchmark target. Adapters remain only for original-implementation regression checks. Vendor checks and optional missing-file recovery are available there:
+[Native cores](../SpaceBattle.Simulations/) use pinned runtime sources owned by the ECS benchmark target. Vendor checks and optional missing-file recovery are available there:
 
 ```sh
 dotnet run --project SKECS.Benchmarks -c Release -- verify-vendor

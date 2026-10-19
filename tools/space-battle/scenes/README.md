@@ -6,7 +6,11 @@ English | [Русский](README.ru.md)
 
 Reusable tools for three real SpaceBattle moments: coordinated squad kills,
 lethal HeavyCannon hits, and corner warp arrivals followed by a dense two-sided
-battle. They use the current C# / SKECS simulation, not scripted combat.
+battle. They instrument the concrete native SKECS simulation, not scripted combat.
+Only `SpaceBattle.Simulations/Skecs` and its Web bridge receive diagnostic hooks;
+the other cores remain untouched. Isolated production/probe snapshots include
+all concrete cores, Replay, shared contracts and pinned vendor sources needed by
+the Web build.
 
 ## Quick Start
 

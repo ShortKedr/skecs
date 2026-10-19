@@ -67,7 +67,7 @@ var config = new BattleConfig {
 
 ## Проверки
 
-[Headless-проверки](../../SpaceBattle.Benchmarks/Measurement/Validation.cs) покрывают слои урона, оценки AI и повторы на сохранённых хранилищах совместимости. Повторы конкретных ядер [проверяются отдельно после каждого тика](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs). Запуск через [CLI бенчмарков](../../SpaceBattle.Benchmarks/README.ru.md):
+[Headless-проверки](../../SpaceBattle.Benchmarks/Measurement/Validation.cs) покрывают слои урона и оценки AI на нативном ядре SKECS. Остальные нативные ядра [внешнее ПО сравнивает с SKECS в начальном состоянии и после каждого тика](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs). Запуск через [CLI бенчмарков](../../SpaceBattle.Benchmarks/README.ru.md):
 
 ```sh
 dotnet run --project SpaceBattle.Benchmarks -c Release -- validate space-battle

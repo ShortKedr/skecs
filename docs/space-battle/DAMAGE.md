@@ -63,7 +63,7 @@ This is a target-selection heuristic. It does not simulate future acceleration, 
 
 ## Verification
 
-[Headless checks](../../SpaceBattle.Benchmarks/Measurement/Validation.cs) cover layer accounting, damage/AI estimates and retained compatibility-store replays. Concrete-core replay is [checked separately after every tick](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs). Run them with the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md):
+[Headless checks](../../SpaceBattle.Benchmarks/Measurement/Validation.cs) cover layer accounting and damage/AI estimates on the native SKECS core. The other native cores are [compared externally with SKECS at initial state and after every tick](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs). Run them with the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md):
 
 ```sh
 dotnet run --project SpaceBattle.Benchmarks -c Release -- validate space-battle

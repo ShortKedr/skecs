@@ -73,7 +73,7 @@ public sealed class Workspace
     public SortedDictionary<string, string> Sources()
     {
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        string[] directories = ["SKECS", "SKECS.Benchmarks", "SpaceBattle.Core", "SpaceBattle.SKECS", "SpaceBattle.Adapters", "SpaceBattle.Simulations", "SpaceBattle.Replay", "SpaceBattle.Benchmarks", "SpaceBattle.Game", "SpaceBattle.Web", "tools/BenchmarkSupport"];
+        string[] directories = ["SKECS", "SKECS.Benchmarks", "SpaceBattle.Core", "SpaceBattle.Simulations", "SpaceBattle.Replay", "SpaceBattle.Benchmarks", "SpaceBattle.Game", "SpaceBattle.Web", "tools/BenchmarkSupport"];
         foreach (var directory in directories)
             if (Directory.Exists(PathFor(directory))) Visit(PathFor(directory));
         foreach (var file in new[] { "SKECS.sln", "Directory.Build.props", "Directory.Build.targets", "global.json", "NuGet.Config", "tools/BenchmarkMachineLabel.cs", "tools/BenchmarkMachineInfo.cs" })

@@ -1,3 +1,4 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
 using SpaceBattle;
 
 internal static partial class Validation
@@ -13,13 +14,9 @@ internal static partial class Validation
     private static void FleetCompositionChecks()
     {
         FleetCycleChecks();
-        var expected = FleetStoreChecks(static () => new SkecsStore());
-        Check(FleetStoreChecks(static () => new SkecsStore()), "SKECS repeat");
-        Check(FleetStoreChecks(static () => new LeoEcsLiteStore()), "Lite");
-        Check(FleetStoreChecks(static () => new LeoEcsClassicStore()), "Classic");
-        Check(FleetStoreChecks(static () => new MorpehStore()), "Morpeh");
-        Check(FleetStoreChecks(static () => new StaticEcsStore()), "Static");
-        Console.WriteLine("PASS: fleet composition cycles, smooth prefixes, legacy defaults, initial swarms, weighted production and varied warp waves across all five ports.");
+        var expected = FleetStoreChecks();
+        Check(FleetStoreChecks(), "SKECS repeat");
+        Console.WriteLine("PASS: fleet composition cycles, smooth prefixes, legacy defaults, initial swarms, weighted production and varied warp waves on the SKECS native core.");
 
         void Check(ulong[] actual, string name) => Require(expected.SequenceEqual(actual),
             $"{name}: fleet composition matches SKECS at all {expected.Length} deterministic checkpoints");
@@ -91,7 +88,7 @@ internal static partial class Validation
         return counts;
     }
 
-    private static ulong[] FleetStoreChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static ulong[] FleetStoreChecks()
     {
         var hashes = new List<ulong>();
         foreach (var composition in new[] { FleetComposition.Uniform, FleetComposition.LightSwarm })
@@ -99,7 +96,7 @@ internal static partial class Validation
             // Uniform deliberately uses the default property rather than explicitly opting in.
             var config = new BattleConfig { ShipsPerTeam = 96, Seed = 27, ParticleMultiplier = 0, ReplenishCarriers = false };
             if (composition == FleetComposition.LightSwarm) config = config with { FleetComposition = composition };
-            using var battle = WarpBattle(factory, config);
+            using var battle = WarpBattle(config);
             var initial = WarpFrame(battle);
             for (var team = 0; team < 2; team++)
             {
@@ -118,12 +115,12 @@ internal static partial class Validation
             battle.Validate(); hashes.Add(battle.Checksum());
             FleetProductionChecks(battle, composition, hashes);
         }
-        FleetWarpChecks(factory, hashes);
+        FleetWarpChecks(hashes);
         return hashes.ToArray();
     }
 
-    private static void FleetProductionChecks<TStore>(Battle<TStore> battle, FleetComposition composition, List<ulong> hashes)
-        where TStore : IEcsStore
+    private static void FleetProductionChecks(Battle battle, FleetComposition composition, List<ulong> hashes)
+
     {
         var initial = WarpFrame(battle);
         foreach (var ship in initial.Ships.Where(s => s.Team == 0 && !ShipCatalog.IsCarrier((ShipClass)s.Kind)).Take(48))
@@ -159,9 +156,9 @@ internal static partial class Validation
         battle.Validate(); hashes.Add(battle.Checksum());
     }
 
-    private static void FleetWarpChecks<TStore>(Func<TStore> factory, List<ulong> hashes) where TStore : IEcsStore
+    private static void FleetWarpChecks(List<ulong> hashes)
     {
-        using var battle = WarpBattle(factory, new BattleConfig
+        using var battle = WarpBattle(new BattleConfig
         {
             ShipsPerTeam = 96, Seed = 27, FleetComposition = FleetComposition.LightSwarm,
             ParticleMultiplier = 0, EndlessReinforcements = true,

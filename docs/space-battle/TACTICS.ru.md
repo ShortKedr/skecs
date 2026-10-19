@@ -74,7 +74,7 @@ fallback. Диагностика считает его явно.
 [Тесты групп](../../SpaceBattle.Benchmarks/Measurement/SquadCompositionValidation.cs) покрывают
 состав, совместимость, фиксацию, смерть, укрытие, линии и плотные бюджеты.
 [Тесты оценки](../../SpaceBattle.Benchmarks/Measurement/TacticalScoringValidation.cs) покрывают
-слои/вступление/нагрев. Эти точечные проверки выполняют сохранённый код совместимости; [проверка конкретных ядер](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) сравнивает каждый тик с SKECS.
+слои/вступление/нагрев. Эти подробные проверки механик выполняют нативное ядро SKECS; [проверка конкретных ядер](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) сравнивает остальные нативные ядра с SKECS в начальном состоянии и после каждого тика.
 
 
 Полная native-проверка запускается через [CLI бенчмарков](../../SpaceBattle.Benchmarks/README.ru.md). Производительность текущей нагрузки опубликована в [отчёте](REPORT.ru.md).

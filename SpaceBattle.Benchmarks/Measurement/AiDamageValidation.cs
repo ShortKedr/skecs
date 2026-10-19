@@ -1,3 +1,6 @@
+using Battle = SpaceBattle.Simulations.Skecs.Battle;
+using Squad = SpaceBattle.Simulations.Skecs.Squad;
+using ActorScoring = SpaceBattle.Simulations.Skecs.ActorScoring;
 using System.Numerics;
 using SpaceBattle;
 
@@ -6,15 +9,14 @@ internal static partial class AiLocalityValidation
     public static void RunDamage()
     {
         Check(DamageRules.Revision == "layered-weapon-damage-v1", "layer damage revision");
-        RunDamage(static () => new SkecsStore()); RunDamage(static () => new LeoEcsLiteStore());
-        RunDamage(static () => new LeoEcsClassicStore()); RunDamage(static () => new MorpehStore());
-        RunDamage(static () => new StaticEcsStore());
-        Console.WriteLine("PASS: v3 layer preferences, heterogeneous readiness, armor, secondary heat, solo catalog mounts and configurable missiles (five adapters).");
+        RunDamageNative();
+
+        Console.WriteLine("PASS: v3 layer preferences, heterogeneous readiness, armor, secondary heat, solo catalog mounts and configurable missiles (SKECS native core).");
     }
-    public static void RunDamage<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void RunDamageNative()
     {
-        LayerPreferenceChecks(factory); HeterogeneousLayerChecks(factory); SecondaryLayerChecks(factory);
-        CatalogMountLayerChecks(factory); ArmorLayerChecks(factory); MissileLayerChecks(factory);
+        LayerPreferenceChecks(); HeterogeneousLayerChecks(); SecondaryLayerChecks();
+        CatalogMountLayerChecks(); ArmorLayerChecks(); MissileLayerChecks();
     }
     private static BattleConfig LayerConfig(DamageSettings? settings = null) => new()
     {
@@ -24,17 +26,17 @@ internal static partial class AiLocalityValidation
     {
         Kind = kind, Damage = damage, Cooldown = 60, Burst = 1, Range = 100, Speed = 100, HeatPerShot = heat
     };
-    private static void LayerHealth<TStore>(Fixture<TStore> f, EntityKey e, float shield, float hull, float armor = 0)
-        where TStore : IEcsStore
+    private static void LayerHealth(Fixture f, EntityKey e, float shield, float hull, float armor = 0)
+
     {
         f.Battle.Store.Get<Shield>(e) = new Shield { Current = shield, Maximum = MathF.Max(1, shield) };
         f.Battle.Store.Get<Hull>(e) = new Hull { Current = hull, Maximum = hull, Armor = armor };
         // These analytical targets intentionally do not return fire or offer a suppression opportunity.
         f.Battle.Store.Get<Weapon>(e).NextFireTick = int.MaxValue;
     }
-    private static void LayerPreferenceChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void LayerPreferenceChecks()
     {
-        using var f = new Fixture<TStore>(factory(), LayerConfig());
+        using var f = new Fixture(LayerConfig());
         var actor = f.Spawn(0, ShipClass.Fighter, Vector2.Zero);
         var shielded = f.Spawn(1, ShipClass.Fighter, Vector2.Zero); var exposed = f.Spawn(1, ShipClass.Fighter, Vector2.Zero);
         LayerHealth(f, shielded, 90, 30); LayerHealth(f, exposed, 0, 120);
@@ -56,9 +58,9 @@ internal static partial class AiLocalityValidation
             CheckSelection(f, f.Oracle(), a, null, new Brain { Target = EntityKey.None }, exposed);
         }
     }
-    private static void HeterogeneousLayerChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void HeterogeneousLayerChecks()
     {
-        using var f = new Fixture<TStore>(factory(), LayerConfig());
+        using var f = new Fixture(LayerConfig());
         var plasma = f.Spawn(0, ShipClass.Fighter, Vector2.Zero); var kinetic = f.Spawn(0, ShipClass.Fighter, Vector2.Zero);
         var late = f.Spawn(0, ShipClass.Fighter, new(1000, 0)); var screen = f.Spawn(0, ShipClass.Fighter, Vector2.Zero);
         var target = f.Spawn(1, ShipClass.Fighter, Vector2.Zero);
@@ -84,9 +86,9 @@ internal static partial class AiLocalityValidation
         f.Battle.Store.Get<Weapon>(kinetic).NextFireTick = int.MaxValue; f.Prepare();
         Parity(f.Cost(members[0], squad, t), f.Cost(members[0], null, t), "unavailable member does not add full DPS");
     }
-    private static void SecondaryLayerChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void SecondaryLayerChecks()
     {
-        using var f = new Fixture<TStore>(factory(), LayerConfig());
+        using var f = new Fixture(LayerConfig());
         var actor = f.Spawn(0, ShipClass.Fighter, Vector2.Zero); var target = f.Spawn(1, ShipClass.Fighter, Vector2.Zero);
         f.Battle.Store.Get<Weapon>(actor) = LayerWeapon(WeaponKind.Cannon, 6, 6);
         f.Battle.Store.Set(actor, new SecondaryWeapon { Value = LayerWeapon(WeaponKind.Plasma, 3, 4) });
@@ -106,11 +108,11 @@ internal static partial class AiLocalityValidation
         f.Battle.Store.Get<Heat>(actor).Value = 100; f.Battle.Store.Get<Heat>(actor).CoolingPerSecond = 0; f.Prepare();
         Check(float.IsPositiveInfinity(f.Cost(a, null, t)), "no cooling and no ready heat budget means unavailable");
     }
-    private static void CatalogMountLayerChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void CatalogMountLayerChecks()
     {
         foreach (var kind in new[] { ShipClass.Frigate, ShipClass.Destroyer, ShipClass.LightCarrier, ShipClass.FleetCarrier, ShipClass.FoundryCarrier })
         {
-            using var f = new Fixture<TStore>(factory(), LayerConfig());
+            using var f = new Fixture(LayerConfig());
             var actor = f.Spawn(0, kind, Vector2.Zero); var wing = f.Spawn(0, ShipClass.Fighter, Vector2.Zero);
             var target = f.Spawn(1, ShipClass.Fighter, Vector2.Zero);
             f.Battle.Store.Get<Weapon>(actor) = LayerWeapon(WeaponKind.Cannon, 6, 100);
@@ -127,7 +129,7 @@ internal static partial class AiLocalityValidation
             Check(scoring.HeatScale < 0.01f && scoring.CannonHeatScale == 1 && scoring.PlasmaHeatScale == 1,
                 "catalog mount independent heat budgets survive hot main weapon");
         }
-        using var ranged = new Fixture<TStore>(factory(), LayerConfig());
+        using var ranged = new Fixture(LayerConfig());
         var ship = ranged.Spawn(0, ShipClass.Frigate, Vector2.Zero); var victim = ranged.Spawn(1, ShipClass.Fighter, new(130, 0));
         var weapon = LayerWeapon(WeaponKind.Cannon); weapon.Range = 170; ranged.Battle.Store.Get<Weapon>(ship) = weapon;
         LayerHealth(ranged, victim, 90, 60); ranged.Prepare(); var ai = ranged.Index(ship); var ti = ranged.Index(victim);
@@ -137,9 +139,9 @@ internal static partial class AiLocalityValidation
         Check(ranged.Cost(ai, null, ti) > mobile, "off-range mounts without closing speed are excluded");
         Check(!ranged.Field<ActorScoring[]>("actorScoring")[ai].MountHeatReady, "unreachable mount heat cache remains lazy");
     }
-    private static void ArmorLayerChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void ArmorLayerChecks()
     {
-        using var f = new Fixture<TStore>(factory(), LayerConfig());
+        using var f = new Fixture(LayerConfig());
         var actor = f.Spawn(0, ShipClass.Fighter, Vector2.Zero); var target = f.Spawn(1, ShipClass.Fighter, Vector2.Zero);
         f.Battle.Store.Get<Weapon>(actor) = LayerWeapon(WeaponKind.Cannon); LayerHealth(f, target, 0, 9, 0.99f);
         f.Prepare(); var a = f.Index(actor); var t = f.Index(target);
@@ -155,11 +157,11 @@ internal static partial class AiLocalityValidation
         f.Battle.Store.Get<Hull>(target).Armor = 0; f.Battle.Store.Get<Weapon>(actor).Burst = 0; f.Prepare();
         Check(float.IsPositiveInfinity(f.Cost(a, null, t)), "zero volley means unavailable");
     }
-    private static void MissileLayerChecks<TStore>(Func<TStore> factory) where TStore : IEcsStore
+    private static void MissileLayerChecks()
     {
         foreach (var profile in new[] { new DamageProfile(1, 1), new DamageProfile(3, 0.5f), new DamageProfile(0.5f, 3) })
         {
-            using var f = new Fixture<TStore>(factory(), LayerConfig(new DamageSettings { Missile = profile }));
+            using var f = new Fixture(LayerConfig(new DamageSettings { Missile = profile }));
             var actor = f.Spawn(0, ShipClass.Fighter, Vector2.Zero);
             var exposed = f.Spawn(1, ShipClass.Fighter, Vector2.Zero); var shielded = f.Spawn(1, ShipClass.Fighter, Vector2.Zero);
             f.Battle.Store.Get<Weapon>(actor) = LayerWeapon(WeaponKind.Missile);

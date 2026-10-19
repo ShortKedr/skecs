@@ -97,7 +97,7 @@ elastic momentum/energy, angular integration, friction torque/angular momentum,
 contact lifecycle, docking, correction without explosions, dense stability and
 reserved allocation. [Geometry tests](../../SpaceBattle.Benchmarks/Measurement/AnalyticSweepValidation.cs)
 include 12,000 independent distance-oracle sweeps and 3,000 brute-force bounds
-queries. Focused fixtures exercise the retained compatibility model. [Native replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare the five concrete cores against SKECS at every tick; validation and hashing run outside measured Step timers.
+queries. Focused mechanics fixtures run on the native SKECS core. [Native replay checks](../../SpaceBattle.Benchmarks/Measurement/NativeReplayValidation.cs) compare the other native cores against SKECS at initial state and after every tick; validation and hashing run outside measured Step timers.
 
 Run the [benchmark CLI](../../SpaceBattle.Benchmarks/README.md) with `validate space-battle` to execute the current checks. Measurements and raw evidence use the same CLI and remain separate from validation.
 

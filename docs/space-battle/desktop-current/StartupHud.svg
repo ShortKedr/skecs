@@ -4,18 +4,18 @@
 <text x="24" y="32" font-size="22" font-weight="bold">HUD Mean at tick 30</text>
 <text x="24" y="58" font-size="14">ms · lower is better · colour shows relative lag, not statistical significance</text>
 <text x="228" y="111" text-anchor="end" font-size="14">headless-warm-fast</text>
-<rect x="240" y="90" width="46.460152" height="30" fill="#2e9b50"/>
-<text x="294.460152" y="111" font-size="14">0.313147</text>
+<rect x="240" y="90" width="47.10392" height="30" fill="#2e9b50"/>
+<text x="295.10392" y="111" font-size="14">0.317733</text>
 <text x="228" y="155" text-anchor="end" font-size="14">headless-warm-paced</text>
-<rect x="240" y="134" width="78.592651" height="30" fill="#c93637"/>
-<text x="326.592651" y="155" font-size="14">0.529723</text>
+<rect x="240" y="134" width="72.988345" height="30" fill="#c93637"/>
+<text x="320.988345" y="155" font-size="14">0.492333</text>
 <text x="228" y="199" text-anchor="end" font-size="14">desktop-cold-fast-tiering0</text>
 <rect x="240" y="178" width="650" height="30" fill="#c93637"/>
-<text x="898" y="199" font-size="14">4.381073</text>
+<text x="898" y="199" font-size="14">4.38449</text>
 <text x="228" y="243" text-anchor="end" font-size="14">desktop-cold-fast-default</text>
-<rect x="240" y="222" width="374.587202" height="30" fill="#c93637"/>
-<text x="622.587202" y="243" font-size="14">2.52476</text>
+<rect x="240" y="222" width="355.658811" height="30" fill="#c93637"/>
+<text x="603.658811" y="243" font-size="14">2.39905</text>
 <text x="228" y="287" text-anchor="end" font-size="14">desktop-cold-paced-default</text>
-<rect x="240" y="266" width="378.218199" height="30" fill="#c93637"/>
-<text x="626.218199" y="287" font-size="14">2.549233</text>
+<rect x="240" y="266" width="381.09305" height="30" fill="#c93637"/>
+<text x="629.09305" y="287" font-size="14">2.570613</text>
 </g></svg>

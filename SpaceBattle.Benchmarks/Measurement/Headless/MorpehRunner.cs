@@ -99,7 +99,6 @@ internal static class MorpehRunner
             }
         }
         var elapsed = started.Elapsed.TotalSeconds;
-        battle.Validate();
         var measuredAllocation = allocation.Sum();
         object OpeningSummary(int count)
         {

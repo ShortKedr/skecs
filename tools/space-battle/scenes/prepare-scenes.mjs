@@ -10,38 +10,40 @@ export function insertOnce(text, anchor, replacement, name) {
 }
 
 export function instrumentSources(sources, template) {
-  assert.ok(!sources.has('SpaceBattle.Core/SceneEvents.cs'), 'Diagnostic file name collides with an existing Core source; review the probe before continuing');
+  assert.ok(!sources.has('SpaceBattle.Simulations/Skecs/SceneEvents.cs'), 'Diagnostic file name collides with an existing SKECS core source; review the probe before continuing');
   const output = new Map(sources);
   const patch = (file, anchor, replacement, name) => output.set(file,
     insertOnce(output.get(file).replaceAll('\r\n', '\n'), anchor, replacement, name));
-  patch('SpaceBattle.Core/Battle.cs', '        Tick++;', '        SceneBeginTick();\n        Tick++;', 'begin tick');
-  patch('SpaceBattle.Core/Battle.cs', 'Store.ForEach<Identity, Brain, Transform, AiSystem>(ref ai); Mark(1);',
-    'Store.ForEach<Identity, Brain, Transform, AiSystem>(ref ai); SceneCaptureTactics(); Mark(1);', 'post-AI roster');
-  patch('SpaceBattle.Core/Battle.cs', '        SpawnTurrets(e, id, transform);\n        return e;',
+  patch('SpaceBattle.Simulations/Skecs/Battle.cs', '        Tick++;', '        SceneBeginTick();\n        Tick++;', 'begin tick');
+  patch('SpaceBattle.Simulations/Skecs/Battle.cs', 'RunAiSystem(ref ai); Mark(1);',
+    'RunAiSystem(ref ai); SceneCaptureTactics(); Mark(1);', 'post-AI roster');
+  patch('SpaceBattle.Simulations/Skecs/Battle.cs', '        SpawnTurrets(e, id, transform);\n        return e;',
     '        SpawnTurrets(e, id, transform);\n        SceneSpawn(e);\n        return e;', 'ship birth');
-  patch('SpaceBattle.Core/CombatSystems.cs', '                projectiles.Add(new(e, number)); Counters.Shots++; Counters.StructuralAdds += 3;',
+  patch('SpaceBattle.Simulations/Skecs/CombatSystems.cs', '                projectiles.Add(new(e, number)); Counters.Shots++; Counters.StructuralAdds += 3;',
     '                projectiles.Add(new(e, number)); Counters.Shots++; Counters.StructuralAdds += 3;\n                SceneShot(e, number, shot, position);', 'projectile birth');
-  patch('SpaceBattle.Core/CombatSystems.cs', '            DamageWeapon(target, p.Damage, p.Kind, p.Owner); Counters.Hits++;',
+  patch('SpaceBattle.Simulations/Skecs/CombatSystems.cs', '            DamageWeapon(target, p.Damage, p.Kind, p.Owner); Counters.Hits++;',
     '            var sceneShield = Store.Get<Shield>(target).Current; var sceneHull = Store.Get<Hull>(target).Current;\n' +
     '            DamageWeapon(target, p.Damage, p.Kind, p.Owner); Counters.Hits++;\n' +
     '            SceneHit(row.Entity, p, target, impact, sceneShield, sceneHull);', 'resolved CCD hit');
-  patch('SpaceBattle.Core/CombatSystems.cs', '                    Store.Destroy(e); Counters.ShipsDestroyed++; Counters.Explosions++;',
+  patch('SpaceBattle.Simulations/Skecs/CombatSystems.cs', '                    Store.Destroy(e); Counters.ShipsDestroyed++; Counters.Explosions++;',
     '                    SceneDestroyed(e);\n                    Store.Destroy(e); Counters.ShipsDestroyed++; Counters.Explosions++;', 'actual destruction');
-  patch('SpaceBattle.Core/WarpReinforcements.cs', '            wave.NextShip++; teamCounts[team]++; Counters.ReinforcementShips++;',
+  patch('SpaceBattle.Simulations/Skecs/WarpReinforcements.cs', '            wave.NextShip++; teamCounts[team]++; Counters.ReinforcementShips++;',
     '            wave.NextShip++; teamCounts[team]++; Counters.ReinforcementShips++;\n            SceneWarpArrival(ship, team, wave);', 'exact warp arrival');
-  patch('SpaceBattle.Core/WarpReinforcements.cs', '        Counters.ReinforcementWaves++;',
+  patch('SpaceBattle.Simulations/Skecs/WarpReinforcements.cs', '        Counters.ReinforcementWaves++;',
     '        Counters.ReinforcementWaves++;\n        SceneWarpOpen(team, wave);', 'warp opening');
   patch('SpaceBattle.Web/BattleBridge.cs', '    public static string Checksum() => Current.Checksum().ToString("X16");',
     '    public static string Checksum() => Current.Checksum().ToString("X16");\n\n' +
-    '    [JSExport]\n    public static string SceneCapture() => System.Text.Json.JsonSerializer.Serialize(Current.SceneCapture(), SceneJsonContext.Default.ScenePacket);', 'diagnostic export');
-  output.set('SpaceBattle.Core/SceneEvents.cs', template);
+    '    [JSExport]\n    public static string SceneCapture() => System.Text.Json.JsonSerializer.Serialize(Current.SceneCapture(), SpaceBattle.Simulations.Skecs.SceneJsonContext.Default.ScenePacket);', 'diagnostic export');
+  output.set('SpaceBattle.Simulations/Skecs/SceneEvents.cs', template);
   return output;
 }
 
 export async function sourceIdentity() {
   const paths = [];
-  for (const dir of ['SKECS', 'SpaceBattle.Core', 'SpaceBattle.SKECS', 'SpaceBattle.Web', 'SpaceBattle.Game/Assets'])
+  for (const dir of ['SKECS', 'SpaceBattle.Core', 'SpaceBattle.Simulations', 'SpaceBattle.Replay',
+    'SpaceBattle.Web', 'SpaceBattle.Game/Assets', 'SKECS.Benchmarks/Vendor'])
     paths.push(...await filesBelow(path.join(projectRoot, dir)));
+  paths.push(path.join(projectRoot, 'LICENSE'));
   const files = {};
   for (const file of paths.sort()) files[path.relative(projectRoot, file).split(path.sep).join('/')] = sha256(await fs.readFile(file));
   for (const name of ['tools/space-battle/scenes/prepare-scenes.mjs', 'tools/space-battle/scenes/probe/SceneEvents.cs.txt',
