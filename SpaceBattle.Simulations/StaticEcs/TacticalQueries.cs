@@ -7,6 +7,8 @@ public sealed partial class Battle
 {
     private readonly List<int> coverCandidates = new(68);
     private float maximumTargetSpeed;
+    private readonly record struct FireIntent(int Serial, int Target, float Shield, float Hull);
+    private readonly List<FireIntent> intents = new();
 
     private SpatialPointIndex MemberPoints(int team) => team == 0 ? teamPoints0 : team == 1 ? teamPoints1 : tacticalPoints;
     private SpatialPointIndex OpponentPoints(int team) => team == 0 ? teamPoints1 : team == 1 ? teamPoints0 : tacticalPoints;
@@ -52,7 +54,7 @@ public sealed partial class Battle
         foreach (var target in targetCandidates)
         {
             if (!TargetAvailable(actor, AiRows[target].Entity) || formationTargets.Contains(target)) continue;
-            var arrival = MemberEngageSeconds(actor, AiRows[target]);
+            var arrival = CachedEngageSeconds(leader, target);
             if (!float.IsFinite(arrival)) continue;
             var slot = retained;
             while (slot < formationTargets.Count && arrivals[slot] <= arrival) slot++;
@@ -74,6 +76,7 @@ public sealed partial class Battle
     private void PrepareCommittedFire()
     {
         var count = Math.Min(projectiles.Count, Config.Tactics.MaximumIntentProjectiles);
+        if (projectiles.Count > count) projectiles.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
         for (var i = 0; i < count; i++)
         {
             var entity = projectiles[i].Entity;
@@ -92,9 +95,17 @@ public sealed partial class Battle
                 target.Radius / MathF.Max(target.Radius, target.Radius + target.Motion.Velocity.Length() * flight * 0.025f);
             var profile = DamageRules.ForWeapon(shot.Kind, Config.Damage);
             var damage = DamageRules.Resolve(shot.Damage, target.Shield.Current, target.Hull.Armor, profile);
-            committedShield[targetIndex] = MathF.Min(target.Shield.Current * 0.5f, committedShield[targetIndex] + damage.Shield * probability);
-            committedHull[targetIndex] = MathF.Min(target.Hull.Current * 0.5f, committedHull[targetIndex] + damage.Hull * probability);
+            intents.Add(new(projectiles[i].Serial, targetIndex, damage.Shield * probability, damage.Hull * probability));
         }
+        // Commitments accumulate in serial order, so the rows may come in any order.
+        intents.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
+        foreach (var intent in intents)
+        {
+            ref readonly var target = ref AiRows[intent.Target];
+            committedShield[intent.Target] = MathF.Min(target.Shield.Current * 0.5f, committedShield[intent.Target] + intent.Shield);
+            committedHull[intent.Target] = MathF.Min(target.Hull.Current * 0.5f, committedHull[intent.Target] + intent.Hull);
+        }
+        intents.Clear();
         if (projectiles.Count > count) Tactics.BudgetFallbacks++;
     }
 

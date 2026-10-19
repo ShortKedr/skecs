@@ -6,6 +6,8 @@ public sealed partial class Battle
 {
     private readonly List<(int Tick, SpawnRequest Spawn)> reinforcements = new();
     private readonly Dictionary<EntityKey, int> occupiedDocks = new(), ownedShips = new();
+    private readonly record struct HitRequest(int Serial, EntityKey Entity, int TargetSerial, Vector2 Impact);
+    private readonly List<HitRequest> hits = new();
     private struct WeaponSystem : global::SKECS.IQueryProcessor<Identity, Weapon, Brain>
     {
         public void Execute(global::SKECS.Entity native, ref Identity c0, ref Weapon c1, ref Brain c2) => Execute(new EntityKey(native.Id, native.Version), ref c0, ref c1, ref c2);
@@ -178,17 +180,29 @@ public sealed partial class Battle
             if (serialToShip.TryGetValue(contact.FirstSerial, out var a) && AliveShip(a)) Damage(a, (contact.RelativeSpeed - 10) * 0.35f, false, false);
             if (serialToShip.TryGetValue(contact.SecondSerial, out var b) && AliveShip(b)) Damage(b, (contact.RelativeSpeed - 10) * 0.35f, false, false);
         }
+        var cells = physics.SweepCellMask();
         foreach (var row in projectiles)
         {
             ref var p = ref Store.Get<Projectile>(row.Entity); var t = Store.Get<Transform>(row.Entity);
             if (p.ExpiresTick <= Tick) { retired.Add(row.Entity); continue; }
+            var mayHit = p.Shape == ProjectileShape.Rectangle
+                ? cells.MayHitRectangle(t.Previous, t.Position, new(p.HalfLength, p.Radius), t.Angle)
+                : cells.MayHit(t.Previous, t.Position, p.Radius);
+            if (!mayHit) { physics.CountEmptySweep(); if (Outside(t.Position)) retired.Add(row.Entity); continue; }
             var ownerSerial = Store.Alive(p.Owner) && Store.Has<Identity>(p.Owner) ? Store.Get<Identity>(p.Owner).Serial : -1;
             int targetSerial; Vector2 impact;
             var hit = p.Shape == ProjectileShape.Rectangle
                 ? physics.SweepRectangle(t.Previous, t.Position, new(p.HalfLength, p.Radius), t.Angle, ownerSerial, out targetSerial, out impact)
                 : physics.Sweep(t.Previous, t.Position, p.Radius, ownerSerial, out targetSerial, out impact);
             if (!hit) { if (Outside(t.Position)) retired.Add(row.Entity); continue; }
-            if (!serialToShip.TryGetValue(targetSerial, out var target) || !AliveShip(target)) continue;
+            hits.Add(new(row.Serial, row.Entity, targetSerial, impact));
+        }
+        // Hits apply in serial order, so detection may visit the rows in any order.
+        hits.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
+        foreach (var row in hits)
+        {
+            ref var p = ref Store.Get<Projectile>(row.Entity); var impact = row.Impact;
+            if (!serialToShip.TryGetValue(row.TargetSerial, out var target) || !AliveShip(target)) continue;
             DamageWeapon(target, p.Damage, p.Kind, p.Owner); Counters.Hits++;
             if (Store.Alive(p.Owner) && Store.Has<Identity>(p.Owner) &&
                 Store.Get<Identity>(p.Owner).Team == Store.Get<Identity>(target).Team) Counters.FriendlyFireHits++;
@@ -198,18 +212,27 @@ public sealed partial class Battle
             if (p.Kind is WeaponKind.Cannon or WeaponKind.Missile) Fragments(impact, velocity * 0.12f, 6, p.Damage * 0.2f);
             retired.Add(row.Entity);
         }
+        hits.Clear();
         foreach (var row in debris)
         {
             ref var p = ref Store.Get<Debris>(row.Entity); var t = Store.Get<Transform>(row.Entity);
             if (p.ExpiresTick <= Tick) { retired.Add(row.Entity); continue; }
+            if (!cells.MayHit(t.Previous, t.Position, p.Radius)) { physics.CountEmptySweep(); if (Outside(t.Position)) retired.Add(row.Entity); continue; }
             // Fragments damage either faction. No engine or artificial velocity decay.
             if (!physics.Sweep(t.Previous, t.Position, p.Radius, out var targetSerial, out var impact))
             { if (Outside(t.Position)) retired.Add(row.Entity); continue; }
-            if (!serialToShip.TryGetValue(targetSerial, out var target) || !AliveShip(target)) continue;
+            hits.Add(new(row.Serial, row.Entity, targetSerial, impact));
+        }
+        hits.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
+        foreach (var row in hits)
+        {
+            ref var p = ref Store.Get<Debris>(row.Entity); var impact = row.Impact;
+            if (!serialToShip.TryGetValue(row.TargetSerial, out var target) || !AliveShip(target)) continue;
             var speed = Store.Get<Motion>(row.Entity).Velocity.Length();
             Damage(target, p.Damage * MathF.Max(0.2f, speed / 40), false, true);
             Counters.DebrisHits++; Effect(impact, Vector2.Zero, 0, 2); retired.Add(row.Entity);
         }
+        hits.Clear();
         foreach (var row in particles) if (Store.Get<Particle>(row.Entity).ExpiresTick <= Tick) retired.Add(row.Entity);
     }
     private bool Outside(Vector2 position) => MathF.Abs(position.X) > Config.ArenaHalfSize * 2.5f || MathF.Abs(position.Y) > Config.ArenaHalfSize * 2.5f;

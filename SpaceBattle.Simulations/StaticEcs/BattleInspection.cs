@@ -8,7 +8,7 @@ public sealed partial class Battle
     // Raw native entity observation for software-side invariant checks.
     public void CopyEntityKeys(List<EntityKey> destination)
     {
-        Collect();
+        Collect(); SortMovingRows();
         destination.Clear();
         foreach (var row in ships) destination.Add(row.Entity);
         foreach (var row in turrets) destination.Add(row.Entity);
@@ -22,6 +22,7 @@ public sealed partial class Battle
     public void Capture(BattleFrame frame, bool refreshEntities = true)
     {
         if (refreshEntities) Collect();
+        SortMovingRows();
         frame.Tick = Tick; frame.ArenaHalfSize = Config.ArenaHalfSize; frame.LastTickMs = LastTickMs; frame.Counters = Counters.Copy();
         frame.Ships.Clear(); frame.Projectiles.Clear(); frame.Debris.Clear(); frame.Particles.Clear(); frame.Turrets.Clear();
         foreach (var row in ships)
@@ -66,7 +67,7 @@ public sealed partial class Battle
 
     public void CopyReplayState(List<uint> state)
     {
-        Collect();
+        Collect(); SortMovingRows();
         state.Clear();
         Add((uint)Tick); Add((uint)serial); Add((uint)nextFormationTick);
         Add(1); Float(Config.Physics.Restitution); Float(Config.Physics.Friction); Float(Config.Physics.RestitutionThreshold);

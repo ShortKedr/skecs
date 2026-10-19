@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace SpaceBattle.Simulations.LeoEcsClassic;
@@ -50,11 +51,23 @@ internal sealed class PhysicsService : IDisposable
     private readonly HashSet<ulong> constraintPairs = new();
     private bool disposed, membershipDirty = true, gridDirty = true;
     private int sweepSegments = 1;
+    private const int SweepCellCount = 64;
+    private const double SweepMargin = 1e-3;
+    private SweepRows sweepCellRows;
+    private (double MinX, double MinY, double MaxX, double MaxY)[] sweepBodyBounds = [];
+    private double sweepMinX, sweepMinY, sweepMaxX, sweepMaxY, sweepScaleX, sweepScaleY;
+    private int sweepBodyCount;
     private long sweeps, emptySweeps, hitCandidates, narrowTests;
     private double contactCandidatesMs, solverMs, hitCandidatesMs, hitNarrowMs;
     private PhysicsWorkStatistics diagnostics;
     private CandidatePair[] potentialPairs = Array.Empty<CandidatePair>();
     private int potentialCount;
+    private int[] broadBodies = [], broadOrder = [], broadOpen = [], broadSorted = [], broadIndexOfBody = [], broadStamp = [], broadStart = [];
+    private int[] broadSeconds = [];
+    private int broadSortedCount, broadEpoch;
+    private double[] broadMinX = [], broadMinY = [], broadMaxX = [], broadMaxY = [];
+    private ulong[] broadPairs = [];
+    private readonly List<ulong> pairKeys = new();
     private bool candidateCacheValid, candidateFallback;
 
     public PhysicsSettings Settings { get; }
@@ -121,7 +134,17 @@ internal sealed class PhysicsService : IDisposable
         var pairCapacity = (int)Math.Min((long)ships.Count * (ships.Count - 1) / 2, Settings.MaximumContactPairs);
         constraints.EnsureCapacity(pairCapacity); contacts.EnsureCapacity(pairCapacity);
         previousPairs.EnsureCapacity(pairCapacity); currentPairs.EnsureCapacity(pairCapacity);
-        constraintPairs.EnsureCapacity(pairCapacity);
+        constraintPairs.EnsureCapacity(pairCapacity); pairKeys.EnsureCapacity(pairCapacity);
+        if (broadBodies.Length < ships.Count)
+        {
+            var bodies = Math.Max(ships.Count, broadBodies.Length * 2);
+            Array.Resize(ref broadBodies, bodies); Array.Resize(ref broadOrder, bodies); Array.Resize(ref broadOpen, bodies);
+            Array.Resize(ref broadSorted, bodies); Array.Resize(ref broadIndexOfBody, bodies); Array.Resize(ref broadStamp, bodies);
+            Array.Resize(ref broadStart, bodies + 1);
+            Array.Resize(ref broadMinX, bodies); Array.Resize(ref broadMinY, bodies);
+            Array.Resize(ref broadMaxX, bodies); Array.Resize(ref broadMaxY, bodies);
+            Array.Resize(ref broadPairs, checked(bodies * (bodies - 1) / 2)); Array.Resize(ref broadSeconds, broadPairs.Length);
+        }
         var candidateCapacity = (int)Math.Min((long)ships.Count * (ships.Count - 1) / 2, Settings.MaximumCandidatePairs);
         if (candidateCapacity > potentialPairs.Length)
             Array.Resize(ref potentialPairs, (int)Math.Min(Settings.MaximumCandidatePairs,
@@ -171,7 +194,7 @@ internal sealed class PhysicsService : IDisposable
             if (body.Enabled) travel = Math.Max(travel, body.Velocity.Length() * dt / body.Radius);
         }
         if (dt == 0) { sweepSegments = 1; gridDirty = true; return; }
-        (previousPairs, currentPairs) = (currentPairs, previousPairs); currentPairs.Clear();
+        (previousPairs, currentPairs) = (currentPairs, previousPairs); ClearPairs(currentPairs);
         var substeps = (int)Math.Clamp(Math.Ceiling(travel * 2.0), 1, Settings.MaximumSubsteps);
         sweepSegments = substeps;
         if (Settings.CollectDiagnostics) diagnostics.Substeps = substeps;
@@ -187,7 +210,7 @@ internal sealed class PhysicsService : IDisposable
                 if (!Finite(position) || !float.IsFinite(angle)) throw new InvalidOperationException("Non-finite integration result.");
                 body.Position = position; body.Angle = angle;
             }
-            constraints.Clear(); constraintPairs.Clear();
+            constraints.Clear(); ClearPairs(constraintPairs);
             candidateCacheValid = candidateFallback = false;
             BuildContacts();
             SolveVelocities(0);
@@ -263,10 +286,14 @@ internal sealed class PhysicsService : IDisposable
         }
         return true;
     }
+    // Pairs of enabled bodies whose fat bounds overlap, ordered by the serials of the first and the second body:
+    // the active list is in serial order, so ordering by the active indices gives the serial order.
     private void BuildPotentialPairs()
     {
-        grid.Clear(); potentialCount = 0;
+        potentialCount = 0;
         if (Settings.CollectDiagnostics) diagnostics.CandidateCacheBuilds++;
+        var count = 0;
+        if (++broadEpoch == int.MaxValue) { Array.Clear(broadStamp); broadEpoch = 1; }
         foreach (var id in active)
         {
             var body = ships[id]!; if (!body.Enabled) continue;
@@ -275,21 +302,60 @@ internal sealed class PhysicsService : IDisposable
             body.FatMinY = Math.BitDecrement(body.MinY - Settings.ContactCandidateMargin);
             body.FatMaxX = Math.BitIncrement(body.MaxX + Settings.ContactCandidateMargin);
             body.FatMaxY = Math.BitIncrement(body.MaxY + Settings.ContactCandidateMargin);
-            grid.AddBounds(id, body.FatMinX, body.FatMinY, body.FatMaxX, body.FatMaxY);
+            broadBodies[count] = id; broadIndexOfBody[id] = count; broadStamp[id] = broadEpoch;
+            broadMinX[count] = body.FatMinX; broadMinY[count] = body.FatMinY;
+            broadMaxX[count] = body.FatMaxX; broadMaxY[count] = body.FatMaxY;
+            count++;
         }
-        grid.Seal();
-        foreach (var firstId in active)
+        // Bodies barely move between builds: start from the previous x order and finish with an insertion sort.
+        var ordered = 0;
+        for (var k = 0; k < broadSortedCount; k++)
         {
-            var a = ships[firstId]!; if (!a.Enabled) continue;
-            var queryStart = Stamp();
-            grid.QueryBounds(a.FatMinX, a.FatMinY, a.FatMaxX, a.FatMaxY, candidates, sort: false);
-            candidates.Sort(compareSerial);
-            if (Settings.CollectDiagnostics) { diagnostics.Sorts++; diagnostics.ContactCandidates += candidates.Count; }
-            if (Settings.CollectTimings) diagnostics.ContactQueryMs += Elapsed(queryStart);
-            foreach (var secondId in candidates)
+            var id = broadSorted[k];
+            if (broadStamp[id] != broadEpoch) continue;
+            broadStamp[id] = -broadEpoch; broadOrder[ordered++] = broadIndexOfBody[id];
+        }
+        for (var index = 0; index < count; index++)
+            if (broadStamp[broadBodies[index]] == broadEpoch) broadOrder[ordered++] = index;
+        for (var k = 1; k < count; k++)
+        {
+            var current = broadOrder[k]; var key = broadMinX[current]; var j = k - 1;
+            while (j >= 0 && broadMinX[broadOrder[j]] > key) { broadOrder[j + 1] = broadOrder[j]; j--; }
+            broadOrder[j + 1] = current;
+        }
+        for (var k = 0; k < count; k++) broadSorted[k] = broadBodies[broadOrder[k]];
+        broadSortedCount = count;
+        int pairs = 0, open = 0;
+        for (var k = 0; k < count; k++)
+        {
+            var current = broadOrder[k]; var kept = 0;
+            for (var o = 0; o < open; o++)
             {
-                var b = ships[secondId]!;
-                if (b.Serial <= a.Serial || constraintPairs.Contains(Pair(a.Serial, b.Serial))) continue;
+                var other = broadOpen[o];
+                if (broadMaxX[other] < broadMinX[current]) continue;
+                broadOpen[kept++] = other;
+                if (broadMinY[other] > broadMaxY[current] || broadMaxY[other] < broadMinY[current]) continue;
+                broadPairs[pairs++] = other < current ? (ulong)other << 32 | (uint)current : (ulong)current << 32 | (uint)other;
+            }
+            open = kept; broadOpen[open++] = current;
+        }
+        Array.Clear(broadStart, 0, count + 1);
+        for (var p = 0; p < pairs; p++) broadStart[(int)(broadPairs[p] >> 32) + 1]++;
+        for (var first = 0; first < count; first++) { broadStart[first + 1] += broadStart[first]; broadOpen[first] = broadStart[first]; }
+        for (var p = 0; p < pairs; p++) broadSeconds[broadOpen[(int)(broadPairs[p] >> 32)]++] = (int)(uint)broadPairs[p];
+        for (var first = 0; first < count; first++)
+        {
+            int begin = broadStart[first], end = broadStart[first + 1];
+            for (var k = begin + 1; k < end; k++)
+            {
+                var second = broadSeconds[k]; var j = k - 1;
+                while (j >= begin && broadSeconds[j] > second) { broadSeconds[j + 1] = broadSeconds[j]; j--; }
+                broadSeconds[j + 1] = second;
+            }
+            for (var k = begin; k < end; k++)
+            {
+                var firstId = broadBodies[first]; var secondId = broadBodies[broadSeconds[k]];
+                if (constraintPairs.Contains(Pair(ships[firstId]!.Serial, ships[secondId]!.Serial))) continue;
                 if (potentialCount == potentialPairs.Length)
                 {
                     candidateFallback = true; candidateCacheValid = false; return;
@@ -298,6 +364,12 @@ internal sealed class PhysicsService : IDisposable
             }
         }
         candidateCacheValid = true;
+    }
+    private void ClearPairs(HashSet<ulong> pairs)
+    {
+        pairKeys.Clear();
+        foreach (var key in pairs) pairKeys.Add(key);
+        foreach (var key in pairKeys) pairs.Remove(key);
     }
     private void BuildContactsUncached()
     {
@@ -520,6 +592,8 @@ internal sealed class PhysicsService : IDisposable
     {
         if (!gridDirty) return;
         EnsureActive(); grid.Clear();
+        if (sweepBodyBounds.Length < active.Count) Array.Resize(ref sweepBodyBounds, active.Count);
+        sweepBodyCount = 0;
         foreach (var id in active)
         {
             var body = ships[id]!; if (!body.Enabled) continue;
@@ -529,10 +603,76 @@ internal sealed class PhysicsService : IDisposable
                 minX = Math.Min(minX, body.Path[p].X); maxX = Math.Max(maxX, body.Path[p].X);
                 minY = Math.Min(minY, body.Path[p].Y); maxY = Math.Max(maxY, body.Path[p].Y);
             }
-            grid.AddBounds(id, minX - body.Radius, minY - body.Radius, maxX + body.Radius, maxY + body.Radius);
+            var bounds = (minX - body.Radius, minY - body.Radius, maxX + body.Radius, maxY + body.Radius);
+            grid.AddBounds(id, bounds.Item1, bounds.Item2, bounds.Item3, bounds.Item4);
+            sweepBodyBounds[sweepBodyCount++] = bounds;
         }
         grid.Seal();
+        MarkSweepCells();
         gridDirty = false;
+    }
+    private void MarkSweepCells()
+    {
+        sweepCellRows = default;
+        sweepMinX = sweepMinY = double.PositiveInfinity; sweepMaxX = sweepMaxY = double.NegativeInfinity;
+        for (var i = 0; i < sweepBodyCount; i++)
+        {
+            var bounds = sweepBodyBounds[i];
+            sweepMinX = Math.Min(sweepMinX, bounds.MinX); sweepMinY = Math.Min(sweepMinY, bounds.MinY);
+            sweepMaxX = Math.Max(sweepMaxX, bounds.MaxX); sweepMaxY = Math.Max(sweepMaxY, bounds.MaxY);
+        }
+        sweepScaleX = sweepMaxX > sweepMinX ? SweepCellCount / (sweepMaxX - sweepMinX) : 0;
+        sweepScaleY = sweepMaxY > sweepMinY ? SweepCellCount / (sweepMaxY - sweepMinY) : 0;
+        for (var i = 0; i < sweepBodyCount; i++)
+        {
+            var bounds = sweepBodyBounds[i];
+            var columns = SweepColumns(SweepCell(bounds.MinX, sweepMinX, sweepScaleX), SweepCell(bounds.MaxX, sweepMinX, sweepScaleX));
+            var top = SweepCell(bounds.MaxY, sweepMinY, sweepScaleY);
+            for (var row = SweepCell(bounds.MinY, sweepMinY, sweepScaleY); row <= top; row++) sweepCellRows[row] |= columns;
+        }
+    }
+    private static int SweepCell(double value, double minimum, double scale)
+    {
+        var cell = (value - minimum) * scale;
+        return cell <= 0 ? 0 : cell >= SweepCellCount - 1 ? SweepCellCount - 1 : (int)cell;
+    }
+    private static ulong SweepColumns(int first, int last) => (ulong.MaxValue >> (SweepCellCount - 1 - last)) & (ulong.MaxValue << first);
+    public SweepCells SweepCellMask()
+    {
+        ThrowIfDisposed();
+        if (gridDirty) EnsureSweepGrid();
+        return new() { Rows = sweepCellRows, Occupied = sweepBodyCount > 0, MinX = sweepMinX, MinY = sweepMinY,
+            MaxX = sweepMaxX, MaxY = sweepMaxY, ScaleX = sweepScaleX, ScaleY = sweepScaleY };
+    }
+    public void CountEmptySweep() { sweeps++; emptySweeps++; }
+    // False only when Sweep would find no candidate: the margin covers the one-ulp widening of Sweep's query bounds
+    // and SweepCell is monotonic, so any grid bounds overlapping them share a marked cell.
+    [InlineArray(SweepCellCount)] internal struct SweepRows { private ulong first; }
+    internal struct SweepCells
+    {
+        public SweepRows Rows;
+        public bool Occupied;
+        public double MinX, MinY, MaxX, MaxY, ScaleX, ScaleY;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly bool MayHit(Vector2 from, Vector2 to, float radius) => MayHit(from, to, (double)radius);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly bool MayHitRectangle(Vector2 from, Vector2 to, Vector2 halfExtents, float angle) =>
+            !Finite(halfExtents) || halfExtents.X < 0 || halfExtents.Y < 0 || !float.IsFinite(angle) ||
+            MayHit(from, to, Math.Sqrt((double)halfExtents.X * halfExtents.X + (double)halfExtents.Y * halfExtents.Y));
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private readonly bool MayHit(Vector2 from, Vector2 to, double radius)
+        {
+            if (!Finite(from) || !Finite(to) || !double.IsFinite(radius) || radius < 0) return true;
+            var reach = radius + SweepMargin;
+            var queryMinX = Math.Min(from.X, to.X) - reach; var queryMaxX = Math.Max(from.X, to.X) + reach;
+            var queryMinY = Math.Min(from.Y, to.Y) - reach; var queryMaxY = Math.Max(from.Y, to.Y) + reach;
+            if (!Occupied || MinX > queryMaxX || MaxX < queryMinX || MinY > queryMaxY || MaxY < queryMinY) return false;
+            var columns = SweepColumns(SweepCell(queryMinX, MinX, ScaleX), SweepCell(queryMaxX, MinX, ScaleX));
+            var top = SweepCell(queryMaxY, MinY, ScaleY);
+            for (var row = SweepCell(queryMinY, MinY, ScaleY); row <= top; row++)
+                if ((Rows[row] & columns) != 0) return true;
+            return false;
+        }
     }
     private void EnsureActive()
     {

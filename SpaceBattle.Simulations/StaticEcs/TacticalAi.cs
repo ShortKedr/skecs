@@ -80,6 +80,7 @@ public sealed partial class Battle
                 Store.Has<SecondaryWeapon>(e) ? Store.Get<SecondaryWeapon>(e).Value : default,
                 Store.Get<Brain>(e), Store.Get<CombatState>(e), Store.Get<Collider>(e).Radius, Store.Has<Docked>(e), Store.Has<Overheated>(e)));
         }
+        ResetScoringCache();
         if (assignedSquadMembers.Length < aiRows.Count)
         {
             Array.Resize(ref assignedSquadMembers, Math.Max(aiRows.Count, assignedSquadMembers.Length * 2));

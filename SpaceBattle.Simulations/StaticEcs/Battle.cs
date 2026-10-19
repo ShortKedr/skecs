@@ -139,6 +139,11 @@ public sealed partial class Battle : IDisposable
         var projectilesCollector = new ProjectileCollector { Battle = this }; RunProjectileCollector(ref projectilesCollector);
         var debrisCollector = new DebrisCollector { Battle = this }; RunDebrisCollector(ref debrisCollector);
         var particlesCollector = new ParticleCollector { Battle = this }; RunParticleCollector(ref particlesCollector);
+    }
+
+    // Step processes moving rows in any order; observers read them in serial order.
+    private void SortMovingRows()
+    {
         projectiles.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
         debris.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
         particles.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
@@ -156,17 +161,14 @@ public sealed partial class Battle : IDisposable
         Compact(projectiles); Compact(debris); Compact(particles); Compact(turrets);
         void Compact(List<MovingRow> rows)
         {
-            var write = 0; var ordered = true; var previous = int.MinValue;
+            var write = 0;
             for (var read = 0; read < rows.Count; read++)
             {
                 var row = rows[read];
                 if (!Store.Alive(row.Entity)) continue;
-                ordered &= row.Serial >= previous; previous = row.Serial;
                 rows[write++] = row;
             }
             if (write < rows.Count) rows.RemoveRange(write, rows.Count - write);
-            // Normal spawns append increasing serials; externally injected serials may not.
-            if (!ordered) rows.Sort(static (a, b) => a.Serial.CompareTo(b.Serial));
         }
     }
 
