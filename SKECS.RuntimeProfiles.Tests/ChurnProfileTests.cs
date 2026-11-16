@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using SKECS.RuntimeProfiles;
 
 namespace SKECS.RuntimeProfiles.Tests;
@@ -8,6 +9,7 @@ public sealed class ChurnProfileTests
     private static readonly string SchemaHash = new('a', 64);
     private static readonly ProfileIdentity Identity = ProfileIdentity.Current("build-1", "levels-1", SchemaHash, "test-cpu", 64);
     private static readonly ProfileEvidence Evidence = new("test-verifier/1", new string('b', 64), new string('c', 64), 3, 2, 4);
+    private static readonly PackedProfileEvidence PlacementEvidence = new(new string('e', 64), new string('f', 64));
 
     [Fact]
     public void JsonRoundTripCreatesWorldWithEntirePolicy()
@@ -133,6 +135,103 @@ public sealed class ChurnProfileTests
         Assert.Throws<InvalidDataException>(() => ChurnProfile.Load(source, Identity));
     }
 
+    [Fact]
+    public void PackedRoundTripUsesRegisteredGeometryAndAppliesPlacementToTheWorld()
+    {
+        var binding = PackedProfileBinding.Create<Effect>(SchemaHash);
+        var permissions = new ComponentPlacementOptions().AllowAdaptiveStorage<Effect>();
+        var profile = MakePackedProfile(permissions, binding);
+        using var saved = Write(profile);
+        Assert.False(ChurnProfile.TryLoad(saved, Identity, out _, out var reason));
+        Assert.Contains("permissions", reason);
+        saved.Position = 0;
+        var loaded = ChurnProfile.Load(saved, Identity, permissions, [binding]);
+        Assert.Equal(ChurnProfile.PackedFormatId, loaded.Format);
+        Assert.Equal(2, loaded.SchemaVersion);
+        Assert.Equal(binding.Description, Assert.Single(loaded.PackedComponents));
+        Assert.Equal(PlacementEvidence, loaded.PackedEvidence);
+        using var world = new World(loaded.CreateOptions());
+        var entity = world.CreateEntity(new Effect(42));
+        Assert.Equal(new Effect(42), world.Get<Effect>(entity));
+        Assert.Throws<InvalidOperationException>(() => world.Query<Effect>());
+        Assert.True(world.GetChurnControlStatistics().Enabled);
+        using var resaved = Write(loaded);
+        Assert.Equal(saved.ToArray(), resaved.ToArray());
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("empty")]
+    [InlineData("duplicate")]
+    [InlineData("assembly")]
+    [InlineData("type")]
+    [InlineData("size")]
+    [InlineData("alignment")]
+    [InlineData("schemaFingerprint")]
+    [InlineData("format")]
+    [InlineData("missing-control")]
+    [InlineData("duplicate-control")]
+    [InlineData("invalid-control")]
+    public void PackedManifestRejectsIncompleteAndUnregisteredPlacement(string change)
+    {
+        var binding = PackedProfileBinding.Create<Effect>(SchemaHash);
+        var permissions = new ComponentPlacementOptions().AllowAdaptiveStorage<Effect>();
+        using var saved = Write(MakePackedProfile(permissions, binding));
+        var artifact = JsonNode.Parse(saved)!.AsObject();
+        var placement = artifact["placement"]!.AsArray();
+        var component = placement[0]!.AsObject();
+        switch (change)
+        {
+            case "missing": artifact.Remove("placement"); break;
+            case "empty": placement.Clear(); break;
+            case "duplicate": placement.Add(component.DeepClone()); break;
+            case "size": component["size"] = 8; component["alignment"] = 8; break;
+            case "alignment": component["alignment"] = 1; break;
+            case "schemaFingerprint": component[change] = new string('d', 64); break;
+            case "format": artifact[change] = ChurnProfile.FormatId; break;
+            case "missing-control": artifact["placementEvidence"]!.AsObject().Remove("samePolicySha256"); break;
+            case "duplicate-control": artifact["placementEvidence"]!["samePolicySha256"] = PlacementEvidence.TunedArchetypesSha256; break;
+            case "invalid-control": artifact["placementEvidence"]!["samePolicySha256"] = "wrong"; break;
+            default: component[change] = "unregistered"; break;
+        }
+
+        using var modified = new MemoryStream(Encoding.UTF8.GetBytes(artifact.ToJsonString()));
+        Assert.False(ChurnProfile.TryLoad(modified, Identity, permissions, [binding], out var profile, out var reason));
+        Assert.Null(profile);
+        Assert.False(string.IsNullOrWhiteSpace(reason));
+    }
+
+    [Fact]
+    public void PackedManifestRespectsPinnedTypesAndRejectsAnAmbiguousRegistry()
+    {
+        var binding = PackedProfileBinding.Create<Effect>(SchemaHash);
+        var allowed = new ComponentPlacementOptions().AllowAdaptiveStorage<Effect>();
+        using var saved = Write(MakePackedProfile(allowed, binding));
+        Assert.False(ChurnProfile.TryLoad(saved, Identity, allowed.RequireArchetypeStorage<Effect>(), [binding], out _, out var ineligible));
+        Assert.Contains("ineligible", ineligible);
+        saved.Position = 0;
+        Assert.False(ChurnProfile.TryLoad(saved, Identity, allowed, [binding, binding], out _, out var ambiguous));
+        Assert.Contains("Duplicate application binding", ambiguous);
+    }
+
+    [Fact]
+    public void VersionOneDoesNotInheritPackedSelectionFromTheApplicationRegistry()
+    {
+        var binding = PackedProfileBinding.Create<Effect>(SchemaHash);
+        var permissions = new ComponentPlacementOptions().AllowAdaptiveStorage<Effect>().WithPackedPools(typeof(Effect));
+        using var saved = Write(MakeProfile());
+        var loaded = ChurnProfile.Load(saved, Identity, permissions, [binding]);
+        Assert.Empty(loaded.PackedComponents);
+        Assert.Null(loaded.PackedEvidence);
+        using var world = new World(loaded.CreateOptions());
+        world.CreateEntity(new Effect(1));
+        _ = world.Query<Effect>();
+    }
+
+    private static ChurnProfile MakePackedProfile(ComponentPlacementOptions permissions, PackedProfileBinding binding) =>
+        ChurnProfile.CreatePacked(Identity, new ChurnProfileSettings(16_384, 0, [], 0, 25, 4), Evidence,
+            PlacementEvidence, permissions, [binding]);
+
     private static ChurnProfile MakeProfile(ChurnProfileSettings? settings = null, ProfileIdentity? identity = null) =>
         new(ChurnProfile.FormatId, ChurnProfile.Version, identity ?? Identity,
             settings ?? new ChurnProfileSettings(4096, 1118, new[] { new ChurnStartupBlock(47, 2) }, 128, 10, 3), Evidence);
@@ -144,4 +243,6 @@ public sealed class ChurnProfileTests
         stream.Position = 0;
         return stream;
     }
+
+    private readonly record struct Effect(int Value);
 }

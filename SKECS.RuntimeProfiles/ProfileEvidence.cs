@@ -14,3 +14,15 @@ public sealed record ProfileEvidence(string VerifierVersion, string CorpusSha256
         if (Repetitions < 2) throw new ArgumentOutOfRangeException(nameof(Repetitions));
     }
 }
+
+/// <summary>Content hashes for each independently recorded archetype control.</summary>
+public sealed record PackedProfileEvidence(string SamePolicySha256, string TunedArchetypesSha256)
+{
+    internal void Validate()
+    {
+        ProfileIdentity.RequireSha256(SamePolicySha256, nameof(SamePolicySha256));
+        ProfileIdentity.RequireSha256(TunedArchetypesSha256, nameof(TunedArchetypesSha256));
+        if (string.Equals(SamePolicySha256, TunedArchetypesSha256, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Packed placement requires two distinct control receipts.");
+    }
+}

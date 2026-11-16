@@ -4,18 +4,46 @@ namespace SKECS.RuntimeProfiles;
 
 internal static class ChurnProfileJson
 {
-    internal static ChurnProfile Read(Stream source)
+    internal static ChurnProfile Read(Stream source, ComponentPlacementOptions? permissions, IReadOnlyList<PackedProfileBinding>? bindings)
     {
         using var document = JsonDocument.Parse(source);
         var root = document.RootElement;
-        RequireObject(root, "profile", "format", "schemaVersion", "identity", "settings", "evidence");
+        var packed = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("schemaVersion", out var value) &&
+            value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var schema) && schema == ChurnProfile.PackedVersion;
+        if (packed) RequireObject(root, "profile", "format", "schemaVersion", "identity", "settings", "evidence", "placement", "placementEvidence");
+        else RequireObject(root, "profile", "format", "schemaVersion", "identity", "settings", "evidence");
         var format = ReadString(root, "format");
         var version = ReadInt(root, "schemaVersion");
-        if (format != ChurnProfile.FormatId || version != ChurnProfile.Version)
+        var expectedFormat = packed ? ChurnProfile.PackedFormatId : ChurnProfile.FormatId;
+        var expectedVersion = packed ? ChurnProfile.PackedVersion : ChurnProfile.Version;
+        if (format != expectedFormat || version != expectedVersion)
             throw new InvalidDataException("Unsupported churn profile format or schema version.");
 
-        return new ChurnProfile(format, version, ReadIdentity(root.GetProperty("identity")),
-            ReadSettings(root.GetProperty("settings")), ReadEvidence(root.GetProperty("evidence")));
+        var identity = ReadIdentity(root.GetProperty("identity"));
+        var settings = ReadSettings(root.GetProperty("settings"));
+        var evidence = ReadEvidence(root.GetProperty("evidence"));
+        if (!packed) return new ChurnProfile(format, version, identity, settings, evidence);
+        if (permissions == null || bindings == null)
+            throw new InvalidDataException("A packed profile requires application placement permissions and type bindings.");
+        var controls = root.GetProperty("placementEvidence");
+        RequireObject(controls, "placement evidence", "samePolicySha256", "tunedArchetypesSha256");
+        var placementEvidence = new PackedProfileEvidence(ReadString(controls, "samePolicySha256"), ReadString(controls, "tunedArchetypesSha256"));
+        return ChurnProfile.CreatePacked(identity, settings, evidence, placementEvidence,
+            ReadPlacement(root.GetProperty("placement")), permissions, bindings);
+    }
+
+    private static PackedProfileComponent[] ReadPlacement(JsonElement placement)
+    {
+        if (placement.ValueKind != JsonValueKind.Array) throw new InvalidDataException("placement must be an array.");
+        var components = new PackedProfileComponent[placement.GetArrayLength()];
+        var index = 0;
+        foreach (var component in placement.EnumerateArray())
+        {
+            RequireObject(component, "packed component", "assembly", "type", "size", "alignment", "schemaFingerprint");
+            components[index++] = new PackedProfileComponent(ReadString(component, "assembly"), ReadString(component, "type"),
+                ReadInt(component, "size"), ReadInt(component, "alignment"), ReadString(component, "schemaFingerprint"));
+        }
+        return components;
     }
 
     private static ProfileIdentity ReadIdentity(JsonElement value)
@@ -99,6 +127,25 @@ internal static class ChurnProfileJson
         WriteIdentity(writer, profile.Identity);
         WriteSettings(writer, profile.Settings);
         WriteEvidence(writer, profile.Evidence);
+        if (profile.PackedEvidence is { } controls)
+        {
+            writer.WriteStartArray("placement");
+            foreach (var component in profile.PackedComponents)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("assembly", component.Assembly);
+                writer.WriteString("type", component.Type);
+                writer.WriteNumber("size", component.Size);
+                writer.WriteNumber("alignment", component.Alignment);
+                writer.WriteString("schemaFingerprint", component.SchemaFingerprint);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteStartObject("placementEvidence");
+            writer.WriteString("samePolicySha256", controls.SamePolicySha256);
+            writer.WriteString("tunedArchetypesSha256", controls.TunedArchetypesSha256);
+            writer.WriteEndObject();
+        }
         writer.WriteEndObject();
     }
 

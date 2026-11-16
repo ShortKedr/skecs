@@ -3,6 +3,7 @@
     <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
     <PackageId>ShortKedr.SKECS.RuntimeProfiles</PackageId>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

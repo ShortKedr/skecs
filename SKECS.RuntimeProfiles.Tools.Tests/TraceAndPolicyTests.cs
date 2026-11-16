@@ -85,7 +85,7 @@ public sealed class TraceAndPolicyTests
     }
 
     [Theory]
-    [InlineData("schemaVersion", "3")]
+    [InlineData("schemaVersion", "4")]
     [InlineData("schemaVersion", "99")]
     [InlineData("droppedEvents", "1")]
     [InlineData("recordedEvents", "1000")]
@@ -141,6 +141,50 @@ public sealed class TraceAndPolicyTests
         Assert.True(controlled.Diagnostics.PeakRetained < baseline.Diagnostics.PeakRetained);
     }
 
+    [Fact]
+    public void VersionThreeTracksCrossStorageReuseAndCountsTheSharedIndexOnce()
+    {
+        var placement = new ComponentPlacementOptions().AllowAdaptiveStorage<Packed>().AllowAdaptiveStorage<Marker>()
+            .WithPackedPools(typeof(Packed), typeof(Marker));
+        var options = new WorldOptions(Capacity).WithChurnControl(new ChurnControlOptions(long.MaxValue, maxOversizePercent: 0))
+            .WithComponentPlacement(placement);
+        long peak = 0;
+        using var stream = Capture((world, profiler) =>
+        {
+            profiler.BeginFrame();
+            world.DestroyEntity(world.CreateEntity(new First(1)));
+            var a = world.CreateEntity(new Packed(1));
+            world.Add(a, new Marker(1));
+            world.CreateEntity(new Packed(2));
+            var c = world.CreateEntity(new Packed(3));
+            peak = world.GetChurnControlStatistics().RetainedBytes;
+            world.Remove<Packed>(c);
+            world.CreateEntity(new Second(2));
+            peak = Math.Max(peak, world.GetChurnControlStatistics().RetainedBytes);
+            profiler.EndFrame();
+        }, options);
+        var xml = XDocument.Load(stream);
+        stream.Position = 0;
+        var trace = TraceReader.Read(stream);
+        Assert.Equal(3, trace.Header.SchemaVersion);
+        Assert.Equal(2, trace.PackedLayouts.Count);
+        Assert.Equal(peak, trace.PeakRetained);
+        Assert.True(trace.LowerBound.PackedPresence > 0);
+        var events = xml.Root!.Elements().ToArray();
+        var reusedPage = events.First(entry => (string?)entry.Attribute("kind") == "packedPageReused");
+        var releasedPage = events.First(entry => (string?)entry.Attribute("kind") == "packedPageReturned");
+        Assert.Contains(events, entry => (string?)entry.Attribute("kind") == "chunkAllocated" &&
+            (long)entry.Attribute("backing")! == (long)reusedPage.Attribute("backing")!);
+        Assert.Contains(events, entry => (string?)entry.Attribute("kind") == "chunkReused" &&
+            (long)entry.Attribute("backing")! == (long)releasedPage.Attribute("backing")!);
+
+        releasedPage.SetAttributeValue("backing", 999);
+        using var invalid = new MemoryStream();
+        xml.Save(invalid);
+        invalid.Position = 0;
+        Assert.Throws<InvalidDataException>(() => TraceReader.Read(invalid));
+    }
+
     private static MemoryStream Capture(Action<World, ProfilerSession> work, WorldOptions? options = null)
     {
         var profiler = new ProfilerSession(128);
@@ -153,4 +197,6 @@ public sealed class TraceAndPolicyTests
 
     private readonly record struct First(int Value);
     private readonly record struct Second(int Value);
+    private readonly record struct Packed(int Value);
+    private readonly record struct Marker(int Value);
 }

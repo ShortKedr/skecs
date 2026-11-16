@@ -9,9 +9,10 @@ internal readonly record struct TraceSlot(int Archetype, int Chunk);
 internal readonly record struct TraceComponent(string Assembly, string Type, int Size, int Alignment);
 internal sealed record TraceLayout(int NativeBytes, TraceComponent[] Components);
 internal readonly record struct MemoryPeak(int Frame, long OccupiedNative, long OccupiedPinned, long EntityRecords,
-    long FreeIds, long Accessors)
+    long FreeIds, long Accessors, long PackedIndexes = 0, long PackedPresence = 0)
 {
-    public long Total => checked(OccupiedNative + OccupiedPinned + EntityRecords + FreeIds + Accessors);
+    public long TableBytes => checked(EntityRecords + FreeIds + Accessors + PackedIndexes + PackedPresence);
+    public long Total => checked(OccupiedNative + OccupiedPinned + TableBytes);
 }
 
 internal enum TraceAction { Occupy, Empty, Tables, Trim }
@@ -19,9 +20,9 @@ internal readonly record struct TraceChange(TraceAction Action, TraceSlot Slot, 
 
 internal sealed record ProfilerTrace(TraceHeader Header, int ChunkCapacity, int Frames,
     IReadOnlyList<TraceLayout> Layouts, IReadOnlyList<TraceChange> Changes, MemoryPeak LowerBound,
-    long PeakRetained, int EarlyEntityCapacity, long TableBytesPerEntity);
+    long PeakRetained, int EarlyEntityCapacity, long TableBytesPerEntity, IReadOnlyList<TraceLayout> PackedLayouts);
 
-internal static class TraceReader
+internal static partial class TraceReader
 {
     internal static ProfilerTrace Read(Stream stream)
     {
@@ -31,7 +32,7 @@ internal static class TraceReader
             Require(xml.MoveToContent() == XmlNodeType.Element && xml.Name == "skecs-profiler-trace" &&
                 xml.NamespaceURI.Length == 0, "Expected a SKECS Profiler trace.");
             var version = Int(xml, "schemaVersion", 1);
-            Require(version is 1 or 2, $"Unsupported Profiler trace version {version}.");
+            Require(version is 1 or 2 or 3, $"Unsupported Profiler trace version {version}.");
             var dropped = Number(xml, "droppedEvents");
             Require(dropped == 0, $"Trace lost {dropped} events.");
             var header = new TraceHeader(version, Required(xml, "scenario"), Required(xml, "workloadId"),
@@ -60,7 +61,7 @@ internal static class TraceReader
         }
     }
 
-    private sealed class Builder(TraceHeader header)
+    private sealed partial class Builder(TraceHeader header)
     {
         private readonly Dictionary<int, Archetype> _archetypes = new();
         private readonly Dictionary<int, TraceComponent> _components = new();
@@ -86,13 +87,14 @@ internal static class TraceReader
         private MemoryPeak _peak = new(-1, 0, 0, 0, 0, 0);
 
         private int Frame => _frameOpen ? _frames : _frames - 1;
-        private long TableBytes => checked(_entityRecords + _freeIds + _accessors);
+        private long TableBytes => checked(_entityRecords + _freeIds + _accessors + _packedIndexes + _packedPresence);
 
         internal void ReadEvent(XmlReader xml, int index)
         {
             var kind = Required(xml, "kind");
             Require(!_disposed && (index != 1 || kind == "worldStarted") &&
-                (!_teardown || kind is "chunkReleased" or "pooledChunkReleased" or "worldDisposed"),
+                (!_teardown || kind is "chunkReleased" or "packedPageReleased" or "pooledChunkReleased" or "worldDisposed") &&
+                (_packedNextKind == null || kind == _packedNextKind),
                 $"Unexpected {kind} at event {index}.");
             switch (kind)
             {
@@ -119,24 +121,24 @@ internal static class TraceReader
                     _teardown = true;
                     break;
                 case "pooledChunkAllocated":
-                    Require(header.SchemaVersion == 2 && _frames == 0 && !_frameOpen, "Unexpected startup backing.");
+                    Require(header.SchemaVersion >= 2 && _frames == 0 && !_frameOpen, "Unexpected startup backing.");
                     var reserved = NewBacking(xml);
                     _pool.Add(reserved.Id, reserved);
                     break;
                 case "chunkPooled":
-                    Require(header.SchemaVersion == 2, "Pooled slots require trace version 2.");
+                    Require(header.SchemaVersion >= 2, "Pooled slots require trace version 2 or 3.");
                     if (!_chunks.Remove(Slot(xml), out var pooled) || pooled.Rows != 0 || pooled.Id != Number(xml, "backing", 1))
                         throw new InvalidDataException("Invalid returned backing or occupied chunk.");
                     _pool.Add(pooled.Id, pooled);
                     break;
                 case "chunkReused":
-                    Require(header.SchemaVersion == 2, "Reused slots require trace version 2.");
+                    Require(header.SchemaVersion >= 2, "Reused slots require trace version 2 or 3.");
                     var reused = Number(xml, "backing", 1);
                     if (!_pool.Remove(reused, out var backing)) throw new InvalidDataException("Reused backing was not pooled.");
                     Attach(Slot(xml), backing, reused: true);
                     break;
                 case "pooledChunkReleased":
-                    Require(header.SchemaVersion == 2, "Pool releases require trace version 2.");
+                    Require(header.SchemaVersion >= 2, "Pool releases require trace version 2 or 3.");
                     if (!_pool.Remove(Number(xml, "backing", 1), out var cold)) throw new InvalidDataException("Released backing was not pooled.");
                     _retainedChunks -= cold.Native + cold.Pinned;
                     break;
@@ -177,8 +179,14 @@ internal static class TraceReader
                     _ = Required(xml, "name");
                     _ = Number(xml, "elapsedTicks");
                     break;
+                case "packedComponentDefined" or "packedPageAllocated" or "packedPageReused" or "packedPageReturned" or
+                    "packedPageReleased" or "packedRowsChanged" or "packedIndexesMeasured":
+                    Require(header.SchemaVersion == 3, "Packed events require trace version 3.");
+                    ReadPacked(xml, kind);
+                    break;
                 case "worldDisposed":
-                    Require(!_frameOpen && _chunks.Count == 0 && _pool.Count == 0 && _retainedChunks == 0,
+                    Require(!_frameOpen && _chunks.Count == 0 && _pool.Count == 0 && _retainedChunks == 0 &&
+                        _packedTypes.Values.All(type => type.Pages.Count == 0),
                         "World disposed with missing backing releases or an open frame.");
                     _disposed = true;
                     break;
@@ -191,11 +199,18 @@ internal static class TraceReader
         {
             var archetype = GetArchetype(Int(xml, "archetype"));
             var id = Int(xml, "componentId");
+            Require(!_packedTypes.ContainsKey(id), "A component cannot be both packed and an archetype column.");
+            var component = RegisterComponent(xml, id);
+            Require(archetype.Components.Count < archetype.ComponentCount && !archetype.Components.Contains(component),
+                "Invalid component layout.");
+            archetype.Components.Add(component);
+        }
+
+        private TraceComponent RegisterComponent(XmlReader xml, int id)
+        {
             var component = new TraceComponent(Required(xml, "assembly"), Required(xml, "type"),
                 Int(xml, "size", 1), Int(xml, "alignment", 1));
-            Require(component.Alignment == Math.Min(16, component.Size & -component.Size) &&
-                archetype.Components.Count < archetype.ComponentCount && !archetype.Components.Contains(component),
-                "Invalid component layout.");
+            Require(component.Alignment == Math.Min(16, component.Size & -component.Size), "Invalid component alignment.");
             Require(!_components.TryGetValue(id, out var previous) || previous == component,
                 "Inconsistent component ID in trace.");
             var key = (component.Assembly, component.Type);
@@ -203,7 +218,7 @@ internal static class TraceReader
                 "Duplicate stable component identity in trace.");
             _components[id] = component;
             _componentIds[key] = id;
-            archetype.Components.Add(component);
+            return component;
         }
 
         private void Allocate(XmlReader xml) => Attach(Slot(xml), NewBacking(xml), reused: false);
@@ -212,7 +227,7 @@ internal static class TraceReader
         {
             var native = Int(xml, "nativeBytes", 1);
             var pinned = Number(xml, "pinnedBytes", 1);
-            var id = header.SchemaVersion == 2 ? Number(xml, "backing", 1) : 0;
+            var id = header.SchemaVersion >= 2 ? Number(xml, "backing", 1) : 0;
             Require((id > 0 ? _backingIds.Add(id) : xml.GetAttribute("backing") == null) && pinned == 8L * _capacity,
                 "Invalid backing identity or pinned payload.");
             _retainedChunks = checked(_retainedChunks + native + pinned);
@@ -290,7 +305,7 @@ internal static class TraceReader
 
         private void Observe()
         {
-            var memory = new MemoryPeak(Frame, _native, _pinned, _entityRecords, _freeIds, _accessors);
+            var memory = new MemoryPeak(Frame, _native, _pinned, _entityRecords, _freeIds, _accessors, _packedIndexes, _packedPresence);
             if (memory.Total > _peak.Total) _peak = memory;
             _peakRetained = Math.Max(_peakRetained, checked(_retainedChunks + TableBytes));
         }
@@ -311,7 +326,8 @@ internal static class TraceReader
                 archetype.Components.OrderBy(component => component.Assembly, StringComparer.Ordinal)
                     .ThenBy(component => component.Type, StringComparer.Ordinal).ToArray())).ToArray();
             return new(header, _capacity, _frames, layouts, _changes, _peak, _peakRetained,
-                _earlyEntityCapacity, _tables.Values.Sum(table => table.Bytes / table.Capacity));
+                _earlyEntityCapacity, _tables.Values.Sum(table => table.Bytes / table.Capacity),
+                _packedTypes.Values.Select(type => new TraceLayout(type.NativeBytes, [type.Component])).ToArray());
         }
 
         private static long Align(long value, int alignment) => checked(value + alignment - 1) & -(long)alignment;

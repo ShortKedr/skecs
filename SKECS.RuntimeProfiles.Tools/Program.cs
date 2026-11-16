@@ -22,7 +22,7 @@ try
                 var trace = TraceReader.Read(stream);
                 Console.WriteLine(System.Text.Encoding.UTF8.GetString(Artifacts.Serialize(new
                 {
-                    trace.Header, trace.ChunkCapacity, trace.Frames, trace.LowerBound, trace.PeakRetained
+                    trace.Header, trace.ChunkCapacity, trace.Frames, trace.LowerBound, trace.PeakRetained, trace.PackedLayouts
                 })));
             }
             return 0;
