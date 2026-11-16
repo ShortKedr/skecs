@@ -64,9 +64,9 @@ public static partial class GaSemanticAnalysis
                 case ISimpleAssignmentOperation { IsRef: true }:
                     Report(Write, location, "Write the component value directly instead of reassigning its reference.");
                     return;
-                case ISimpleAssignmentOperation fieldInitializer when IsAdditionInitializer(fieldInitializer.Parent):
+                case ISimpleAssignmentOperation fieldInitializer when IsPackedOutputInitializer(fieldInitializer.Parent):
                     if (fieldInitializer.Target is not IFieldReferenceOperation { Field.IsStatic: false })
-                        Report(Stream, location, "Initialize only instance fields in an Add<T> payload.");
+                        Report(Stream, location, "Initialize only instance fields in a GA output payload.");
                     break;
                 case ISimpleAssignmentOperation assignment:
                     RequireWritable(assignment.Target, location);
@@ -120,11 +120,11 @@ public static partial class GaSemanticAnalysis
                 case IInlineArrayAccessOperation access:
                     AnalyzeInlineArrayAccess(access, location);
                     break;
-                case IObjectCreationOperation addition when IsAdditionValue(addition):
-                    if (addition.Arguments.Length != 0 || addition.Constructor is { IsImplicitlyDeclared: false })
-                        Report(Stream, location, "Use a plain field initializer with no user-defined constructor in an Add<T> payload.");
+                case IObjectCreationOperation payload when IsPackedOutputValue(payload):
+                    if (payload.Arguments.Length != 0 || payload.Constructor is { IsImplicitlyDeclared: false })
+                        Report(Stream, location, "Use a plain field initializer with no user-defined constructor in a GA output payload.");
                     break;
-                case IObjectOrCollectionInitializerOperation initializer when IsAdditionInitializer(initializer):
+                case IObjectOrCollectionInitializerOperation initializer when IsPackedOutputInitializer(initializer):
                     break;
                 case IObjectCreationOperation creation when creation.Type?.IsValueType == true && creation.Initializer == null:
                     if (creation.Constructor is { IsImplicitlyDeclared: false } constructor)
@@ -205,7 +205,7 @@ public static partial class GaSemanticAnalysis
             {
                 var component = method.TypeArguments[0];
                 if (!IsEntryContext(invocation.Instance) || !IsRemovalComponent(component) ||
-                    !CanPackAddition(component))
+                    !CanPackOutput(component))
                 {
                     Report(Stream, location, "Call Add<T> directly on the entry context with an accessible, portable component struct.");
                 }
@@ -251,6 +251,11 @@ public static partial class GaSemanticAnalysis
             }
             if (Equal(method.ContainingType, context) && method.Name == "Create" && IsEntityTicket(method.ReturnType))
                 return;
+            if (IsTypedOutput(method))
+            {
+                AnalyzeTypedOutput(invocation, location);
+                return;
+            }
             if (Equal(method.ContainingType, context) && method.Name == "Emit" && IsRuntimeSystemContext())
             {
                 if (method is not { IsStatic: false, Arity: 0, ReturnsVoid: true } ||
@@ -560,20 +565,58 @@ public static partial class GaSemanticAnalysis
             invocation.Arguments[0] is { Parameter.Ordinal: 0, Value: ILocalReferenceOperation local } &&
             ticketLocals.Contains(local.Local);
 
-        private bool IsAdditionInitializer(IOperation? operation) =>
-            operation is IObjectOrCollectionInitializerOperation { Parent: IObjectCreationOperation creation } && IsAdditionValue(creation);
+        private bool IsTypedOutput(IMethodSymbol method) =>
+            method is { Name: "Emit" or "Contribute", IsStatic: false, Arity: 1, ReturnsVoid: true } &&
+            Equal(method.ContainingType, context) && IsRuntimeSystemContext();
 
-        private bool IsAdditionValue(IOperation operation) => operation.Parent switch
+        private void AnalyzeTypedOutput(IInvocationOperation invocation, Location location)
+        {
+            var method = invocation.TargetMethod;
+            var type = method.TypeArguments[0];
+            if (!IsEntryContext(invocation.Instance) || method.Parameters.Length != 1 ||
+                method.Parameters[0].RefKind != RefKind.None || !Equal(method.Parameters[0].Type, type) ||
+                invocation.Arguments.Length != 1 || invocation.Arguments[0].Parameter?.Ordinal != 0 ||
+                !CanNameComponentType(type) || !CanPackOutput(type))
+            {
+                Report(Stream, location, $"Call {method.Name}<T> directly on the entry context with an accessible, portable payload.");
+                return;
+            }
+            if (IsScalarResource(type))
+                return;
+
+            var value = invocation.Arguments[0].Value;
+            while (true)
+            {
+                if (value is IConversionOperation { Conversion.IsIdentity: true } conversion)
+                    value = conversion.Operand;
+                else if (value is IParenthesizedOperation parentheses)
+                    value = parentheses.Operand;
+                else
+                    break;
+            }
+            if (value is not (IDefaultValueOperation or IObjectCreationOperation) &&
+                !(value is IParameterReferenceOperation parameter &&
+                    entry.Parameters.Any(item => Equal(item, parameter.Parameter)) &&
+                    parameter.Parameter.RefKind is RefKind.In or RefKind.Ref))
+                Report(Stream, location, $"Use default, a plain field initializer, or an entry component as the {method.Name}<T> payload.");
+        }
+
+        private bool IsPackedOutputInitializer(IOperation? operation) =>
+            operation is IObjectOrCollectionInitializerOperation { Parent: IObjectCreationOperation creation } && IsPackedOutputValue(creation);
+
+        private bool IsPackedOutputValue(IOperation operation) => operation.Parent switch
         {
             IArgumentOperation { Parent: IInvocationOperation invocation, Parameter: { } parameter } =>
-                IsAdditionCommand(invocation.TargetMethod) && parameter.Ordinal == invocation.TargetMethod.Parameters.Length - 1,
+                (IsAdditionCommand(invocation.TargetMethod) || IsTypedOutput(invocation.TargetMethod)) &&
+                parameter.Ordinal == invocation.TargetMethod.Parameters.Length - 1,
             ISimpleAssignmentOperation assignment =>
-                ReferenceEquals(operation, assignment.Value) && IsAdditionInitializer(assignment.Parent),
-            IConversionOperation { Conversion.IsIdentity: true } conversion => IsAdditionValue(conversion),
+                ReferenceEquals(operation, assignment.Value) && IsPackedOutputInitializer(assignment.Parent),
+            IConversionOperation { Conversion.IsIdentity: true } conversion => IsPackedOutputValue(conversion),
+            IParenthesizedOperation parentheses => IsPackedOutputValue(parentheses),
             _ => false
         };
 
-        private bool CanPackAddition(ITypeSymbol type)
+        private bool CanPackOutput(ITypeSymbol type)
         {
             if (type.SpecialType is SpecialType.System_Boolean or SpecialType.System_Int32 or SpecialType.System_UInt32 ||
                 Equal(type, fixedType))
@@ -591,7 +634,7 @@ public static partial class GaSemanticAnalysis
                 }) &&
                 component.GetMembers().OfType<IFieldSymbol>().Where(field => !field.IsStatic).All(field =>
                     !field.IsReadOnly && !field.IsImplicitlyDeclared && !field.IsFixedSizeBuffer && field.RefKind == RefKind.None &&
-                    compilation.IsSymbolAccessibleWithin(field, compilation.Assembly) && CanPackAddition(field.Type));
+                    compilation.IsSymbolAccessibleWithin(field, compilation.Assembly) && CanPackOutput(field.Type));
         }
 
         private bool IsRemovalComponent(ITypeSymbol type) =>
@@ -697,7 +740,7 @@ public static partial class GaSemanticAnalysis
             if (!Equal(method.ContainingType, context))
                 return false;
 
-            var descriptor = method.Name is "Emit" or "Create" or "Destroy" or "Remove" or "Add" or "SetDomainOrder" or "get_Commands" ? Stream : Unknown;
+            var descriptor = method.Name is "Emit" or "Contribute" or "Create" or "Destroy" or "Remove" or "Add" or "SetDomainOrder" or "get_Commands" ? Stream : Unknown;
             Report(descriptor, location, $"Register and lower scoped context operation '{method.Name}' before using it in a GA kernel.");
             return true;
         }

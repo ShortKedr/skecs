@@ -21,7 +21,8 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
     private readonly bool _usesDomainOrder;
     private readonly GaComponentRemoval[] _componentRemovals;
     private readonly GaComponentAddition[] _componentAdditions;
-    private readonly int _additionPayloadWords;
+    private readonly GaTypedEvent[] _eventTypes;
+    private readonly int _outputPayloadWords;
     private readonly PackJob _pack;
     private readonly ApplyJob _apply;
     private readonly Action<GaBatchTimings>? _observe;
@@ -96,6 +97,16 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
         Action<GaBatchTimings>? observe, GaTickSnapshot? snapshot, bool usesCommands,
         ReadOnlySpan<GaComponentRemoval> componentRemovals, ReadOnlySpan<GaComponentAddition> componentAdditions,
         GaTickResourceCodec<TInput> tickResource, GaTickBuffer? buffer)
+        : this(startup, systemId, sourceDigest, irDigest, componentSchemaDigest, wordsPerRow, pack, apply, eventCapacity,
+            observe, snapshot, usesCommands, componentRemovals, componentAdditions, tickResource, buffer, [])
+    {
+    }
+
+    public GaBatchProcessor(GaStartupResult startup, string systemId, string sourceDigest,
+        string irDigest, string componentSchemaDigest, int wordsPerRow, PackJob pack, ApplyJob apply, int eventCapacity,
+        Action<GaBatchTimings>? observe, GaTickSnapshot? snapshot, bool usesCommands,
+        ReadOnlySpan<GaComponentRemoval> componentRemovals, ReadOnlySpan<GaComponentAddition> componentAdditions,
+        GaTickResourceCodec<TInput> tickResource, GaTickBuffer? buffer, ReadOnlySpan<GaTypedEvent> eventTypes)
     {
         ArgumentNullException.ThrowIfNull(startup);
         ArgumentException.ThrowIfNullOrWhiteSpace(systemId);
@@ -118,6 +129,16 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
                 throw new ArgumentException("The component addition table contains an unbound type.", nameof(componentAdditions));
             additionPayloadWords = Math.Max(additionPayloadWords, addition.PayloadWords);
         }
+        int eventPayloadWords = 0;
+        int reductionTypeCount = 0;
+        foreach (var type in eventTypes)
+        {
+            if (!type.IsBound)
+                throw new ArgumentException("The typed event table contains an unbound type.", nameof(eventTypes));
+            eventPayloadWords = Math.Max(eventPayloadWords, type.PayloadWords);
+            if (type.IsContribution)
+                reductionTypeCount++;
+        }
 
         var decision = startup.Decisions.SingleOrDefault(item => item.Contract.SystemId == systemId);
         if (!startup.Succeeded || decision?.Route != GaRoute.Gpu)
@@ -131,6 +152,8 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
             contract.TickResourceType != tickResource.TypeId || contract.TickResourceWords != tickResource.WordCount ||
             (contract.BufferSchema is not null) != (buffer is not null) ||
             contract.UsesCommands != usesCommands || contract.ComponentRemovalCount != componentRemovals.Length ||
+            contract.EventTypeCount != eventTypes.Length || contract.EventPayloadWords != eventPayloadWords ||
+            contract.ReductionTypeCount != reductionTypeCount ||
             contract.ComponentAdditionCount != componentAdditions.Length || contract.AdditionPayloadWords != additionPayloadWords)
             throw new InvalidDataException($"The generated row codec does not match the prepared GA artifact for '{systemId}'.");
 
@@ -143,7 +166,8 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
         _usesDomainOrder = contract.UsesDomainOrder;
         _componentRemovals = componentRemovals.ToArray();
         _componentAdditions = componentAdditions.ToArray();
-        _additionPayloadWords = additionPayloadWords;
+        _eventTypes = eventTypes.ToArray();
+        _outputPayloadWords = Math.Max(additionPayloadWords, eventPayloadWords);
         _pack = pack;
         _apply = apply;
         _observe = observe;
@@ -190,9 +214,9 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
         return pending;
     }
 
-    private bool UsesPackedOutputs => _usesCommands || _usesDomainOrder;
+    private bool UsesPackedOutputs => _usesCommands || _usesDomainOrder || _eventTypes.Length != 0;
 
-    private int OutputRecordWords => UsesPackedOutputs ? GaOutputRecord.Words + _additionPayloadWords +
+    private int OutputRecordWords => UsesPackedOutputs ? GaOutputRecord.Words + _outputPayloadWords +
         (_usesDomainOrder ? GaOutputRecord.DomainWordCount : 0) : 1;
 
     private int EventWords(int rowCount) =>
@@ -264,7 +288,7 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
             var successfulRows = firstFault?.Row ?? _rowCount;
             if (eventWords != 0 && _owner.UsesPackedOutputs)
                 events.ValidateMixedRecords(successfulRows, _owner._componentRemovals, _owner._componentAdditions,
-                    _owner._usesDomainOrder);
+                    _owner._usesDomainOrder, _owner._eventTypes);
             var endJobId = _firstJobId + _jobCount;
             var rowOffset = 0;
             for (var jobId = _firstJobId; jobId < endJobId; jobId++)
@@ -278,7 +302,7 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
                     {
                         if (_owner.UsesPackedOutputs)
                             events.ApplyMixedEntityRows(job, rowOffset, prefix, _owner._componentRemovals, _owner._componentAdditions,
-                                _owner._usesDomainOrder);
+                                _owner._usesDomainOrder, _owner._eventTypes);
                         else
                             events.ApplyEntityRows<TInput, int>(job, rowOffset, prefix, DecodeInt32Event);
                     }

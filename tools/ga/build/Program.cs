@@ -24,6 +24,7 @@ if (args is ["--help"] or ["-h"])
         Optional properties
           sourceRoot (.), adapterClass (GaCpuAdapter), policy (auto), slangAdapter
           target (vulkan or d3d12), dxcDirectory (for d3d12)
+          workgroupX (64)          One-dimensional GPU workgroup width
           checkOverflow (false), languageVersion (12.0), defines, nullable (disable)
           allowUnsafe (false), assemblyName (GaConsumer), outputKind (dynamicallyLinkedLibrary)
 
@@ -191,8 +192,9 @@ static async Task<GpuBuildResult> BuildGpu(
         string slang = Path.GetFullPath(request.SlangAdapter, requestDirectory);
         var bundle = request.Target == "d3d12"
             ? await GaD3D12Packager.Build(program, request.SimulationContractId, slang,
-                Path.GetFullPath(request.DxcDirectory!, requestDirectory), staging, request.ArtifactName)
-            : await GaVulkanPackager.Build(program, request.SimulationContractId, slang, staging, request.ArtifactName);
+                Path.GetFullPath(request.DxcDirectory!, requestDirectory), staging, request.ArtifactName, request.WorkgroupX)
+            : await GaVulkanPackager.Build(program, request.SimulationContractId, slang, staging, request.ArtifactName,
+                request.WorkgroupX);
         return new GpuBuildResult(GpuBuildStatus.Emitted, bundle.ContentId, request.ArtifactName + ".manifest.json");
     }
     catch (NotSupportedException unsupported)

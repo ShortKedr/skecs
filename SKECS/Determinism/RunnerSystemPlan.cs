@@ -58,6 +58,7 @@ internal sealed class RunnerSystemPlan<TInput> where TInput : unmanaged
     public DeterministicDomainOrder? DomainOrder => _system.DomainOrder;
     public IDeterministicBatchProcessor<TInput>? BatchProcessor => _system.BatchProcessor;
     public DeterministicSnapshotPreparation<TInput>? SnapshotPreparation => _system.SnapshotPreparation;
+    public DeterministicOrderedApply<TInput>? OrderedApply => _system.OrderedApply;
 
     public void SortRows()
     {
@@ -75,6 +76,11 @@ internal sealed class RunnerSystemPlan<TInput> where TInput : unmanaged
 
     public DeterministicSnapshotSource<TInput> CreateSnapshotSource(long tickIndex, TInput input, Fixed step) =>
         new(_rows, _system.Access, tickIndex, Stage, SystemOrder, KernelOrder, input, step);
+
+    public DeterministicOrderedApplyContext<TInput> CreateOrderedApplyContext(World.RunnerLease lease,
+        long worldId, long tickIndex, TInput input, Fixed step, object ticketScope, PreparedReductions reductions,
+        ReadOnlySpan<DeterministicEvent> events) =>
+        new(GetJob(0, worldId, tickIndex, input, step, ticketScope, reductions), worldId, lease, _system.Access, events);
 
     public void ExecuteJob(int jobId, long worldId, long tickIndex, TInput input, Fixed step,
         object ticketScope, PreparedReductions reductions)

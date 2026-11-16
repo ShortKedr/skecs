@@ -34,6 +34,14 @@ public sealed record GaContractIdentity(
     public int ComponentAdditionCount { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public int AdditionPayloadWords { get; init; }
+    /// <summary>The number of typed output bindings, including reduction leaves.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int EventTypeCount { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int EventPayloadWords { get; init; }
+    /// <summary>The number of typed output bindings that feed runner reductions.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ReductionTypeCount { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool UsesDomainOrder { get; init; }
 }
@@ -142,6 +150,14 @@ public sealed record GaArtifactManifest(
             Contract.ComponentAdditionCount == 0 && Contract.AdditionPayloadWords != 0 ||
             Contract.ComponentAdditionCount != 0 && (!Contract.UsesCommands || Contract.SubsetVersion < 7 || Contract.IrVersion < 7))
             throw Invalid("Invalid contract component addition table.");
+        if (Contract.EventTypeCount is < 0 or > GaOutputRecord.MaximumEventTypes ||
+            Contract.EventPayloadWords is < 0 or > GaOutputRecord.MaximumEventPayloadWords ||
+            Contract.EventTypeCount == 0 && Contract.EventPayloadWords != 0 ||
+            Contract.EventTypeCount != 0 && (Contract.SubsetVersion < 14 || Contract.IrVersion < 14))
+            throw Invalid("Invalid contract typed event table.");
+        if (Contract.ReductionTypeCount < 0 || Contract.ReductionTypeCount > Contract.EventTypeCount ||
+            Contract.ReductionTypeCount != 0 && (Contract.SubsetVersion < 15 || Contract.IrVersion < 15))
+            throw Invalid("Invalid contract reduction bindings.");
         if (Contract.UsesDomainOrder && (Contract.SubsetVersion < 8 || Contract.IrVersion < 8))
             throw Invalid("Invalid contract version for domain-ordered outputs.");
         ValidateText(Contract.SystemId, "system ID");

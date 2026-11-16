@@ -34,6 +34,14 @@ public readonly ref struct SystemContext
     public void Emit(int value) =>
         throw new InvalidOperationException("Run a GA system through its compiled adapter to emit events.");
 
+    /// <summary>Emits an ordered event with a portable unmanaged payload.</summary>
+    public void Emit<T>(T value) where T : unmanaged =>
+        throw new InvalidOperationException("Run a GA system through its compiled adapter to emit events.");
+
+    /// <summary>Appends a leaf to the runner reduction bound to this kernel for <typeparamref name="T"/>.</summary>
+    public void Contribute<T>(T value) where T : unmanaged =>
+        throw new InvalidOperationException("Run a GA system through its compiled adapter to contribute to a reduction.");
+
     /// <summary>Sets the domain key for subsequent outputs of this invocation.</summary>
     public void SetDomainOrder(int primary, int secondary) =>
         throw new InvalidOperationException("Run a GA system through its compiled adapter to set output order.");

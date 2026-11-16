@@ -45,6 +45,53 @@ public sealed class CompilerTests
         Assert.Contains(" % ", shader.Source);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(32)]
+    [InlineData(64)]
+    [InlineData(127)]
+    [InlineData(128)]
+    public void WorkgroupWidthChangesOnlyPhysicalShaderDispatch(int workgroupX)
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v) => p.Point.X = checked(p.Point.X + v.X);
+            """);
+        var fixedHeader = $"[numthreads({GaSlangModule.ThreadsPerGroup}, 1, 1)]";
+        var variantHeader = $"[numthreads({workgroupX}, 1, 1)]";
+        foreach (var (baseline, variant) in new[]
+        {
+            (GaSlangEmitter.EmitVulkan(program), GaSlangEmitter.EmitVulkan(program, workgroupX)),
+            (GaSlangEmitter.EmitD3D12(program), GaSlangEmitter.EmitD3D12(program, workgroupX))
+        })
+        {
+            Assert.Contains(fixedHeader, baseline.Source);
+            Assert.Equal(baseline.Source.Replace(fixedHeader, variantHeader, StringComparison.Ordinal), variant.Source);
+            Assert.Equal(baseline.FaultSources.ToArray(), variant.FaultSources.ToArray());
+        }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void NonPositiveWorkgroupWidthIsRejected(int workgroupX)
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v) => p.Point.X = v.X;
+            """);
+        Assert.Throws<ArgumentOutOfRangeException>(nameof(workgroupX), () => GaSlangEmitter.EmitVulkan(program, workgroupX));
+        Assert.Throws<ArgumentOutOfRangeException>(nameof(workgroupX), () => GaSlangEmitter.EmitD3D12(program, workgroupX));
+    }
+
+    [Fact]
+    public void D3D12WorkgroupWidthRespectsTheTargetLimit()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v) => p.Point.X = v.X;
+            """);
+        Assert.Contains("[numthreads(1024, 1, 1)]", GaSlangEmitter.EmitD3D12(program, 1024).Source);
+        Assert.Throws<ArgumentOutOfRangeException>("workgroupX", () => GaSlangEmitter.EmitD3D12(program, 1025));
+    }
+
     [Fact]
     public void FaultRetainsRowAndSelectsFirstDynamicallyEvaluatedOperation()
     {

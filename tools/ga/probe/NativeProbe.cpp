@@ -4,10 +4,12 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -27,13 +29,17 @@ auto openContext()
     return std::unique_ptr<void, decltype(&skecs_ga_vk_close)>(context, skecs_ga_vk_close);
 }
 
-void testDevice(uint32_t index, const std::vector<uint32_t>& spirv)
+bool testDevice(uint32_t index, const std::vector<uint32_t>& spirv, bool software)
 {
     auto context = openContext();
     GaVulkanDevice info{};
     check(skecs_ga_vk_get_device(context.get(), index, &info, error, sizeof(error)));
-    if (info.deviceType != 1 && info.deviceType != 2)
-        return;
+    // VkPhysicalDeviceType values are carried by the C ABI without Vulkan headers.
+    constexpr uint32_t integratedGpu = 1, discreteGpu = 2, cpu = 4;
+    const bool selected = software ? info.deviceType == cpu
+                                   : info.deviceType == integratedGpu || info.deviceType == discreteGpu;
+    if (!selected)
+        return false;
     check(skecs_ga_vk_probe(context.get(), index, error, sizeof(error)));
 
     const GaVulkanLocation locations[]{{0, 3}, {0, 5}, {0, 7}};
@@ -78,23 +84,29 @@ void testDevice(uint32_t index, const std::vector<uint32_t>& spirv)
         if (quotient.back() != sentinel || remainder.back() != sentinel)
             throw std::runtime_error("native persistent pipeline modified data beyond the logical rows");
     }
-    std::cout << info.name << " native ABI startup and repeated dispatch passed\n";
-}
+    std::cout << info.name << " native ABI startup and repeated dispatch passed"
+        << " deviceType=" << (software ? "software" : "physical") << '\n';
+    return true;
 }
 
-int wmain(int argc, wchar_t** argv)
+int run(int argc, const std::filesystem::path& artifact, bool software)
 {
     try
     {
-        if (argc != 2)
-            throw std::runtime_error("usage: ga-native-probe <startup.spv>");
-        const auto spirv = ga::readWords(argv[1], UINT32_MAX);
+        if (argc != (software ? 3 : 2))
+            throw std::runtime_error("usage: ga-native-probe <startup.spv> [--software]");
+        const auto spirv = ga::readWords(artifact, UINT32_MAX);
 
         auto context = openContext();
         uint32_t count = 0;
         check(skecs_ga_vk_device_count(context.get(), &count, error, sizeof(error)));
+        uint32_t tested = 0;
         for (uint32_t i = 0; i < count; ++i)
-            testDevice(i, spirv);
+            tested += testDevice(i, spirv, software);
+        if (tested == 0)
+            throw std::runtime_error(software ? "no Vulkan software CPU device was tested" :
+                "no Vulkan integrated or discrete physical GPU was tested");
+        return 0;
     }
     catch (const std::exception& failure)
     {
@@ -102,3 +114,18 @@ int wmain(int argc, wchar_t** argv)
         return 1;
     }
 }
+}
+
+#if defined(_WIN32)
+int wmain(int argc, wchar_t** argv)
+{
+    return run(argc, argc >= 2 ? std::filesystem::path(argv[1]) : std::filesystem::path{},
+        argc == 3 && std::wstring_view(argv[2]) == L"--software");
+}
+#else
+int main(int argc, char** argv)
+{
+    return run(argc, argc >= 2 ? std::filesystem::path(argv[1]) : std::filesystem::path{},
+        argc == 3 && std::string_view(argv[2]) == "--software");
+}
+#endif

@@ -50,15 +50,13 @@ internal static class GaIrDigest
         writer.Write(program.AdditionPayloadWords);
         writer.Write(program.AdditionComponents.Count);
         foreach (var component in program.AdditionComponents)
+            WritePayloadSchema(writer, component.Id, component.Fields);
+        writer.Write(program.EventPayloadWords);
+        writer.Write(program.EventTypes.Count);
+        foreach (var eventType in program.EventTypes)
         {
-            writer.Write(component.Id);
-            writer.Write(component.Fields.Count);
-            foreach (var field in component.Fields)
-            {
-                writer.Write(field.Path);
-                writer.Write((byte)field.Type);
-                writer.Write(field.ClrEnumType ?? "");
-            }
+            writer.Write(eventType.IsContribution);
+            WritePayloadSchema(writer, eventType.Id, eventType.Fields);
         }
         writer.Write(program.Components.Count);
         foreach (var component in program.Components)
@@ -74,6 +72,18 @@ internal static class GaIrDigest
             writer.Write(field.Path);
             writer.Write((byte)field.Type);
             writer.Write((byte)field.Access);
+            writer.Write(field.ClrEnumType ?? "");
+        }
+    }
+
+    private static void WritePayloadSchema(BinaryWriter writer, string id, IReadOnlyList<GaAdditionField> fields)
+    {
+        writer.Write(id);
+        writer.Write(fields.Count);
+        foreach (var field in fields)
+        {
+            writer.Write(field.Path);
+            writer.Write((byte)field.Type);
             writer.Write(field.ClrEnumType ?? "");
         }
     }
@@ -111,6 +121,11 @@ internal static class GaIrDigest
             case GaEmit emit:
                 writer.Write((byte)4);
                 WriteValue(writer, emit.Value);
+                break;
+            case GaEmitTyped emit:
+                writer.Write((byte)14);
+                writer.Write(emit.EventTypeIndex);
+                WriteAdditionValues(writer, emit.Values);
                 break;
             case GaDestroy destroy:
                 writer.Write((byte)5);

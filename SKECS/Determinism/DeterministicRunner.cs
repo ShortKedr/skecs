@@ -37,6 +37,7 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     private int _kernelIndex;
     private int _nextJob;
     private int _pendingCount;
+    private int _orderedApplyEventStart = -1;
     private IDeterministicBatchSubmission<TInput>? _pending;
     private bool _advancing;
     private bool _disposed;
@@ -91,7 +92,7 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     }
 
     /// <summary>Submits up to the given positive number of new logical jobs.</summary>
-    /// <remarks>Plan preparation, snapshot callbacks, sorting and system barriers can also take time, including
+    /// <remarks>Plan preparation, snapshot and ordered apply callbacks, sorting and system barriers can also take time, including
     /// after the last budgeted job. This budget does not bound wall-clock duration.</remarks>
     public DeterministicTickStatus Advance(int logicalJobBudget)
     {
@@ -121,6 +122,14 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
                         started = trace == null ? 0 : Stopwatch.GetTimestamp();
                         prepare(_plan.CreateSnapshotSource(_tickIndex, _input, _step));
                         trace?.Finish("snapshot", started);
+                    }
+                    else if (_plan.OrderedApply is { } apply)
+                    {
+                        started = trace == null ? 0 : Stopwatch.GetTimestamp();
+                        apply(_plan.CreateOrderedApplyContext(_lease!, _world.Id, _tickIndex, _input, _step,
+                            _ticketScope!, _definitions, CopyOrderedApplyEvents()));
+                        _nextJob = _plan.JobCount;
+                        trace?.Finish("ordered-apply", started);
                     }
                 }
 
@@ -231,12 +240,26 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
         _groupEmissions = null;
         emissions?.Sort(static (left, right) => left.Key.CompareTo(right.Key));
         trace?.Finish("merge-sort", started);
+        if (next < _systems.Length && _systems[next].OrderedApply is not null)
+            _orderedApplyEventStart = _events!.Count;
         if (emissions is null) return;
         started = trace == null ? 0 : Stopwatch.GetTimestamp();
         var barrier = new RunnerBarrier(_lease!, _events!, _reductions!);
         foreach (var emission in emissions)
             emission.Apply(barrier);
         trace?.Finish("commit", started);
+    }
+
+    private DeterministicEvent[] CopyOrderedApplyEvents()
+    {
+        var start = _orderedApplyEventStart;
+        _orderedApplyEventStart = -1;
+        if (start < 0) throw new InvalidOperationException("Ordered apply needs a completed commit group.");
+        var count = _events!.Count - start;
+        if (count == 0) return Array.Empty<DeterministicEvent>();
+        var events = new DeterministicEvent[count];
+        _events.CopyTo(start, events, 0, count);
+        return events;
     }
 
     private DeterministicBatch<TInput> CreateBatch(bool readOnly) =>
@@ -267,6 +290,7 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
         _kernelIndex = 0;
         _nextJob = 0;
         _pendingCount = 0;
+        _orderedApplyEventStart = -1;
     }
 
     private void SetFault(Exception fault)

@@ -10,6 +10,10 @@ public interface IDeterministicJobProcessor<TInput> where TInput : unmanaged
     void Execute(DeterministicJob<TInput> job);
 }
 
+/// <summary>A callback for one canonical job. All workers share the registered callback and its bindings.</summary>
+/// <remarks>Keep captured bindings immutable and use the job context to stage deterministic outputs.</remarks>
+public delegate void DeterministicJobExecution<TInput>(DeterministicJob<TInput> job) where TInput : unmanaged;
+
 /// <summary>Entity filters and component access for a deterministic system.</summary>
 /// <remarks>Filters and access are independent. Include a component with With when every row
 /// must contain it. Write or ReadWrite also grants permission to enqueue commands for the type.</remarks>
@@ -40,7 +44,8 @@ public sealed class DeterministicQuery
 
     private DeterministicQuery Add<T>(ComponentRuleKind kind) where T : unmanaged
     {
-        _rules.Add(new ComponentRule(typeof(T), kind, static world => world.GetComponentType<T>().Id));
+        _rules.Add(new ComponentRule(typeof(T), kind, static (world, allowPacked) =>
+            allowPacked ? world.GetAdaptiveComponentType<T>().Id : world.GetComponentType<T>().Id));
         return this;
     }
 }
@@ -69,6 +74,16 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
         SystemStage stage, DeterministicQuery query, TProcessor processor)
         where TProcessor : unmanaged, IDeterministicJobProcessor<TInput>
         => Add(stage, query, processor, runOnce: false);
+
+    /// <summary>Registers a per-job callback with immutable host bindings on the normal CPU worker path.</summary>
+    public DeterministicWorkload<TInput> AddSystem(
+        SystemStage stage, DeterministicQuery query, DeterministicJobExecution<TInput> execute)
+    {
+        RequireOutsideGroup();
+        _systems.Add(SystemRegistration<TInput>.ForJob(stage, _systemCount, 0, query, execute, runOnce: false));
+        _systemCount++;
+        return this;
+    }
 
     /// <summary>Registers an entity system that submits consecutive ranges of logical jobs.</summary>
     /// <remarks>The registered processor belongs to its runner. Use independent processors
@@ -134,7 +149,7 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
         }
         if (members.Count == 0) throw new ArgumentException("A commit group needs at least one kernel.", nameof(configure));
         _systems.AddRange(members);
-        _systemCount++;
+        _systemCount += group.HasOrderedApply ? 2 : 1;
         return this;
     }
 
@@ -191,7 +206,7 @@ internal enum ComponentRuleKind
 
 internal readonly struct ComponentRule
 {
-    public ComponentRule(Type type, ComponentRuleKind kind, Func<World, int> register)
+    public ComponentRule(Type type, ComponentRuleKind kind, Func<World, bool, int> register)
     {
         Type = type;
         Kind = kind;
@@ -200,24 +215,23 @@ internal readonly struct ComponentRule
 
     public Type Type { get; }
     public ComponentRuleKind Kind { get; }
-    public Func<World, int> Register { get; }
+    public Func<World, bool, int> Register { get; }
 }
-
-internal delegate void ExecuteJob<TInput>(DeterministicJob<TInput> job) where TInput : unmanaged;
 
 internal sealed class SystemRegistration<TInput> where TInput : unmanaged
 {
     private readonly ComponentRule[] _rules;
     private readonly bool _runOnce;
-    private readonly ExecuteJob<TInput>? _execute;
+    private readonly DeterministicJobExecution<TInput>? _execute;
     private readonly IDeterministicBatchProcessor<TInput>? _batchProcessor;
     private readonly DeterministicSnapshotPreparation<TInput>? _snapshotPreparation;
     private readonly DeterministicSourceOrder? _sourceOrder;
+    private readonly DeterministicOrderedApply<TInput>? _orderedApply;
 
     private SystemRegistration(SystemStage stage, int order, int kernelOrder, ComponentRule[] rules, bool runOnce,
-        ExecuteJob<TInput>? execute, IDeterministicBatchProcessor<TInput>? batchProcessor = null,
+        DeterministicJobExecution<TInput>? execute, IDeterministicBatchProcessor<TInput>? batchProcessor = null,
         DeterministicSnapshotPreparation<TInput>? snapshotPreparation = null, DeterministicDomainOrder? domainOrder = null,
-        DeterministicSourceOrder? sourceOrder = null)
+        DeterministicSourceOrder? sourceOrder = null, DeterministicOrderedApply<TInput>? orderedApply = null)
     {
         Stage = stage;
         Order = order;
@@ -229,6 +243,7 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
         _batchProcessor = batchProcessor;
         _snapshotPreparation = snapshotPreparation;
         _sourceOrder = sourceOrder;
+        _orderedApply = orderedApply;
     }
 
     public SystemStage Stage { get; }
@@ -239,7 +254,17 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
     public static SystemRegistration<TInput> ForJob<TProcessor>(SystemStage stage, int order, int kernelOrder,
         DeterministicQuery query, TProcessor processor, bool runOnce, DeterministicDomainOrder? domainOrder = null)
         where TProcessor : unmanaged, IDeterministicJobProcessor<TInput>
+        => ForJob(stage, order, kernelOrder, query, execute: job =>
+        {
+            var copy = processor;
+            copy.Execute(job);
+        }, runOnce, domainOrder);
+
+    public static SystemRegistration<TInput> ForJob(SystemStage stage, int order, int kernelOrder,
+        DeterministicQuery query, DeterministicJobExecution<TInput> execute, bool runOnce,
+        DeterministicDomainOrder? domainOrder = null)
     {
+        if (execute is null) throw new ArgumentNullException(nameof(execute));
         var rules = GetRules(stage, query);
         if (runOnce && Array.Exists(rules, static rule =>
                 rule.Kind == ComponentRuleKind.Include || rule.Kind == ComponentRuleKind.Exclude))
@@ -247,11 +272,8 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
         if (runOnce && query.SourceOrder is not null)
             throw new ArgumentException("A standalone job has no entity source order.", nameof(query));
 
-        return new SystemRegistration<TInput>(stage, order, kernelOrder, rules, runOnce, job =>
-        {
-            var copy = processor;
-            copy.Execute(job);
-        }, domainOrder: domainOrder, sourceOrder: query.SourceOrder);
+        return new SystemRegistration<TInput>(stage, order, kernelOrder, rules, runOnce, execute,
+            domainOrder: domainOrder, sourceOrder: query.SourceOrder);
     }
 
     public static SystemRegistration<TInput> ForBatch(SystemStage stage, int order, int kernelOrder,
@@ -271,6 +293,17 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
             throw new ArgumentException("Snapshot preparation always reads rows in canonical entity order.", nameof(query));
         return new SystemRegistration<TInput>(stage, order, kernelOrder, rules,
             runOnce: false, execute: null, snapshotPreparation: prepare, domainOrder: domainOrder);
+    }
+
+    public static SystemRegistration<TInput> ForOrderedApply(SystemStage stage, int order, DeterministicQuery access,
+        DeterministicOrderedApply<TInput> apply)
+    {
+        if (apply is null) throw new ArgumentNullException(nameof(apply));
+        var rules = GetRules(stage, access);
+        if (access.SourceOrder is not null || Array.Exists(rules, static rule =>
+            rule.Kind == ComponentRuleKind.Include || rule.Kind == ComponentRuleKind.Exclude))
+            throw new ArgumentException("Ordered apply declares access and does not query entity rows.", nameof(access));
+        return new SystemRegistration<TInput>(stage, order, 0, rules, runOnce: true, execute: null, orderedApply: apply);
     }
 
     internal static void RequireStage(SystemStage stage)
@@ -293,7 +326,7 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
         var access = new Dictionary<Type, PreparedAccess>();
         foreach (var rule in _rules)
         {
-            var typeId = rule.Register(world);
+            var typeId = rule.Register(world, _orderedApply != null);
             switch (rule.Kind)
             {
                 case ComponentRuleKind.Include:
@@ -311,7 +344,7 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
 
         var query = _runOnce ? null : world.GetOrCreateQueryCache(new QueryCacheKey(include, exclude));
         return new PreparedSystem<TInput>(Stage, Order, KernelOrder, query, access, _execute, _batchProcessor,
-            _snapshotPreparation, DomainOrder, _sourceOrder?.Bind(world));
+            _snapshotPreparation, DomainOrder, _sourceOrder?.Bind(world), _orderedApply);
     }
 }
 
@@ -337,9 +370,10 @@ internal readonly struct PreparedAccess
 internal sealed class PreparedSystem<TInput> where TInput : unmanaged
 {
     public PreparedSystem(SystemStage stage, int order, int kernelOrder, QueryCacheEntry? query,
-        Dictionary<Type, PreparedAccess> access, ExecuteJob<TInput>? execute,
+        Dictionary<Type, PreparedAccess> access, DeterministicJobExecution<TInput>? execute,
         IDeterministicBatchProcessor<TInput>? batchProcessor, DeterministicSnapshotPreparation<TInput>? snapshotPreparation,
-        DeterministicDomainOrder? domainOrder, Func<RunnerRow, DeterministicDomainKey>? selectSourceKey)
+        DeterministicDomainOrder? domainOrder, Func<RunnerRow, DeterministicDomainKey>? selectSourceKey,
+        DeterministicOrderedApply<TInput>? orderedApply)
     {
         Stage = stage;
         Order = order;
@@ -351,6 +385,7 @@ internal sealed class PreparedSystem<TInput> where TInput : unmanaged
         BatchProcessor = batchProcessor;
         SnapshotPreparation = snapshotPreparation;
         SelectSourceKey = selectSourceKey;
+        OrderedApply = orderedApply;
     }
 
     public SystemStage Stage { get; }
@@ -359,8 +394,9 @@ internal sealed class PreparedSystem<TInput> where TInput : unmanaged
     public DeterministicDomainOrder? DomainOrder { get; }
     public QueryCacheEntry? Query { get; }
     public Dictionary<Type, PreparedAccess> Access { get; }
-    public ExecuteJob<TInput>? Execute { get; }
+    public DeterministicJobExecution<TInput>? Execute { get; }
     public IDeterministicBatchProcessor<TInput>? BatchProcessor { get; }
     public DeterministicSnapshotPreparation<TInput>? SnapshotPreparation { get; }
     public Func<RunnerRow, DeterministicDomainKey>? SelectSourceKey { get; }
+    public DeterministicOrderedApply<TInput>? OrderedApply { get; }
 }

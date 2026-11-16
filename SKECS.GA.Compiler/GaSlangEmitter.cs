@@ -12,31 +12,48 @@ public sealed record GaSlangModule(string Source, IReadOnlyList<GaSourceSpan> Fa
 
 public static class GaSlangEmitter
 {
-    public static GaSlangModule EmitVulkan(GaProgram program) => Emit(program, vulkan: true);
+    public const int MaximumD3D12WorkgroupX = 1024;
 
-    public static GaSlangModule EmitD3D12(GaProgram program) => Emit(program, vulkan: false);
+    public static GaSlangModule EmitVulkan(GaProgram program) => EmitVulkan(program, GaSlangModule.ThreadsPerGroup);
 
-    private static GaSlangModule Emit(GaProgram program, bool vulkan)
+    public static GaSlangModule EmitVulkan(GaProgram program, int workgroupX) => Emit(program, workgroupX, vulkan: true);
+
+    public static GaSlangModule EmitD3D12(GaProgram program) => EmitD3D12(program, GaSlangModule.ThreadsPerGroup);
+
+    public static GaSlangModule EmitD3D12(GaProgram program, int workgroupX)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(workgroupX, MaximumD3D12WorkgroupX);
+        return Emit(program, workgroupX, vulkan: false);
+    }
+
+    private static GaSlangModule Emit(GaProgram program, int workgroupX, bool vulkan)
     {
         ArgumentNullException.ThrowIfNull(program);
-        return new Emitter(program).Emit(vulkan);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workgroupX);
+        return new Emitter(program).Emit(vulkan, workgroupX);
     }
 
     private sealed class Emitter(GaProgram program)
     {
         private readonly StringBuilder _code = new();
         private readonly List<GaSourceSpan> _sources = new();
+        private readonly HashSet<int> _snapshotKeyWrites = program.UsesSnapshot
+            ? GaRowCodecEmitter.WrittenFields(program.Body).ToHashSet() : [];
+        private readonly List<SnapshotOffset> _snapshotOffsets = new();
         private readonly bool _usesOptional = program.Components.Any(component => component.Origin == GaComponentOrigin.Optional);
         private int _indent;
         private int _temporary;
         private readonly int _eventCapacity = program.EventCapacity;
-        private readonly bool _mixedOutputs = program.UsesCommands || program.UsesDomainOrder;
-        private readonly int _recordWords = program.UsesCommands || program.UsesDomainOrder
-            ? checked(GaOutputRecord.Words + program.AdditionPayloadWords +
+        private readonly bool _mixedOutputs = UsesPackedOutputs(program);
+        private readonly int _recordWords = UsesPackedOutputs(program)
+            ? checked(GaOutputRecord.Words + program.OutputPayloadWords +
                 (program.UsesDomainOrder ? GaOutputRecord.DomainWordCount : 0))
             : 1;
 
-        internal GaSlangModule Emit(bool vulkan)
+        private static bool UsesPackedOutputs(GaProgram program) =>
+            program.UsesCommands || program.UsesDomainOrder || program.EventTypes.Count != 0;
+
+        internal GaSlangModule Emit(bool vulkan, int workgroupX)
         {
             if (program.UsesFixed)
                 _code.Append(GaFixedSlangLibrary.Load()).Append('\n');
@@ -56,7 +73,7 @@ public static class GaSlangEmitter
             }
             Line("");
             Line("[shader(\"compute\")]");
-            Line(FormattableString.Invariant($"[numthreads({GaSlangModule.ThreadsPerGroup}, 1, 1)]"));
+            Line(FormattableString.Invariant($"[numthreads({workgroupX}, 1, 1)]"));
             Line("void main(uint3 id : SV_DispatchThreadID)");
             Open();
             Line("if (id.x >= gaInput[0]) return;");
@@ -252,6 +269,14 @@ public static class GaSlangEmitter
                         }
                     }
                     break;
+                case GaEmitTyped emission:
+                    if (_eventCapacity != 0)
+                    {
+                        var outputType = program.EventTypes[emission.EventTypeIndex];
+                        uint kind = outputType.IsContribution ? GaOutputRecord.ContributeBase : GaOutputRecord.EmitTypedBase;
+                        WritePayload(kind | (uint)emission.EventTypeIndex, "0u", "0u", outputType.Offsets, emission.Values);
+                    }
+                    break;
                 case GaDestroy destroy:
                     if (_eventCapacity != 0)
                     {
@@ -289,14 +314,14 @@ public static class GaSlangEmitter
                     {
                         string entityId = Temp(Value(add.EntityId));
                         string generation = Temp(Value(add.Generation));
-                        WriteAddition(GaOutputRecord.AddEntityBase | (uint)add.ComponentIndex, entityId, generation,
-                            add.ComponentIndex, add.Values);
+                        WritePayload(GaOutputRecord.AddEntityBase | (uint)add.ComponentIndex, entityId, generation,
+                            program.AdditionComponents[add.ComponentIndex].Offsets, add.Values);
                     }
                     break;
                 case GaAddTicket add:
                     if (_eventCapacity != 0)
-                        WriteAddition(GaOutputRecord.AddTicketBase | (uint)add.ComponentIndex, Ticket(add.TicketSlot), "0u",
-                            add.ComponentIndex, add.Values);
+                        WritePayload(GaOutputRecord.AddTicketBase | (uint)add.ComponentIndex, Ticket(add.TicketSlot), "0u",
+                            program.AdditionComponents[add.ComponentIndex].Offsets, add.Values);
                     break;
                 case GaSetDomainOrder order:
                     Line($"gaDomainPrimary = {Value(order.Primary)};");
@@ -345,10 +370,10 @@ public static class GaSlangEmitter
             Line($"gaOutput[{offset}] = {Word(kind)};");
             Line($"gaOutput[{offset} + 1u] = {first};");
             Line($"gaOutput[{offset} + 2u] = {second};");
-            if (program.AdditionPayloadWords != 0)
+            if (program.OutputPayloadWords != 0)
             {
                 string index = Name();
-                Line($"for (uint {index} = {Word(GaOutputRecord.Words)}; {index} < {Word(GaOutputRecord.Words + program.AdditionPayloadWords)}; ++{index})");
+                Line($"for (uint {index} = {Word(GaOutputRecord.Words)}; {index} < {Word(GaOutputRecord.Words + program.OutputPayloadWords)}; ++{index})");
                 Line($"    gaOutput[{offset} + {index}] = 0u;");
             }
             if (program.UsesDomainOrder)
@@ -361,14 +386,13 @@ public static class GaSlangEmitter
             return offset;
         }
 
-        private void WriteAddition(uint kind, string first, string second, int componentIndex,
+        private void WritePayload(uint kind, string first, string second, int[] offsets,
             IReadOnlyList<GaAdditionValue> values)
         {
-            var component = program.AdditionComponents[componentIndex];
             string offset = WriteOutputHeader(kind, first, second);
             foreach (var value in values)
             {
-                int word = GaOutputRecord.Words + component.Offsets[value.FieldIndex];
+                int word = GaOutputRecord.Words + offsets[value.FieldIndex];
                 string bits = Value(value.Value);
                 if (value.Value.Type == GaScalar.Fixed)
                 {
@@ -457,20 +481,56 @@ public static class GaSlangEmitter
             string id = Temp(Value(read.EntityId));
             string generation = Temp(Value(read.Generation));
             string result = Temp(Value(read.Fallback), Type(read.Type));
-            Line("if (gaSnapshotValid)");
-            Open();
-            string offset = Name();
-            Line($"uint {offset};");
-            Line($"if (gaTryFindSnapshotV1(gaInput, gaSnapshotView, {id}, {generation}, {offset}))");
+            var key = SnapshotKey(read);
+            string? cachedOffset = key is { } reusable
+                ? _snapshotOffsets.FirstOrDefault(entry => entry.Key == reusable).Offset : null;
+            string offset = cachedOffset ?? Name();
+            if (cachedOffset is not null)
+                Line($"if ({offset} != 0u)");
+            else
+            {
+                if (key is not null)
+                    Line($"uint {offset} = 0u;");
+                Line("if (gaSnapshotValid)");
+                Open();
+                if (key is null)
+                    Line($"uint {offset};");
+                Line($"if (gaTryFindSnapshotV1(gaInput, gaSnapshotView, {id}, {generation}, {offset}))");
+            }
             int word = read.FieldIndex < 0 ? 0 : program.SnapshotLayout!.GetWordOffset(read.FieldIndex);
             string firstWord = word == 0 ? $"gaInput[{offset}]" : $"gaInput[{offset} + {Word(word)}]";
             string value = read.Type == GaScalar.Fixed
                 ? $"uint2({firstWord}, gaInput[{offset} + {Word(word + 1)}])"
                 : firstWord;
             Line($"    {result} = {value};");
-            Close();
+            if (cachedOffset is null)
+            {
+                Close();
+                if (key is { } available)
+                    _snapshotOffsets.Add(new SnapshotOffset(available, offset, _indent));
+            }
             return result;
         }
+
+        // The bound snapshot is immutable. Reuse an earlier offset only while its
+        // shader variable is in scope and its key fields cannot change in this invocation.
+        private (SnapshotOperand Id, SnapshotOperand Generation)? SnapshotKey(GaSnapshotRead read)
+        {
+            var id = SnapshotOperandFor(read.EntityId);
+            var generation = SnapshotOperandFor(read.Generation);
+            return id is { } first && generation is { } second ? (first, second) : null;
+        }
+
+        private SnapshotOperand? SnapshotOperandFor(GaValue value) => value switch
+        {
+            GaConstant constant => new SnapshotOperand(null, constant.Bits),
+            GaLoad { Slot.IsField: true } load when !_snapshotKeyWrites.Contains(load.Slot.Index) =>
+                new SnapshotOperand(load.Slot.Index, 0),
+            _ => null
+        };
+
+        private readonly record struct SnapshotOperand(int? Field, ulong Constant);
+        private readonly record struct SnapshotOffset((SnapshotOperand, SnapshotOperand) Key, string Offset, int Depth);
 
         private string CheckedArrayIndex(GaArrayField field, GaValue value, GaSourceSpan source)
             => CheckedIndex(value, Word(field.Length), source);
@@ -681,6 +741,12 @@ public static class GaSlangEmitter
         private static string Slot(GaSlot slot) => slot.IsField ? Field(slot.Index) : Local(slot.Index);
         private void Line(string text) => _code.Append(' ', _indent * 4).Append(text).Append('\n');
         private void Open() { Line("{"); _indent++; }
-        private void Close() { _indent--; Line("}"); }
+        private void Close()
+        {
+            _indent--;
+            while (_snapshotOffsets.Count != 0 && _snapshotOffsets[^1].Depth > _indent)
+                _snapshotOffsets.RemoveAt(_snapshotOffsets.Count - 1);
+            Line("}");
+        }
     }
 }

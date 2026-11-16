@@ -59,7 +59,7 @@ public static class GaInterpreter
     }
 
     /// <summary>Executes one row and publishes packed records on success.</summary>
-    /// <remarks>Each record contains three header words, the program's addition payload words,
+    /// <remarks>Each record contains three header words, the program's output payload words,
     /// and three domain-key words when the program uses domain order.</remarks>
     public static GaKernelFault? ExecutePackedOutputs(GaProgram program, Span<uint> row, Span<uint> records, out int count,
         GaSnapshotPacket? snapshot = null) => ExecuteCore(program, row, default, out count, snapshot, null, records, packed: true);
@@ -76,6 +76,8 @@ public static class GaInterpreter
     {
         if (program.AdditionComponents.Count != 0)
             throw new InvalidOperationException("Use ExecutePackedOutputs for programs that add components.");
+        if (program.EventTypes.Count != 0)
+            throw new InvalidOperationException("Use ExecutePackedOutputs for programs with typed events or reduction leaves.");
         if (program.UsesDomainOrder)
             throw new InvalidOperationException("Use ExecutePackedOutputs for programs that set domain order.");
     }
@@ -116,7 +118,7 @@ public static class GaInterpreter
             if (program.TickResourceFields[i].Type == GaScalar.Bool && tickResources[program.TickResourceOffsets[i]] > 1)
                 throw new ArgumentException("Tick resource booleans must be encoded as 0 or 1.", nameof(tickResources));
         int stride = packed
-            ? GaOutputRecord.Words + program.AdditionPayloadWords + (program.UsesDomainOrder ? GaOutputRecord.DomainWordCount : 0)
+            ? GaOutputRecord.Words + program.OutputPayloadWords + (program.UsesDomainOrder ? GaOutputRecord.DomainWordCount : 0)
             : 0;
         int packedWordCount = checked(stride * program.EventCapacity);
         if (packed)
@@ -200,6 +202,7 @@ public static class GaInterpreter
         private readonly int[] _bufferOffsets;
         private readonly GaBufferPacket? _buffer;
         private readonly IReadOnlyList<GaAdditionComponent> _additions;
+        private readonly IReadOnlyList<GaEventType> _eventTypes;
         private readonly GaSnapshotPacket? _snapshot;
         private readonly bool _usesDomainOrder;
         private bool _hasDomainKey;
@@ -227,6 +230,7 @@ public static class GaInterpreter
             _bufferOffsets = program.BufferOffsets;
             _buffer = buffer;
             _additions = program.AdditionComponents;
+            _eventTypes = program.EventTypes;
             _snapshot = snapshot;
             _usesDomainOrder = program.UsesDomainOrder;
         }
@@ -303,6 +307,13 @@ public static class GaInterpreter
                             Append(GaOutputRecord.EmitInt32(value));
                     }
                     break;
+                case GaEmitTyped typed:
+                    var outputType = _eventTypes[typed.EventTypeIndex];
+                    var outputRecord = outputType.IsContribution
+                        ? GaOutputRecord.Contribute(typed.EventTypeIndex)
+                        : GaOutputRecord.EmitTyped(typed.EventTypeIndex);
+                    AppendPayload(outputRecord, outputType.Offsets, typed.Values);
+                    break;
                 case GaSetDomainOrder order:
                     int primary = unchecked((int)Read(order.Primary));
                     int secondary = unchecked((int)Read(order.Secondary));
@@ -340,10 +351,12 @@ public static class GaInterpreter
                     int addId = unchecked((int)Read(add.EntityId));
                     int addGeneration = unchecked((int)Read(add.Generation));
                     if (Fault == null)
-                        AppendAddition(GaOutputRecord.AddEntity(add.ComponentIndex, addId, addGeneration), add.ComponentIndex, add.Values);
+                        AppendPayload(GaOutputRecord.AddEntity(add.ComponentIndex, addId, addGeneration),
+                            _additions[add.ComponentIndex].Offsets, add.Values);
                     break;
                 case GaAddTicket add:
-                    AppendAddition(GaOutputRecord.AddTicket(add.ComponentIndex, _tickets[add.TicketSlot]), add.ComponentIndex, add.Values);
+                    AppendPayload(GaOutputRecord.AddTicket(add.ComponentIndex, _tickets[add.TicketSlot]),
+                        _additions[add.ComponentIndex].Offsets, add.Values);
                     break;
                 case GaIf branch:
                     if (Read(branch.Condition) != 0)
@@ -377,16 +390,15 @@ public static class GaInterpreter
             OutputCount++;
         }
 
-        private void AppendAddition(GaOutputRecord record, int componentIndex, IReadOnlyList<GaAdditionValue> values)
+        private void AppendPayload(GaOutputRecord record, int[] offsets, IReadOnlyList<GaAdditionValue> values)
         {
             var destination = StageRecord(record);
-            var component = _additions[componentIndex];
             foreach (var value in values)
             {
                 ulong bits = Read(value.Value);
                 if (Fault != null)
                     return;
-                int offset = GaOutputRecord.Words + component.Offsets[value.FieldIndex];
+                int offset = GaOutputRecord.Words + offsets[value.FieldIndex];
                 destination[offset] = unchecked((uint)bits);
                 if (value.Value.Type == GaScalar.Fixed)
                     destination[offset + 1] = unchecked((uint)(bits >> 32));

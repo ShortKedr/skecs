@@ -1,6 +1,6 @@
 namespace SKECS.GA;
 
-/// <summary>A staged event or structural command emitted by a compiled GA invocation.</summary>
+/// <summary>A staged event, reduction leaf or structural command emitted by a compiled GA invocation.</summary>
 public readonly record struct GaOutputRecord
 {
     public const int Words = 3;
@@ -13,9 +13,13 @@ public readonly record struct GaOutputRecord
     public const uint RemoveTicketBase = 0x20000u;
     public const uint AddEntityBase = 0x30000u;
     public const uint AddTicketBase = 0x40000u;
+    public const uint EmitTypedBase = 0x50000u;
+    public const uint ContributeBase = 0x60000u;
     public const int MaximumComponentCommands = 65536;
     public const int MaximumComponentRemovals = MaximumComponentCommands;
     public const int MaximumAdditionPayloadWords = 65536;
+    public const int MaximumEventTypes = 65536;
+    public const int MaximumEventPayloadWords = 65536;
 
     private readonly uint _kind;
     private readonly int _first;
@@ -25,6 +29,16 @@ public readonly record struct GaOutputRecord
         (_kind, _first, _second) = (kind, first, second);
 
     public static GaOutputRecord EmitInt32(int value) => new(EmitInt32Kind, value, 0);
+
+    public static GaOutputRecord EmitTyped(int eventTypeIndex) =>
+        (uint)eventTypeIndex < MaximumEventTypes
+            ? new GaOutputRecord(EmitTypedBase + (uint)eventTypeIndex, 0, 0)
+            : throw new ArgumentOutOfRangeException(nameof(eventTypeIndex));
+
+    public static GaOutputRecord Contribute(int eventTypeIndex) =>
+        (uint)eventTypeIndex < MaximumEventTypes
+            ? new GaOutputRecord(ContributeBase + (uint)eventTypeIndex, 0, 0)
+            : throw new ArgumentOutOfRangeException(nameof(eventTypeIndex));
 
     public static GaOutputRecord DestroyEntity(int entityId, int generation) =>
         new(DestroyEntityKind, entityId, generation);
@@ -50,6 +64,7 @@ public readonly record struct GaOutputRecord
 
     private uint CommandKind => _kind & 0xFFFF0000u;
     private int ComponentIndex => (int)(_kind & 0xFFFFu);
+    private bool IsTypedOutput => CommandKind is EmitTypedBase or ContributeBase;
     private bool ReferencesTicket => _kind == DestroyTicketKind || CommandKind is RemoveTicketBase or AddTicketBase;
 
     /// <summary>Writes this record's header and clears its payload region.</summary>
@@ -93,7 +108,7 @@ public readonly record struct GaOutputRecord
                 throw new InvalidDataException("A GA ticket must reference an earlier Create in the same source.");
         }
 
-        var replay = new Replay(source, records.Length, removals, []);
+        var replay = new Replay(source, records.Length, removals, [], []);
         for (int ordinal = 0; ordinal < records.Length; ordinal++)
             replay.Apply(records[ordinal], ordinal);
     }
@@ -106,28 +121,36 @@ public readonly record struct GaOutputRecord
     /// <summary>Validates and replays packed output with the declared domain-key format.</summary>
     public static void ApplyPackedSource(DeterministicSource source, ReadOnlySpan<uint> records, int recordWords,
         ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
+        => ApplyPackedSource(source, records, recordWords, removals, additions, usesDomainOrder, []);
+
+    public static void ApplyPackedSource(DeterministicSource source, ReadOnlySpan<uint> records, int recordWords,
+        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder,
+        ReadOnlySpan<GaTypedEvent> eventTypes)
     {
         int headerWords = Words + (usesDomainOrder ? DomainWordCount : 0);
-        if (recordWords < headerWords || recordWords > headerWords + MaximumAdditionPayloadWords || records.Length % recordWords != 0)
+        int maximumPayloadWords = Math.Max(MaximumAdditionPayloadWords, MaximumEventPayloadWords);
+        if (recordWords < headerWords || recordWords > headerWords + maximumPayloadWords || records.Length % recordWords != 0)
             throw new ArgumentException("Packed GA output has an invalid record width.", nameof(recordWords));
-        ValidatePackedSource(records, recordWords, removals, additions, usesDomainOrder);
-        ReplayPackedSource(source, records, recordWords, removals, additions, usesDomainOrder);
+        ValidatePackedSource(records, recordWords, removals, additions, usesDomainOrder, eventTypes);
+        ReplayPackedSource(source, records, recordWords, removals, additions, usesDomainOrder, eventTypes);
     }
 
     internal static void ValidatePackedSource(ReadOnlySpan<uint> records, int recordWords,
-        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
+        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder,
+        ReadOnlySpan<GaTypedEvent> eventTypes = default)
     {
         int count = records.Length / recordWords;
         for (int ordinal = 0; ordinal < count; ordinal++)
             Read(records.Slice(ordinal * recordWords, recordWords))
-                .ValidatePackedRecord(records, ordinal, recordWords, removals, additions, usesDomainOrder);
+                .ValidatePackedRecord(records, ordinal, recordWords, removals, additions, usesDomainOrder, eventTypes);
     }
 
     internal static void ReplayPackedSource(DeterministicSource source, ReadOnlySpan<uint> records, int recordWords,
-        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
+        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder,
+        ReadOnlySpan<GaTypedEvent> eventTypes = default)
     {
         int count = records.Length / recordWords;
-        var replay = new Replay(source, count, removals, additions);
+        var replay = new Replay(source, count, removals, additions, eventTypes);
         int payloadWords = recordWords - Words - (usesDomainOrder ? DomainWordCount : 0);
         for (int ordinal = 0; ordinal < count; ordinal++)
         {
@@ -166,13 +189,15 @@ public readonly record struct GaOutputRecord
             CreateEntityKind => first == 0 && second == 0,
             >= RemoveEntityBase and < RemoveTicketBase or >= AddEntityBase and < AddTicketBase => true,
             >= RemoveTicketBase and < AddEntityBase or >= AddTicketBase and < AddTicketBase + MaximumComponentCommands => second == 0,
+            >= EmitTypedBase and < ContributeBase + MaximumEventTypes => first == 0 && second == 0,
             _ => false
         };
 
     private void ValidatePackedRecord(ReadOnlySpan<uint> records, int ordinal, int recordWords,
-        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
+        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder,
+        ReadOnlySpan<GaTypedEvent> eventTypes)
     {
-        ValidateBindings(removals, additions);
+        ValidateBindings(removals, additions, eventTypes);
         if (ReferencesTicket && ((uint)_first >= (uint)ordinal || records[_first * recordWords] != CreateEntityKind))
             throw new InvalidDataException("A GA ticket must reference an earlier Create in the same source.");
         var words = records.Slice(ordinal * recordWords, recordWords);
@@ -185,6 +210,8 @@ public readonly record struct GaOutputRecord
         var payload = words.Slice(Words, recordWords - Words - (usesDomainOrder ? DomainWordCount : 0));
         if (CommandKind is AddEntityBase or AddTicketBase)
             additions[ComponentIndex].Validate(payload);
+        else if (IsTypedOutput)
+            eventTypes[ComponentIndex].Validate(payload);
         else if (payload.IndexOfAnyExcept(0u) >= 0)
             throw new InvalidDataException("A GA output record has unexpected payload words.");
     }
@@ -197,7 +224,8 @@ public readonly record struct GaOutputRecord
         return new DeterministicDomainKey(unchecked((int)words[1]), unchecked((int)words[2]));
     }
 
-    private void ValidateBindings(ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions)
+    private void ValidateBindings(ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions,
+        ReadOnlySpan<GaTypedEvent> eventTypes = default)
     {
         if (CommandKind is RemoveEntityBase or RemoveTicketBase &&
             (ComponentIndex >= removals.Length || !removals[ComponentIndex].IsBound))
@@ -205,6 +233,9 @@ public readonly record struct GaOutputRecord
         if (CommandKind is AddEntityBase or AddTicketBase &&
             (ComponentIndex >= additions.Length || !additions[ComponentIndex].IsBound))
             throw new InvalidDataException("A GA addition must reference a bound component type.");
+        if (IsTypedOutput && (ComponentIndex >= eventTypes.Length || !eventTypes[ComponentIndex].IsBound ||
+            eventTypes[ComponentIndex].IsContribution != (CommandKind == ContributeBase)))
+            throw new InvalidDataException("A GA typed output must reference a bound payload type of the same kind.");
     }
 
     private ref struct Replay
@@ -213,15 +244,17 @@ public readonly record struct GaOutputRecord
         private readonly int _count;
         private readonly ReadOnlySpan<GaComponentRemoval> _removals;
         private readonly ReadOnlySpan<GaComponentAddition> _additions;
+        private readonly ReadOnlySpan<GaTypedEvent> _eventTypes;
         private CreateTicket[]? _tickets;
 
         internal Replay(DeterministicSource source, int count, ReadOnlySpan<GaComponentRemoval> removals,
-            ReadOnlySpan<GaComponentAddition> additions)
+            ReadOnlySpan<GaComponentAddition> additions, ReadOnlySpan<GaTypedEvent> eventTypes)
         {
             _source = source;
             _count = count;
             _removals = removals;
             _additions = additions;
+            _eventTypes = eventTypes;
         }
 
         internal void Apply(GaOutputRecord record, int ordinal, ReadOnlySpan<uint> payload = default,
@@ -245,6 +278,8 @@ public readonly record struct GaOutputRecord
                         _additions[record.ComponentIndex].Apply(source, record._first, record._second, payload);
                     else if (record.CommandKind == AddTicketBase)
                         _additions[record.ComponentIndex].Apply(source, _tickets![record._first], payload);
+                    else if (record.IsTypedOutput)
+                        _eventTypes[record.ComponentIndex].Apply(source, payload);
                     else
                         record.Apply(source);
                     break;

@@ -29,6 +29,7 @@ internal sealed class GaBuildRequest
     public GaPolicy Policy { get; init; } = GaPolicy.Auto;
     public string? SlangAdapter { get; init; }
     public string Target { get; init; } = "vulkan";
+    public int WorkgroupX { get; init; } = GaSlangModule.ThreadsPerGroup;
     public string? DxcDirectory { get; init; }
     public bool CheckOverflow { get; init; }
     public string LanguageVersion { get; init; } = "12.0";
@@ -60,6 +61,8 @@ internal sealed class GaBuildRequest
             ArgumentException.ThrowIfNullOrWhiteSpace(SlangAdapter);
         if (Target is not ("vulkan" or "d3d12"))
             throw new ArgumentException("target must be vulkan or d3d12.");
+        if (WorkgroupX < 1 || (Target == "d3d12" && WorkgroupX > GaSlangEmitter.MaximumD3D12WorkgroupX))
+            throw new ArgumentException("workgroupX must be positive and within the target's group size limit.");
         if (DxcDirectory is not null)
             ArgumentException.ThrowIfNullOrWhiteSpace(DxcDirectory);
     }

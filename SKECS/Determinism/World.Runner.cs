@@ -49,8 +49,10 @@ public sealed partial class World
         public void Add<T>(Entity entity, int typeId, T value) where T : unmanaged
         {
             RequireOwnership();
-            if (_world.IsAliveCore(entity) && !_world._entityRecords[entity.Id].Archetype!.HasComponent(typeId))
-                _world.MoveWithAddedComponentCore(entity, typeId, value);
+            if (!_world.IsAliveCore(entity)) return;
+            var exists = _world.GetPackedPool(typeId) is { } pool ? pool.Find(entity) >= 0
+                : _world._entityRecords[entity.Id].Archetype!.HasComponent(typeId);
+            if (!exists) _world.MoveWithAddedComponentCore(entity, typeId, value);
         }
 
         public void Remove(Entity entity, int typeId)
@@ -63,6 +65,40 @@ public sealed partial class World
         {
             RequireOwnership();
             if (_world.IsAliveCore(entity)) _world.SetComponentCore(entity, typeId, value);
+        }
+
+        internal bool TryRead<T>(Entity entity, int typeId, out T value) where T : unmanaged
+        {
+            RequireOwnership();
+            value = default;
+            if (!_world.IsAliveCore(entity)) return false;
+            if (_world.GetPackedPool(typeId) is { } pool)
+            {
+                var slot = pool.Find(entity);
+                if (slot < 0) return false;
+                value = pool.ValueAt<T>(slot);
+                return true;
+            }
+            var record = _world._entityRecords[entity.Id];
+            var archetype = record.Archetype!;
+            if (!archetype.HasComponent(typeId)) return false;
+            value = archetype.ReadComponent<T>(record.ChunkIndex, record.RowIndex, typeId);
+            return true;
+        }
+
+        internal bool TryWrite<T>(Entity entity, int typeId, T value) where T : unmanaged
+        {
+            RequireOwnership();
+            if (!_world.IsAliveCore(entity)) return false;
+            if (_world.GetPackedPool(typeId) is { } pool)
+            {
+                var slot = pool.Find(entity);
+                if (slot < 0) return false;
+                pool.ValueAt<T>(slot) = value;
+                return true;
+            }
+            var record = _world._entityRecords[entity.Id];
+            return record.Archetype!.TryWriteComponent(record.ChunkIndex, record.RowIndex, typeId, value);
         }
 
         public void Release()

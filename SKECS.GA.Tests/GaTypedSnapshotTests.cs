@@ -93,6 +93,31 @@ public sealed class GaTypedSnapshotTests
     }
 
     [Theory]
+    [InlineData("""
+        value.Flag = context.ReadSnapshot<bool>(value.Id, value.Generation, 0, false);
+        if (value.Flag)
+            value.Amount = context.ReadSnapshot<Fixed>(value.Id, value.Generation, 1, Fixed.FromRaw(0L));
+        """, 1)]
+    [InlineData("""
+        value.Flag = context.ReadSnapshot<bool>(value.Id, value.Generation, 0, false);
+        value.Generation++;
+        value.Amount = context.ReadSnapshot<Fixed>(value.Id, value.Generation, 1, Fixed.FromRaw(0L));
+        """, 2)]
+    [InlineData("""
+        if (value.Flag)
+            value.Amount = context.ReadSnapshot<Fixed>(value.Id, value.Generation, 1, Fixed.FromRaw(0L));
+        else
+            value.Count = context.ReadSnapshot<int>(value.Id, value.Generation, 3, -1);
+        """, 2)]
+    public void SlangReusesSnapshotOffsetsOnlyForImmutableKeysInScope(string statements, int lookups)
+    {
+        var program = RequireProgram(MixedSchema, statements);
+        var slang = GaSlangEmitter.EmitVulkan(program).Source;
+        Assert.Equal(lookups, slang.Split('\n').Count(line =>
+            line.Contains("gaTryFindSnapshotV1(gaInput", StringComparison.Ordinal)));
+    }
+
+    [Theory]
     [InlineData(MixedSchema, "value.Count = context.ReadSnapshot<int>(11, 3, value.Id, 0);")]
     [InlineData(MixedSchema, "value.Count = context.ReadSnapshot<int>(11, 3, 2, 0);")]
     [InlineData(MixedSchema, "value.Count = context.ReadSnapshot<int>(11, 3, 4, 0);")]

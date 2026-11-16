@@ -9,24 +9,34 @@ public static class GaVulkanPackager
 {
     public static Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId,
         string slangAdapterPath, string outputDirectory, string artifactName) =>
-        GaArtifactPackager.Build(program, simulationContractId, slangAdapterPath, outputDirectory, artifactName, null);
+        Build(program, simulationContractId, slangAdapterPath, outputDirectory, artifactName, GaSlangModule.ThreadsPerGroup);
+
+    public static Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId,
+        string slangAdapterPath, string outputDirectory, string artifactName, int workgroupX) =>
+        GaArtifactPackager.Build(program, simulationContractId, slangAdapterPath, outputDirectory, artifactName, null,
+            workgroupX);
 }
 
 public static class GaD3D12Packager
 {
     public static Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId,
-        string slangAdapterPath, string dxcDirectory, string outputDirectory, string artifactName)
+        string slangAdapterPath, string dxcDirectory, string outputDirectory, string artifactName) =>
+        Build(program, simulationContractId, slangAdapterPath, dxcDirectory, outputDirectory, artifactName,
+            GaSlangModule.ThreadsPerGroup);
+
+    public static Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId,
+        string slangAdapterPath, string dxcDirectory, string outputDirectory, string artifactName, int workgroupX)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dxcDirectory);
         return GaArtifactPackager.Build(program, simulationContractId, slangAdapterPath, outputDirectory, artifactName,
-            Path.GetFullPath(dxcDirectory));
+            Path.GetFullPath(dxcDirectory), workgroupX);
     }
 }
 
 internal static class GaArtifactPackager
 {
     internal static async Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId,
-        string slangAdapterPath, string outputDirectory, string artifactName, string? dxcDirectory)
+        string slangAdapterPath, string outputDirectory, string artifactName, string? dxcDirectory, int workgroupX)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrWhiteSpace(simulationContractId);
@@ -37,7 +47,7 @@ internal static class GaArtifactPackager
             throw new ArgumentException("Use an ASCII artifact filename without an extension.", nameof(artifactName));
 
         bool d3d12 = dxcDirectory != null;
-        var module = d3d12 ? GaSlangEmitter.EmitD3D12(program) : GaSlangEmitter.EmitVulkan(program);
+        var module = d3d12 ? GaSlangEmitter.EmitD3D12(program, workgroupX) : GaSlangEmitter.EmitVulkan(program, workgroupX);
         var toolchain = d3d12 ? D3D12Toolchain(dxcDirectory!) :
             new GaToolchain("2025.6.1", "Slang direct SPIR-V emitter", GaArtifactFormat.SpirV, "spirv_1_3",
                 ["GenerateSpirvDirectly", "VulkanUseEntryPointName"], [], []);
@@ -55,7 +65,7 @@ internal static class GaArtifactPackager
         var reflectionLines = new List<string>();
         while (reflectionReader.ReadLine() is { } line)
             reflectionLines.Add(line);
-        var (bindings, usage) = ParseReflection(reflectionLines.ToArray(), d3d12);
+        var (bindings, usage) = ParseReflection(reflectionLines.ToArray(), d3d12, workgroupX);
         byte[] sourceMap = JsonSerializer.SerializeToUtf8Bytes(module.FaultSources.ToArray(),
             GaManifestJsonContext.Default.GaSourceSpanArray);
         var manifest = new GaArtifactManifest(GaArtifactManifest.CurrentSchemaVersion,
@@ -74,11 +84,14 @@ internal static class GaArtifactPackager
                 ComponentRemovalCount = program.RemovalComponents.Count,
                 ComponentAdditionCount = program.AdditionComponents.Count,
                 AdditionPayloadWords = program.AdditionPayloadWords,
+                EventTypeCount = program.EventTypes.Count,
+                EventPayloadWords = program.EventPayloadWords,
+                ReductionTypeCount = program.ReductionTypeCount,
                 UsesDomainOrder = program.UsesDomainOrder
             },
             toolchain, GaSlangModule.EntryPoint, bindings, usage,
             new GaKernelRequirements(program.UsesFixed ? GaComputeProfiles.WideFixedEmulated : GaComputeProfiles.Portable32,
-                [], GaSlangModule.ThreadsPerGroup, 1, 1, 0, 0),
+                [], workgroupX, 1, 1, 0, 0),
             GaArtifactManifest.ComputeDigest(binary), GaArtifactManifest.ComputeDigest(reflection),
             GaArtifactManifest.ComputeDigest(sourceMap));
         var bundle = GaArtifactBundle.Load(manifest, manifest.GetContentId(), binary, reflection, sourceMap);
@@ -119,13 +132,13 @@ internal static class GaArtifactPackager
             throw new InvalidDataException($"Slang compilation failed ({process.ExitCode}).\n{await output.ConfigureAwait(false)}{await errors.ConfigureAwait(false)}");
     }
 
-    private static (GaResourceBinding[], GaResourceUsage[]) ParseReflection(string[] lines, bool d3d12)
+    private static (GaResourceBinding[], GaResourceUsage[]) ParseReflection(string[] lines, bool d3d12, int workgroupX)
     {
         if (lines.Length != 7 ||
             lines[0] != "slang\t2025.6.1" ||
             lines[1] != (d3d12 ? "target\tdxil\tsm_6_0" : "target\tspirv\tspirv_1_3") ||
             lines[2] != "entry\t" + GaSlangModule.EntryPoint ||
-            lines[3] != FormattableString.Invariant($"workgroup\t{GaSlangModule.ThreadsPerGroup}\t1\t1"))
+            lines[3] != FormattableString.Invariant($"workgroup\t{workgroupX}\t1\t1"))
             throw new InvalidDataException("Unexpected Slang toolchain, entry point or workgroup reflection.");
 
         var expected = new Dictionary<string, string>(StringComparer.Ordinal)

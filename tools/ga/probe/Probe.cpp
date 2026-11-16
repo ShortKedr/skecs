@@ -1,5 +1,4 @@
 #include "VulkanDispatch.h"
-#include "D3D12Dispatch.h"
 #include "WordsFile.h"
 
 #include <array>
@@ -12,9 +11,21 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#if __has_include(<slang/slang.h>)
 #include <slang/slang-com-ptr.h>
 #include <slang/slang.h>
+#else
+#include <slang-com-ptr.h>
+#include <slang.h>
+#endif
+
+#if defined(_WIN32) && !defined(SKECS_GA_PROBE_VULKAN_ONLY)
+#include "D3D12Dispatch.h"
 #include <wrl/client.h>
+#define SKECS_GA_PROBE_D3D12 1
+#else
+#define SKECS_GA_PROBE_D3D12 0
+#endif
 
 namespace
 {
@@ -402,6 +413,7 @@ void runVulkanFixture(VkPhysicalDevice device, const CompiledFixture& fixture)
     });
 }
 
+#if SKECS_GA_PROBE_D3D12
 void runD3D12Fixture(IDXGIAdapter1* adapter, const CompiledFixture& fixture)
 {
     runFixture(fixture, [&](uint32_t groups, FixtureBuffers inputs)
@@ -496,6 +508,7 @@ void dispatchD3D12Files(std::span<char*> args)
             ga::writeWords(paths[i], result[i].words);
     }
 }
+#endif
 }
 
 int main(int argc, char** argv)
@@ -504,16 +517,27 @@ int main(int argc, char** argv)
     {
         if (argc >= 2 && std::string_view(argv[1]) == "dispatch-dxil")
         {
+#if SKECS_GA_PROBE_D3D12
             dispatchD3D12Files({argv + 2, static_cast<size_t>(argc - 2)});
             return 0;
+#else
+            throw std::runtime_error("this probe was built without D3D12 support");
+#endif
         }
         const bool buildDxil = argc == 7 && std::string_view(argv[1]) == "compile-dxil";
         const bool build = buildDxil || (argc == 6 && std::string_view(argv[1]) == "compile");
         const bool d3d12 = buildDxil || (argc == 5 && std::string_view(argv[1]) == "d3d12");
+#if !SKECS_GA_PROBE_D3D12
+        require(!d3d12, "this probe was built without D3D12 support");
+#endif
         require(build || d3d12 || argc == 3,
-            "usage: ga-slang-probe <Probe.slang> <out directory> | d3d12 <Probe.slang> <out directory> <DXC directory>\n"
+            "usage: ga-slang-probe <Probe.slang> <out directory>\n"
             "       ga-slang-probe compile <source.slang> <entry> <out.spv> <out.layout>\n"
-            "       ga-slang-probe compile-dxil <source.slang> <entry> <out.dxil> <out.layout> <DXC directory>");
+#if SKECS_GA_PROBE_D3D12
+            "       ga-slang-probe d3d12 <Probe.slang> <out directory> <DXC directory>\n"
+            "       ga-slang-probe compile-dxil <source.slang> <entry> <out.dxil> <out.layout> <DXC directory>\n"
+#endif
+        );
         std::ifstream sourceFile(argv[build || d3d12 ? 2 : 1], std::ios::binary);
         require(static_cast<bool>(sourceFile), "could not open probe source");
         std::string source{std::istreambuf_iterator<char>(sourceFile), std::istreambuf_iterator<char>()};
@@ -547,6 +571,7 @@ int main(int argc, char** argv)
         require(rejected, "corrupted manifest accepted");
         std::cout << "corrupted manifest rejected\n";
 
+#if SKECS_GA_PROBE_D3D12
         if (d3d12)
         {
             testD3D12Adapters([&](IDXGIAdapter1* adapter)
@@ -556,6 +581,7 @@ int main(int argc, char** argv)
             }, L"exact readback passed, both register permutations");
             return 0;
         }
+#endif
 
         ga::VulkanInstance instance;
         size_t tested = 0;

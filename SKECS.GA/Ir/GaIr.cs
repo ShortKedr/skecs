@@ -41,6 +41,29 @@ public sealed class GaAdditionComponent
     internal int[] Offsets { get; }
 }
 
+/// <summary>The packed portable payload schema of a typed event or reduction leaf.</summary>
+public sealed class GaEventType
+{
+    internal GaEventType(string id, GaAdditionField[] fields, bool isContribution = false)
+    {
+        Id = id;
+        IsContribution = isContribution;
+        Fields = Array.AsReadOnly((GaAdditionField[])fields.Clone());
+        Offsets = new int[fields.Length];
+        for (int field = 0; field < fields.Length; field++)
+        {
+            Offsets[field] = WordCount;
+            WordCount = checked(WordCount + (fields[field].Type == GaScalar.Fixed ? 2 : 1));
+        }
+    }
+
+    public string Id { get; }
+    public bool IsContribution { get; }
+    public IReadOnlyList<GaAdditionField> Fields { get; }
+    public int WordCount { get; }
+    internal int[] Offsets { get; }
+}
+
 internal enum GaUnaryOperator { Negate, BitwiseNot, Not }
 internal enum GaBinaryOperator
 {
@@ -82,6 +105,7 @@ internal sealed record GaStore(GaSlot Slot, GaValue Value) : GaStatement;
 internal sealed record GaArrayStore(GaArrayField Field, GaValue Index, GaSlot? Previous, GaValue Value, GaSourceSpan Source)
     : GaStatement;
 internal sealed record GaEmit(GaValue Value) : GaStatement;
+internal sealed record GaEmitTyped(int EventTypeIndex, IReadOnlyList<GaAdditionValue> Values) : GaStatement;
 internal sealed record GaSetDomainOrder(GaValue Primary, GaValue Secondary) : GaStatement;
 internal sealed record GaDestroy(GaValue EntityId, GaValue Generation) : GaStatement;
 internal sealed record GaCreate(int TicketSlot) : GaStatement;
@@ -102,7 +126,7 @@ public sealed class GaProgram
         GaScalar[] locals, GaBlock body, int ticketLocalCount, string[] removalComponents,
         GaAdditionComponent[] additionComponents, GaSnapshotLayout? snapshotLayout = null,
         string? tickResourceType = null, GaTickResourceField[]? tickResourceFields = null,
-        string? bufferType = null, GaBufferField[]? bufferFields = null)
+        string? bufferType = null, GaBufferField[]? bufferFields = null, GaEventType[]? eventTypes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(systemId);
         SystemId = systemId;
@@ -114,6 +138,9 @@ public sealed class GaProgram
         RemovalComponents = Array.AsReadOnly((string[])removalComponents.Clone());
         AdditionComponents = Array.AsReadOnly((GaAdditionComponent[])additionComponents.Clone());
         AdditionPayloadWords = additionComponents.Length == 0 ? 0 : additionComponents.Max(component => component.WordCount);
+        EventTypes = Array.AsReadOnly(eventTypes?.ToArray() ?? []);
+        EventPayloadWords = EventTypes.Count == 0 ? 0 : EventTypes.Max(type => type.WordCount);
+        ReductionTypeCount = EventTypes.Count(type => type.IsContribution);
         SnapshotLayout = snapshotLayout;
         TickResourceType = tickResourceType;
         TickResourceFields = Array.AsReadOnly(tickResourceFields?.ToArray() ?? []);
@@ -151,9 +178,9 @@ public sealed class GaProgram
     }
 
     // Initial word-based portable profile. Later profiles must explicitly extend this identity.
-    public const int SubsetVersion = 13;
+    public const int SubsetVersion = 15;
     public const int NumericVersion = SKECS.Numerics.Fixed.NumericContractVersion;
-    public const int IrVersion = 13;
+    public const int IrVersion = 15;
     public string SystemId { get; }
     public string SourceDigest { get; }
     public IReadOnlyList<GaComponent> Components { get; }
@@ -184,6 +211,11 @@ public sealed class GaProgram
     public IReadOnlyList<GaAdditionComponent> AdditionComponents { get; }
     /// <summary>The maximum word count of an addition payload before padding.</summary>
     public int AdditionPayloadWords { get; }
+    /// <summary>The schemas of typed outputs in source traversal order.</summary>
+    public IReadOnlyList<GaEventType> EventTypes { get; }
+    public int EventPayloadWords { get; }
+    public int ReductionTypeCount { get; }
+    public int OutputPayloadWords => Math.Max(AdditionPayloadWords, EventPayloadWords);
     /// <summary>The verified maximum number of events and commands staged by one invocation.</summary>
     public int EventCapacity { get; }
     internal int[] Offsets { get; }

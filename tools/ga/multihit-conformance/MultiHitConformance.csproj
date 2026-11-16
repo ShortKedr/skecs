@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GaSource Condition="'$(GaSource)' == ''">../../..</GaSource>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(GaSource)/SKECS.GA.Backend.Vulkan/SKECS.GA.Backend.Vulkan.csproj" />
+    <ProjectReference Include="$(GaSource)/SKECS.GA.Backend.D3D12/SKECS.GA.Backend.D3D12.csproj" />
+    <Compile Include="DamageKernels.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="DamageOracle.cs" />
+    <Compile Include="$(Bundle)/ga-adapter.g.cs" />
+    <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
+  </ItemGroup>
+</Project>

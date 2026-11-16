@@ -63,11 +63,15 @@ internal static class GaVerifier
         foreach (var component in program.AdditionComponents)
         {
             Require(!string.IsNullOrWhiteSpace(component.Id) && additionComponents.Add(component.Id));
-            var additionFields = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var field in component.Fields)
-                Require(!string.IsNullOrWhiteSpace(field.Path) && additionFields.Add(field.Path) &&
-                    Enum.IsDefined(field.Type) && (field.ClrEnumType is null ||
-                        field.Type is GaScalar.Int32 or GaScalar.UInt32 && !string.IsNullOrWhiteSpace(field.ClrEnumType)));
+            CheckPayloadFields(component.Fields, allowScalar: false);
+        }
+        var eventTypes = new HashSet<(string Id, bool IsContribution)>();
+        Require(program.EventTypes.Count <= GaOutputRecord.MaximumEventTypes &&
+            program.EventPayloadWords <= GaOutputRecord.MaximumEventPayloadWords);
+        foreach (var type in program.EventTypes)
+        {
+            Require(!string.IsNullOrWhiteSpace(type.Id) && eventTypes.Add((type.Id, type.IsContribution)));
+            CheckPayloadFields(type.Fields, allowScalar: true);
         }
         Require(program.Locals.All(Enum.IsDefined) && program.TicketLocalCount >= 0);
         int eventCapacity = CheckStatement(program.Body, new HashSet<int>(), new HashSet<int>());
@@ -75,7 +79,7 @@ internal static class GaVerifier
             arraySlots.Count == program.Fields.Count(field => field.Path.Contains('[')));
         if (eventCapacity > GaEventPacket.MaximumCapacityPerSource)
             throw new GaEventCapacityException($"An invocation may produce more than {GaEventPacket.MaximumCapacityPerSource.ToString(System.Globalization.CultureInfo.InvariantCulture)} events and commands.");
-        int outputWords = GaOutputRecord.Words + program.AdditionPayloadWords +
+        int outputWords = GaOutputRecord.Words + program.OutputPayloadWords +
             (usesDomainOrder ? GaOutputRecord.DomainWordCount : 0);
         if ((long)eventCapacity * outputWords > Array.MaxLength)
             throw new GaEventCapacityException("The packed output of one invocation exceeds the supported buffer size.");
@@ -156,6 +160,10 @@ internal static class GaVerifier
                 case GaEmit emit:
                     CheckValue(emit.Value, assigned);
                     Require(emit.Value.Type == GaScalar.Int32);
+                    return 1;
+                case GaEmitTyped typed:
+                    Require((uint)typed.EventTypeIndex < program.EventTypes.Count);
+                    CheckPayload(program.EventTypes[typed.EventTypeIndex].Fields, typed.Values, assigned);
                     return 1;
                 case GaSetDomainOrder order:
                     usesDomainOrder = true;
@@ -238,7 +246,20 @@ internal static class GaVerifier
         void CheckAddition(int componentIndex, IReadOnlyList<GaAdditionValue> values, HashSet<int> assigned)
         {
             Require((uint)componentIndex < (uint)program.AdditionComponents.Count);
-            var fields = program.AdditionComponents[componentIndex].Fields;
+            CheckPayload(program.AdditionComponents[componentIndex].Fields, values, assigned);
+        }
+
+        static void CheckPayloadFields(IReadOnlyList<GaAdditionField> fields, bool allowScalar)
+        {
+            var paths = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var field in fields)
+                Require((!string.IsNullOrWhiteSpace(field.Path) || allowScalar && field.Path == "" && fields.Count == 1) &&
+                    paths.Add(field.Path) && Enum.IsDefined(field.Type) && (field.ClrEnumType is null ||
+                        field.Type is GaScalar.Int32 or GaScalar.UInt32 && !string.IsNullOrWhiteSpace(field.ClrEnumType)));
+        }
+
+        void CheckPayload(IReadOnlyList<GaAdditionField> fields, IReadOnlyList<GaAdditionValue> values, HashSet<int> assigned)
+        {
             var supplied = new HashSet<int>();
             foreach (var value in values)
             {

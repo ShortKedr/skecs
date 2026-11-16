@@ -1,0 +1,95 @@
+using SKECS;
+using SKECS.GA;
+using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.Vulkan;
+
+if (args is ["cpu"])
+{
+    ContinuationChecks.Run(CpuPlan, "cpu", 127);
+    return;
+}
+
+if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12") ||
+    !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
+    throw new ArgumentException("Usage: ServiceContinuationConformance cpu | <vulkan|d3d12> <bundle> <bridge> <index>");
+
+var contract = new GaContractIdentity(ServiceAdapterRowCodec.SystemId, "service-continuation/1",
+    ServiceAdapterRowCodec.SourceDigest, ServiceAdapterRowCodec.IrDigest, ServiceAdapterRowCodec.ComponentSchemaDigest,
+    GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion)
+{
+    EventCapacity = ServiceAdapterRowCodec.EventCapacity,
+    TickResourceType = ServiceAdapterRowCodec.TickResourceType,
+    TickResourceWords = ServiceAdapterRowCodec.TickResourceWords,
+    EventTypeCount = ServiceAdapterRowCodec.EventTypeCount,
+    EventPayloadWords = ServiceAdapterRowCodec.EventPayloadWords
+};
+ContinuationChecks.Require(contract is { EventCapacity: 1, EventTypeCount: 1, TickResourceWords: 2 },
+    "Unexpected integration contract.");
+
+string stem = Path.Combine(args[1], contract.SystemId);
+var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
+    File.ReadAllText(stem + ".content-id").Trim(),
+    File.ReadAllBytes(stem + (args[0] == "vulkan" ? ".spv" : ".dxil")),
+    File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
+var devices = Open(args[0], args[2], out var owner);
+using (owner)
+{
+    ContinuationChecks.Require(deviceIndex < devices.Count, "Device index is out of range.");
+    var device = devices[deviceIndex];
+    string digest = GaArtifactManifest.ComputeDigest(System.Text.Encoding.UTF8.GetBytes(ContactService.Contract));
+    var serviceContract = new GaContractIdentity("contact-service", ContactService.Contract, digest, digest, digest,
+        GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion);
+    using var startup = GaStartup.Select(GaPolicy.RequireGpu,
+        [new(contract, [artifact]), new(serviceContract, [], DeclaredCpuStage: true)], [device], allowExperimental: true);
+    ContinuationChecks.Require(startup.Succeeded && startup.SelectedPlan == GaSelectedPlan.Mixed &&
+        startup.Decisions[0].Route == GaRoute.Gpu && startup.Decisions[1] is { Route: GaRoute.Cpu, Reason: GaStartupReason.DeclaredCpuStage },
+        string.Join(", ", startup.Decisions.Select(choice => $"{choice.Route} {choice.Reason} {choice.Detail}")));
+
+    int deviceRows = 0;
+    DeterministicWorkload<IntegrationFrame> GpuPlan(ContactService service) =>
+        new DeterministicWorkload<IntegrationFrame>().AddCommitGroup(SystemStage.Update, group =>
+        {
+            var processor = new GaBatchProcessor<IntegrationFrame>(startup, contract.SystemId, contract.SourceDigest,
+                contract.IrDigest, contract.ComponentSchemaDigest, ServiceAdapterRowCodec.WordsPerRow,
+                ServiceAdapterRowCodec.Pack<IntegrationFrame>, ServiceAdapterRowCodec.Apply<IntegrationFrame>,
+                contract.EventCapacity, timing => deviceRows += timing.Rows, null, false, [], [],
+                ServiceAdapterRowCodec.TickResource, null, ServiceAdapterRowCodec.EventTypes);
+            group.AddBatchSystem(ServiceAdapterRowCodec.CreateQuery(), processor);
+            AddService(group, service);
+        });
+
+    var cpu = ContinuationChecks.Run(CpuPlan, "cpu", 127);
+    var gpu = ContinuationChecks.Run(GpuPlan, args[0], 64);
+    int passRows = gpu.Sum(frame => frame.Rows);
+    int replayRows = gpu.Where(frame => frame.Tick > ContinuationChecks.ForkTick).Sum(frame => frame.Rows);
+    int witnessRows = gpu[ContinuationChecks.ForkTick].Rows + 2 * gpu[^1].Rows;
+    ContinuationChecks.Require(passRows + replayRows + witnessRows == deviceRows,
+        "Device rows differ across continuation and fault witnesses.");
+    ContinuationChecks.Compare(cpu, gpu, "CPU and mixed execution");
+    Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} driver={device.Info.Driver} artifact={startup.Decisions[0].ArtifactId} " +
+        $"source={contract.SourceDigest} ir={contract.IrDigest} irVersion={contract.IrVersion} route=mixed deviceRows={deviceRows} " +
+        $"service={serviceContract.SimulationContractId} serviceSchema={ContactService.ExtensionVersion} crossExecutor=passed");
+}
+
+static DeterministicWorkload<IntegrationFrame> CpuPlan(ContactService service) =>
+    new DeterministicWorkload<IntegrationFrame>().AddCommitGroup(SystemStage.Update, group =>
+    {
+        ServiceAdapter.Register(group);
+        AddService(group, service);
+    });
+
+static void AddService(DeterministicCommitGroup<IntegrationFrame> group, ContactService service) =>
+    group.AddOrderedApply(new DeterministicQuery().Write<ContactMotion>(), service.Apply);
+
+static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDisposable owner)
+{
+    if (backend == "vulkan")
+    {
+        var device = GaVulkanBackend.Open(library);
+        owner = device;
+        return device.Devices;
+    }
+    var d3d12 = GaD3D12Backend.Open(library);
+    owner = d3d12;
+    return d3d12.Devices;
+}

@@ -61,19 +61,20 @@ public readonly ref struct GaEventPacket
     }
 
     internal void ValidateMixedRecords(int successfulSources, ReadOnlySpan<GaComponentRemoval> removals,
-        ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
+        ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder, ReadOnlySpan<GaTypedEvent> eventTypes)
     {
         for (int source = 0; source < successfulSources; source++)
-            GaOutputRecord.ValidatePackedSource(Records(source), EventWords, removals, additions, usesDomainOrder);
+            GaOutputRecord.ValidatePackedSource(Records(source), EventWords, removals, additions, usesDomainOrder, eventTypes);
     }
 
     internal void ApplyMixedEntityRows<TInput>(DeterministicJob<TInput> job, int firstSource, int successfulRows,
-        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
+        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder,
+        ReadOnlySpan<GaTypedEvent> eventTypes)
         where TInput : unmanaged
     {
         for (int row = 0; row < successfulRows; row++)
             GaOutputRecord.ReplayPackedSource(job.ForEntity(row), Records(firstSource + row), EventWords, removals, additions,
-                usesDomainOrder);
+                usesDomainOrder, eventTypes);
     }
 
     private ReadOnlySpan<uint> Records(int source)

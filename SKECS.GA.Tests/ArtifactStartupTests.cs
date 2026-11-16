@@ -10,6 +10,36 @@ namespace SKECS.GA.Tests;
 public sealed class ArtifactStartupTests
 {
     [Fact]
+    public void ReductionBindingsAreVersionedAndMustMatchThePreparedArtifact()
+    {
+        var fixture = new Fixture();
+        var contract = fixture.Contract with
+        {
+            EventCapacity = 2,
+            EventTypeCount = 1,
+            EventPayloadWords = 1,
+            ReductionTypeCount = 1,
+            SubsetVersion = GaProgram.SubsetVersion,
+            IrVersion = GaProgram.IrVersion
+        };
+        var manifest = fixture.Manifest with { Contract = contract };
+        Assert.Equal(1, GaArtifactManifest.Parse(manifest.GetCanonicalBytes()).Contract.ReductionTypeCount);
+        Assert.Throws<InvalidDataException>(() =>
+            (manifest with { Contract = contract with { ReductionTypeCount = 2 } }).GetCanonicalBytes());
+        Assert.Throws<InvalidDataException>(() =>
+            (manifest with { Contract = contract with { IrVersion = 14 } }).GetCanonicalBytes());
+
+        var candidate = GaArtifactCandidate.Load(manifest.GetCanonicalBytes(), manifest.GetContentId(),
+            fixture.Shader, fixture.Reflection, []);
+        using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [candidate])], [new TestDevice()]);
+        Assert.True(startup.Succeeded);
+        Assert.Throws<InvalidDataException>(() => new GaBatchProcessor<byte>(
+            startup, contract.SystemId, contract.SourceDigest, contract.IrDigest, contract.ComponentSchemaDigest, 1,
+            static (_, _) => { }, static (_, _, _) => { }, contract.EventCapacity, null, null, false,
+            [], [], default, null, [GaTypedEvent.For<uint>(static words => words[0], 1, [])]));
+    }
+
+    [Fact]
     public void ManifestNormalizesOrderAndPinsPhysicalBindings()
     {
         var fixture = new Fixture();
@@ -75,6 +105,29 @@ public sealed class ArtifactStartupTests
         Assert.Equal(GaSelectedPlan.StartupFailure, strict.SelectedPlan);
         Assert.Equal(GaStartupReason.IncompatibleManifest, Assert.Single(strict.Decisions).Reason);
         Assert.Equal(0, device.Prepared);
+    }
+
+    [Fact]
+    public void StartupChecksDeviceWidthBeforePreparingAWorkgroupVariant()
+    {
+        var fixture = new Fixture();
+        var manifest = fixture.Manifest with { Requirements = fixture.Manifest.Requirements with { WorkgroupX = 128 } };
+        var contentId = manifest.GetContentId();
+        Assert.NotEqual(fixture.ContentId, contentId);
+        var wide = GaArtifactCandidate.Load(manifest.GetCanonicalBytes(), contentId, fixture.Shader, fixture.Reflection, []);
+        Assert.NotNull(wide.Bundle);
+        var device = new TestDevice();
+
+        using var rejected = GaStartup.Select(GaPolicy.RequireGpu, [new(fixture.Contract, [wide])], [device]);
+        Assert.Equal(GaStartupReason.ResourceBudgetExceeded, Assert.Single(rejected.Decisions).Reason);
+        Assert.False(rejected.Succeeded);
+        Assert.Equal(0, device.Prepared);
+
+        using var supported = GaStartup.Select(GaPolicy.RequireGpu,
+            [new(fixture.Contract, [wide, fixture.Load()])], [device]);
+        Assert.Equal(GaRoute.Gpu, Assert.Single(supported.Decisions).Route);
+        Assert.True(supported.Succeeded);
+        Assert.Equal(1, device.Prepared);
     }
 
     [Fact]

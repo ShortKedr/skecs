@@ -19,6 +19,8 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private readonly List<string> _removalComponents = new();
     private readonly Dictionary<string, int> _additionComponentIndices = new(StringComparer.Ordinal);
     private readonly List<GaAdditionComponent> _additionComponents = new();
+    private readonly Dictionary<(string Id, bool IsContribution), int> _eventTypeIndices = new();
+    private readonly List<GaEventType> _eventTypes = new();
     private readonly List<GaField> _schema = new();
     private readonly List<GaTickResourceField> _resourceFields = new();
     private readonly Dictionary<string, int> _resourceFieldIndices = new(StringComparer.Ordinal);
@@ -70,7 +72,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             return new GaProgram(systemId, sourceDigest, components.ToArray(), _schema.ToArray(), _localTypes.ToArray(),
                 root, _ticketLocals.Count, _removalComponents.ToArray(), _additionComponents.ToArray(), _snapshotLayout,
                 _resourceType == null ? null : QualifiedName(_resourceType), _resourceFields.ToArray(),
-                _bufferType == null ? null : QualifiedName(_bufferType), _bufferFields.ToArray());
+                _bufferType == null ? null : QualifiedName(_bufferType), _bufferFields.ToArray(), _eventTypes.ToArray());
         }
         catch (GaEventCapacityException error)
         {
@@ -317,6 +319,8 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             return LowerRemove(invocation);
         if (method is { Name: "Add", Arity: 1 })
             return LowerAdd(invocation);
+        if (method is { Name: "Emit" or "Contribute", Arity: 1 })
+            return LowerTypedOutput(invocation, method.Name == "Contribute");
         if (method.Arity != 0)
             throw Unsupported(invocation);
         if (method.Name == "Destroy" && HasTicketParameter(method))
@@ -336,6 +340,52 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         };
     }
 
+    private GaStatement LowerTypedOutput(IInvocationOperation invocation, bool isContribution)
+    {
+        var method = invocation.TargetMethod;
+        if (method.TypeArguments[0] is not INamedTypeSymbol
+            { IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false } type ||
+            method.Parameters.Length != 1 || !IsComponentParameter(method.Parameters[0], type) ||
+            invocation.Arguments is not [{ Parameter.Ordinal: 0 } argument])
+            throw Unsupported(invocation, $"Call {method.Name}<T> directly on the in SystemContext parameter with one portable payload.");
+
+        if (!isContribution && type.SpecialType == SpecialType.System_Int32)
+            return new GaEmit(LowerValue(argument.Value));
+
+        bool scalar = IsScalarResource(type);
+        if (!scalar && type is not { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None })
+            throw Unsupported(invocation, $"Use a portable scalar or a closed unmanaged payload struct in {method.Name}<T>.");
+
+        string id = QualifiedName(type);
+        if (!_eventTypeIndices.TryGetValue((id, isContribution), out int eventTypeIndex))
+        {
+            eventTypeIndex = _eventTypes.Count;
+            if (eventTypeIndex == GaOutputRecord.MaximumEventTypes)
+                throw Unsupported(invocation, "The system references too many distinct typed outputs.");
+
+            var fields = new List<GaAdditionField>();
+            if (scalar)
+            {
+                fields.Add(new GaAdditionField("", Scalar(type, invocation),
+                    type.TypeKind == TypeKind.Enum ? id : null));
+            }
+            else
+            {
+                CollectPayloadFields(type, "", fields, invocation);
+            }
+
+            var schema = new GaEventType(id, fields.ToArray(), isContribution);
+            if (schema.WordCount > GaOutputRecord.MaximumEventPayloadWords)
+                throw Unsupported(invocation, "The typed output exceeds the supported payload size.");
+            _eventTypeIndices.Add((id, isContribution), eventTypeIndex);
+            _eventTypes.Add(schema);
+        }
+
+        return new GaEmitTyped(eventTypeIndex, scalar
+            ? [new GaAdditionValue(0, LowerValue(argument.Value))]
+            : LowerPayload(argument.Value, _eventTypes[eventTypeIndex].Fields));
+    }
+
     private GaStatement LowerAdd(IInvocationOperation invocation)
     {
         var method = invocation.TargetMethod;
@@ -351,7 +401,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             if (componentIndex == GaOutputRecord.MaximumComponentRemovals)
                 throw Unsupported(invocation, "The system references too many distinct addition components.");
             var fields = new List<GaAdditionField>();
-            CollectAdditionFields(component, "", fields, invocation);
+            CollectPayloadFields(component, "", fields, invocation);
             var schema = new GaAdditionComponent(id, fields.ToArray());
             if (schema.WordCount > GaOutputRecord.MaximumAdditionPayloadWords)
                 throw Unsupported(invocation, "The component addition exceeds the supported payload size.");
@@ -362,32 +412,33 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         if (method.Parameters.Length == 2 && IsTicketParameter(method.Parameters[0]) &&
             IsComponentParameter(method.Parameters[1], component) &&
             invocation.Arguments is [{ Parameter.Ordinal: 0 } ticket, { Parameter.Ordinal: 1 } ticketValue])
-            return new GaAddTicket(componentIndex, TicketSlot(ticket, invocation), LowerPayload(ticketValue.Value));
+            return new GaAddTicket(componentIndex, TicketSlot(ticket, invocation),
+                LowerPayload(ticketValue.Value, _additionComponents[componentIndex].Fields));
         if (method.Parameters.Length == 3 && IsInt32Parameter(method.Parameters[0]) && IsInt32Parameter(method.Parameters[1]) &&
             IsComponentParameter(method.Parameters[2], component) &&
             invocation.Arguments is [{ Parameter.Ordinal: 0 } entityId, { Parameter.Ordinal: 1 } generation, { Parameter.Ordinal: 2 } value])
-            return new GaAdd(componentIndex, LowerValue(entityId.Value), LowerValue(generation.Value), LowerPayload(value.Value));
+            return new GaAdd(componentIndex, LowerValue(entityId.Value), LowerValue(generation.Value),
+                LowerPayload(value.Value, _additionComponents[componentIndex].Fields));
         throw Unsupported(invocation, "Call Add<T> directly on the in SystemContext parameter, with arguments in declaration order.");
-
-        GaAdditionValue[] LowerPayload(IOperation value)
-        {
-            var fields = _additionComponents[componentIndex].Fields;
-            value = UnwrapIdentity(value);
-            if (value is IParameterReferenceOperation parameter && _components.TryGetValue(parameter.Parameter, out var source))
-            {
-                return fields.Select((field, index) => new GaAdditionValue(index,
-                    new GaLoad(FieldSlot(source, field.Path, field.Type, field.ClrEnumType), Source(value)))).ToArray();
-            }
-
-            var fieldIndices = fields.Select((field, index) => (field.Path, index))
-                .ToDictionary(item => item.Path, item => item.index, StringComparer.Ordinal);
-            var values = new List<GaAdditionValue>();
-            LowerInitializer(value, "", fieldIndices, values);
-            return values.ToArray();
-        }
     }
 
-    private static void CollectAdditionFields(INamedTypeSymbol component, string prefix, List<GaAdditionField> fields, IOperation site)
+    private GaAdditionValue[] LowerPayload(IOperation value, IReadOnlyList<GaAdditionField> fields)
+    {
+        value = UnwrapIdentity(value);
+        if (value is IParameterReferenceOperation parameter && _components.TryGetValue(parameter.Parameter, out var source))
+        {
+            return fields.Select((field, index) => new GaAdditionValue(index,
+                new GaLoad(FieldSlot(source, field.Path, field.Type, field.ClrEnumType), Source(value)))).ToArray();
+        }
+
+        var fieldIndices = fields.Select((field, index) => (field.Path, index))
+            .ToDictionary(item => item.Path, item => item.index, StringComparer.Ordinal);
+        var values = new List<GaAdditionValue>();
+        LowerInitializer(value, "", fieldIndices, values);
+        return values.ToArray();
+    }
+
+    private static void CollectPayloadFields(INamedTypeSymbol component, string prefix, List<GaAdditionField> fields, IOperation site)
     {
         if (component.GetAttributes().Any(attribute => attribute.AttributeClass?.ToDisplayString() switch
         {
@@ -395,18 +446,18 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             "System.Runtime.InteropServices.StructLayoutAttribute" => attribute.ConstructorArguments[0].Value is int layout && layout != 0,
             _ => false
         }))
-            throw Unsupported(site, "Use plain sequential fields in component addition payloads.");
+            throw Unsupported(site, "Use plain sequential fields in GA output payloads.");
 
         foreach (var field in component.GetMembers().OfType<IFieldSymbol>().Where(field => !field.IsStatic)
             .OrderBy(field => field.MetadataName, StringComparer.Ordinal))
         {
             if (field.IsReadOnly || field.IsImplicitlyDeclared || field.IsFixedSizeBuffer || field.RefKind != RefKind.None)
-                throw Unsupported(site, "Use writable, explicit instance fields in component addition payloads.");
+                throw Unsupported(site, "Use writable, explicit instance fields in GA output payloads.");
             string path = prefix + field.MetadataName;
             if (field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None,
                 IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false } nested && !IsFixed(nested))
             {
-                CollectAdditionFields(nested, path + ".", fields, site);
+                CollectPayloadFields(nested, path + ".", fields, site);
                 continue;
             }
             fields.Add(new GaAdditionField(path, Scalar(field.Type, site),
@@ -422,7 +473,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             return;
         if (value is not IObjectCreationOperation { Arguments.Length: 0 } creation ||
             creation.Constructor is { IsImplicitlyDeclared: false })
-            throw Unsupported(value, "Use default, a plain field initializer, or an entry component as an Add<T> value.");
+            throw Unsupported(value, "Use default, a plain field initializer, or an entry component as the GA output payload.");
         if (creation.Initializer is null)
             return;
 
@@ -430,7 +481,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         {
             if (operation is not ISimpleAssignmentOperation
                 { IsRef: false, Target: IFieldReferenceOperation { Field.IsStatic: false } target } initializer)
-                throw Unsupported(operation, "Initialize only instance fields in an Add<T> payload.");
+                throw Unsupported(operation, "Initialize only instance fields in a GA output payload.");
             string path = prefix + target.Field.MetadataName;
             if (fields.TryGetValue(path, out int fieldIndex))
                 values.Add(new GaAdditionValue(fieldIndex, LowerValue(initializer.Value)));
@@ -441,9 +492,15 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
 
     private static IOperation UnwrapIdentity(IOperation operation)
     {
-        while (operation is IConversionOperation { Conversion.IsIdentity: true } conversion)
-            operation = conversion.Operand;
-        return operation;
+        while (true)
+        {
+            if (operation is IConversionOperation { Conversion.IsIdentity: true } conversion)
+                operation = conversion.Operand;
+            else if (operation is IParenthesizedOperation parentheses)
+                operation = parentheses.Operand;
+            else
+                return operation;
+        }
     }
 
     private GaStatement LowerRemove(IInvocationOperation invocation)

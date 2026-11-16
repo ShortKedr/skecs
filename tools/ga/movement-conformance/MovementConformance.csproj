@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../SKECS.GA.Backend.Vulkan/SKECS.GA.Backend.Vulkan.csproj" />
+    <ProjectReference Include="../../../SKECS.GA.Backend.D3D12/SKECS.GA.Backend.D3D12.csproj" />
+    <Compile Include="$(Bundle)/ga-adapter.g.cs" />
+    <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
+  </ItemGroup>
+</Project>
