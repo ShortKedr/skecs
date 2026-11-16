@@ -10,6 +10,7 @@ public readonly ref struct GaEventPacket
 {
     public const uint Version = 1;
     public const int HeaderWords = 4;
+    public const int MaximumCapacityPerSource = 65536;
 
     private readonly ReadOnlySpan<uint> _slots;
     private readonly int _sourceWords;
@@ -17,7 +18,7 @@ public readonly ref struct GaEventPacket
     public GaEventPacket(ReadOnlySpan<uint> words)
     {
         if (words.Length < HeaderWords || words[0] != Version ||
-            words[1] > int.MaxValue || words[2] > int.MaxValue || words[3] is 0 or > int.MaxValue)
+            words[1] > int.MaxValue || words[2] > MaximumCapacityPerSource || words[3] is 0 or > int.MaxValue)
             throw new InvalidDataException("The GA event packet header is invalid.");
         SourceCount = (int)words[1];
         CapacityPerSource = (int)words[2];

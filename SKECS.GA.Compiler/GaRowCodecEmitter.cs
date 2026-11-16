@@ -13,7 +13,7 @@ public static class GaRowCodecEmitter
         ArgumentNullException.ThrowIfNull(className);
         if (!SyntaxFacts.IsValidIdentifier(className) || className.StartsWith('@') ||
             className is "SystemId" or "SourceDigest" or "IrDigest" or "ComponentSchemaDigest"
-                or "WordsPerRow" or "CreateQuery" or "Pack" or "Apply")
+                or "WordsPerRow" or "EventCapacity" or "UsesSnapshot" or "CreateQuery" or "Pack" or "Apply")
             throw new ArgumentException("The codec needs a C# class identifier outside its member names.", nameof(className));
 
         var writes = WrittenFields(program.Body).Distinct().Order().ToArray();
@@ -50,6 +50,8 @@ public static class GaRowCodecEmitter
             Line($"public const string IrDigest = {Literal(GaIrDigest.Program(program))};");
             Line($"public const string ComponentSchemaDigest = {Literal(GaIrDigest.Schema(program))};");
             Line($"public const int WordsPerRow = {Number(program.WordCount)};");
+            Line($"public const int EventCapacity = {Number(program.EventCapacity)};");
+            Line($"public const bool UsesSnapshot = {(program.UsesSnapshot ? "true" : "false")};");
             Line();
             CreateQuery();
             Line();

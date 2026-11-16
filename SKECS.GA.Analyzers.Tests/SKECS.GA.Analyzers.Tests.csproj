@@ -12,6 +12,7 @@
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
     <ProjectReference Include="../SKECS.GA.Analyzers/SKECS.GA.Analyzers.csproj" />
+    <ProjectReference Include="../SKECS.GA/SKECS.GA.csproj" />
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

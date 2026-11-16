@@ -27,6 +27,7 @@ public sealed class GaSystemAnalyzerTests
 
     private static readonly ImmutableArray<MetadataReference> References =
         ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+            .Where(path => Path.GetFileName(path) is not ("SKECS.dll" or "SKECS.GA.dll"))
             .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path)).ToImmutableArray();
 
     [Fact]
@@ -149,6 +150,49 @@ public sealed class GaSystemAnalyzerTests
         Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0003" && Text(diagnostic) == "battle");
         Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0004" && Text(diagnostic) == "context.Has<int>()");
         Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0006" && Text(diagnostic) == "context.Emit(input)");
+    }
+
+    [Fact]
+    public async Task AdmitsRuntimeInt32EmitOnEntryContext()
+    {
+        const string source = """
+            [SKECS.GA.SecsSystem]
+            partial struct Events
+            {
+                public void Execute(in SKECS.GA.SystemContext context, in int input)
+                {
+                    if (input < 0) context.Emit(input);
+                    context.Emit(checked(input + 1));
+                }
+            }
+            """;
+
+        Assert.Empty(await Analyze(source, useRuntime: true));
+    }
+
+    [Fact]
+    public async Task RejectsEmitOnCopiedContextAndContextByValue()
+    {
+        const string source = """
+            [SKECS.GA.SecsSystem]
+            partial struct CopiedContext
+            {
+                public void Execute(in SKECS.GA.SystemContext context, in int input)
+                {
+                    var copy = context;
+                    copy.Emit(input);
+                }
+            }
+            [SKECS.GA.SecsSystem]
+            partial struct ValueContext
+            {
+                public void Execute(SKECS.GA.SystemContext context, in int input) => context.Emit(input);
+            }
+            """;
+
+        var diagnostics = await Analyze(source, useRuntime: true);
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0006" && Text(diagnostic) == "copy.Emit(input)");
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0005" && Text(diagnostic) == "context");
     }
 
     [Fact]
@@ -284,22 +328,62 @@ public sealed class GaSystemAnalyzerTests
         Assert.Equal("GA0001", Assert.Single(GaSemanticAnalysis.Analyze(entry, compilation)).Id);
     }
 
+    [Fact]
+    public async Task AcceptsSnapshotReadOnTheEntryContext()
+    {
+        const string source = """
+            using SKECS.GA;
+            [SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(in SystemContext context, ref int result)
+                {
+                    result = context.ReadSnapshotInt32(entityId: 1, generation: 2, fallback: -3);
+                }
+            }
+            """;
+
+        Assert.Empty(await Analyze(source, useRuntime: true));
+    }
+
+    [Fact]
+    public async Task RejectsSnapshotReadOnAnAliasedContext()
+    {
+        const string source = """
+            using SKECS.GA;
+            [SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(in SystemContext context, ref int result)
+                {
+                    var alias = context;
+                    result = alias.ReadSnapshotInt32(1, 2, -3);
+                }
+            }
+            """;
+
+        Assert.Contains(await Analyze(source, useRuntime: true), diagnostic =>
+            diagnostic.Id == "GA0004" && Text(diagnostic) == "alias.ReadSnapshotInt32(1, 2, -3)");
+    }
+
     private static string Text(Diagnostic diagnostic) =>
         diagnostic.Location.SourceTree!.GetText().ToString(diagnostic.Location.SourceSpan);
 
-    private static async Task<ImmutableArray<Diagnostic>> Analyze(string source, bool enabled = true)
+    private static async Task<ImmutableArray<Diagnostic>> Analyze(string source, bool enabled = true, bool useRuntime = false)
     {
-        var compilation = Compile(source);
+        var compilation = Compile(source, useRuntime);
         var analyzers = ImmutableArray.Create<DiagnosticAnalyzer>(new GaSystemAnalyzer());
         var options = new AnalyzerOptions(ImmutableArray<AdditionalText>.Empty, new BuildOptions(enabled));
         return await compilation.WithAnalyzers(analyzers, options).GetAnalyzerDiagnosticsAsync();
     }
 
-    private static CSharpCompilation Compile(string source)
+    private static CSharpCompilation Compile(string source, bool useRuntime = false)
     {
+        var fixture = CSharpSyntaxTree.ParseText(source, path: "Fixture.cs");
+        var trees = useRuntime ? new[] { fixture } : new[] { CSharpSyntaxTree.ParseText(Contracts, path: "Contracts.cs"), fixture };
+        var references = useRuntime ? References.Add(MetadataReference.CreateFromFile(typeof(SystemContext).Assembly.Location)) : References;
         var compilation = CSharpCompilation.Create("GaFixture",
-            new[] { CSharpSyntaxTree.ParseText(Contracts, path: "Contracts.cs"), CSharpSyntaxTree.ParseText(source, path: "Fixture.cs") },
-            References, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            trees, references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         Assert.Empty(compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error));
         return compilation;
     }

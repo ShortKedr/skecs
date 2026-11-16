@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using SKECS.Numerics;
 
 namespace SKECS.GA;
@@ -11,8 +12,35 @@ public static class GaInterpreter
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (program.EventCapacity != 0)
+            throw new InvalidOperationException("Use the Execute overload with event storage for this program.");
+        return Execute(program, row, Span<int>.Empty, out _);
+    }
+
+    /// <summary>Executes one packed row. Row and events are published only on success.</summary>
+    /// <param name="program">The verified GA program.</param>
+    /// <param name="row">Packed component words.</param>
+    /// <param name="events">Separate storage with room for <see cref="GaProgram.EventCapacity"/> events.</param>
+    /// <param name="eventCount">The number of published events. Zero on fault.</param>
+    public static GaKernelFault? Execute(GaProgram program, Span<uint> row, Span<int> events, out int eventCount) =>
+        Execute(program, row, events, out eventCount, null);
+
+    /// <summary>Executes one row against the provided immutable snapshot binding.</summary>
+    public static GaKernelFault? Execute(GaProgram program, Span<uint> row, Span<int> events, out int eventCount,
+        GaSnapshotPacket? snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        eventCount = 0;
+        if (program.UsesSnapshot && snapshot is null)
+            throw new InvalidOperationException("The GA program requires an Int32 snapshot binding.");
+        if (program.UsesSnapshot && (snapshot!.Layout.Fields.Length != 1 || snapshot.Layout.Fields[0] != GaScalar.Int32))
+            throw new ArgumentException("The GA snapshot binding must contain one Int32 field.", nameof(snapshot));
         if (row.Length != program.WordCount)
             throw new ArgumentException("The row length must match the packed GA schema.", nameof(row));
+        if (events.Length < program.EventCapacity)
+            throw new ArgumentException("The destination must hold the verified event capacity.", nameof(events));
+        if (MemoryMarshal.Cast<uint, int>(row).Overlaps(events[..program.EventCapacity]))
+            throw new ArgumentException("Event storage must not overlap the component row.", nameof(events));
         for (int i = 0; i < program.Fields.Count; i++)
             if (program.Fields[i].Type == GaScalar.Bool && row[program.Offsets[i]] > 1)
                 throw new ArgumentException($"Field {i} is not a canonical boolean.", nameof(row));
@@ -21,11 +49,18 @@ public static class GaInterpreter
         Span<ulong> locals = program.Locals.Count <= 64
             ? stackalloc ulong[program.Locals.Count]
             : new ulong[program.Locals.Count];
+        Span<int> nextEvents = program.EventCapacity <= 128
+            ? stackalloc int[program.EventCapacity]
+            : new int[program.EventCapacity];
         row.CopyTo(next);
-        var executor = new Executor(next, locals, program.Offsets);
+        var executor = new Executor(next, locals, nextEvents, program.Offsets, snapshot);
         executor.Run(program.Body);
         if (executor.Fault == null)
+        {
             next.CopyTo(row);
+            eventCount = executor.EventCount;
+            nextEvents[..eventCount].CopyTo(events);
+        }
         return executor.Fault;
     }
 
@@ -33,15 +68,20 @@ public static class GaInterpreter
     {
         private readonly Span<uint> _row;
         private readonly Span<ulong> _locals;
+        private readonly Span<int> _events;
         private readonly int[] _offsets;
+        private readonly GaSnapshotPacket? _snapshot;
         private ulong _evaluationOrdinal;
         internal GaKernelFault? Fault { get; private set; }
+        internal int EventCount { get; private set; }
 
-        internal Executor(Span<uint> row, Span<ulong> locals, int[] offsets)
+        internal Executor(Span<uint> row, Span<ulong> locals, Span<int> events, int[] offsets, GaSnapshotPacket? snapshot)
         {
             _row = row;
             _locals = locals;
+            _events = events;
             _offsets = offsets;
+            _snapshot = snapshot;
         }
 
         private ulong Load(GaSlot slot)
@@ -80,6 +120,11 @@ public static class GaInterpreter
                 case GaStore store:
                     Store(store.Slot, Read(store.Value));
                     break;
+                case GaEmit emit:
+                    int value = unchecked((int)Read(emit.Value));
+                    if (Fault == null)
+                        _events[EventCount++] = value;
+                    break;
                 case GaIf branch:
                     if (Read(branch.Condition) != 0)
                         Run(branch.Then);
@@ -115,6 +160,11 @@ public static class GaInterpreter
                     return Load(load.Slot);
                 case GaSelect select:
                     return Read(Read(select.Condition) != 0 ? select.True : select.False);
+                case GaSnapshotRead lookup:
+                    int entityId = unchecked((int)Read(lookup.EntityId));
+                    int generation = unchecked((int)Read(lookup.Generation));
+                    int fallback = unchecked((int)Read(lookup.Fallback));
+                    return Fault == null ? unchecked((uint)_snapshot!.ReadInt32(entityId, generation, fallback)) : 0;
                 case GaCast cast:
                     ulong source = Read(cast.Operand);
                     if (cast.Type == GaScalar.Fixed)

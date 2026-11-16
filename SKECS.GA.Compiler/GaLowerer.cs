@@ -10,6 +10,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private readonly Dictionary<ILocalSymbol, GaSlot> _locals = new(SymbolEqualityComparer.Default);
     private readonly List<GaField> _schema = new();
     private readonly List<GaScalar> _localTypes = new();
+    private IParameterSymbol? _context;
     private bool _insideLoop;
 
     internal GaProgram Lower(string systemId, string sourceDigest, IOperation body)
@@ -17,6 +18,13 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         var componentIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var parameter in entry.Parameters)
         {
+            if (IsSystemContext(parameter.Type))
+            {
+                if (_context != null || parameter.RefKind != RefKind.In)
+                    throw new GaLoweringException(parameter.Locations[0], "Declare a single in SystemContext parameter.");
+                _context = parameter;
+                continue;
+            }
             if (parameter.RefKind == RefKind.None && QualifiedName(parameter.Type) == "global::SKECS.Entity")
                 continue;
             if (!parameter.Type.IsUnmanagedType || parameter.Type.TypeKind != TypeKind.Struct ||
@@ -32,7 +40,14 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         }
         var root = new GaBlock(new[] { LowerStatement(body) });
         var components = entry.Parameters.Where(_components.ContainsKey).Select(parameter => _components[parameter]).ToArray();
-        return new GaProgram(systemId, sourceDigest, components, _schema.ToArray(), _localTypes.ToArray(), root);
+        try
+        {
+            return new GaProgram(systemId, sourceDigest, components, _schema.ToArray(), _localTypes.ToArray(), root);
+        }
+        catch (GaEventCapacityException error)
+        {
+            throw Unsupported(body, error.Message);
+        }
     }
 
     private GaStatement LowerStatement(IOperation operation)
@@ -43,6 +58,14 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 return new GaBlock(block.Operations.Select(LowerStatement).ToArray());
             case IExpressionStatementOperation expression:
                 return LowerStatement(expression.Operation);
+            case IInvocationOperation invocation when _context != null &&
+                invocation.Instance is IParameterReferenceOperation receiver &&
+                SymbolEqualityComparer.Default.Equals(receiver.Parameter, _context) &&
+                IsSystemContext(invocation.TargetMethod.ContainingType) &&
+                invocation.TargetMethod is { Name: "Emit", IsStatic: false, Arity: 0, ReturnsVoid: true } &&
+                invocation.TargetMethod.Parameters is [{ RefKind: RefKind.None, Type.SpecialType: SpecialType.System_Int32 }] &&
+                invocation.Arguments is [{ Value: var value }]:
+                return new GaEmit(LowerValue(value));
             case IEmptyOperation:
                 return new GaBlock(Array.Empty<GaStatement>());
             case IVariableDeclarationGroupOperation group:
@@ -233,6 +256,8 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             IUnaryOperation { IsLifted: false } unary when IsBuiltinOrFixed(unary.OperatorMethod) => LowerUnary(type, unary),
             IBinaryOperation { IsLifted: false } binary when IsBuiltinOrFixed(binary.OperatorMethod) => Binary(type, binary.OperatorKind,
                 LowerValue(binary.LeftOperand), LowerValue(binary.RightOperand), binary.IsChecked, binary),
+            IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) =>
+                LowerSnapshotRead(invocation),
             IInvocationOperation invocation when IsFixed(invocation.TargetMethod.ContainingType) => LowerFixedCall(invocation),
             IConditionalOperation conditional when conditional.WhenFalse != null && !conditional.IsRef =>
                 new GaSelect(type, LowerValue(conditional.Condition), LowerValue(conditional.WhenTrue),
@@ -240,6 +265,23 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             IDefaultValueOperation => new GaConstant(type, 0, source),
             _ => throw Unsupported(operation)
         };
+    }
+
+    private GaSnapshotRead LowerSnapshotRead(IInvocationOperation invocation)
+    {
+        var method = invocation.TargetMethod;
+        if (method is not { Name: "ReadSnapshotInt32", IsStatic: false, Arity: 0 } ||
+            method.ReturnType.SpecialType != SpecialType.System_Int32 ||
+            method.Parameters.Length != 3 ||
+            method.Parameters.Any(parameter => parameter.RefKind != RefKind.None ||
+                parameter.Type.SpecialType != SpecialType.System_Int32) ||
+            invocation.Arguments is not [{ Parameter.Ordinal: 0 } entityId,
+                { Parameter.Ordinal: 1 } generation, { Parameter.Ordinal: 2 } fallback] ||
+            invocation.Instance is not IParameterReferenceOperation receiver ||
+            !SymbolEqualityComparer.Default.Equals(receiver.Parameter, _context))
+            throw Unsupported(invocation, "Call ReadSnapshotInt32 directly on the in SystemContext parameter, with arguments in declaration order.");
+        return new GaSnapshotRead(LowerValue(entityId.Value), LowerValue(generation.Value),
+            LowerValue(fallback.Value), Source(invocation));
     }
 
     private GaValue ConvertValue(GaScalar type, IConversionOperation conversion)
@@ -374,6 +416,10 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
 
     private static bool IsFixed(ITypeSymbol? type) =>
         type?.ContainingAssembly.Identity.Name == "SKECS" && QualifiedName(type) == "global::SKECS.Numerics.Fixed";
+
+    private static bool IsSystemContext(ITypeSymbol type) =>
+        type.IsRefLikeType && type.ContainingAssembly?.Identity.Name == "SKECS.GA" &&
+        type.DeclaringSyntaxReferences.Length == 0 && QualifiedName(type) == "global::SKECS.GA.SystemContext";
 
     private GaSourceSpan Source(IOperation operation)
     {

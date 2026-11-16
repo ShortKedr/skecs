@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text.Json;
 using SKECS;
 using SKECS.GA;
 using SKECS.GA.Backend.D3D12;
@@ -14,10 +17,21 @@ internal static class GaDemo
         .Register(new ComponentSchema(1001, 1, new FieldSchema(1, FieldKind.Int64),
             new FieldSchema(2, FieldKind.Int32)), new PositionCodec())
         .Register(new ComponentSchema(1002, 1, new FieldSchema(1, FieldKind.Int64),
-            new FieldSchema(2, FieldKind.Int64), new FieldSchema(3, FieldKind.Boolean)), new VelocityCodec());
+            new FieldSchema(2, FieldKind.Int64), new FieldSchema(3, FieldKind.Boolean),
+            new FieldSchema(4, FieldKind.Int32), new FieldSchema(5, FieldKind.Int32)), new VelocityCodec())
+        .Register(new ComponentSchema(1003, 1, new FieldSchema(1, FieldKind.Int32)), new SignalCodec());
+    private static readonly GaSnapshotLayout SnapshotLayout = new([GaScalar.Int32]);
 
     internal static int Run(string[] args)
     {
+        bool measure = args is ["--measure", ..];
+        int warmup = 0;
+        if (measure)
+        {
+            if (args.Length < 2 || !Read(args, 1, 0, 0, out warmup))
+                return 2;
+            args = args[2..];
+        }
         var policy = args.Length == 0 ? (GaPolicy?)null : args[0] switch
         {
             "cpu-only" => GaPolicy.CpuOnly,
@@ -33,13 +47,15 @@ internal static class GaDemo
             !Read(args, 6, 63, 1, out int chunkCapacity) ||
             !Read(args, 7, 1, 1, out int budget))
         {
-            Console.Error.WriteLine("Usage: SKECS.Demo ga <cpu-only|auto|require-gpu> <bundle-dir> <native-library> [device] [entities] [ticks] [chunk-capacity] [job-budget] [vulkan|d3d12]");
+            Console.Error.WriteLine("Usage: SKECS.Demo ga [--measure warmup-ticks] <cpu-only|auto|require-gpu> <bundle-dir> <native-library> [device] [entities] [ticks] [chunk-capacity] [job-budget] [vulkan|d3d12]");
             return 2;
         }
 
         IDisposable? backend = null;
         try
         {
+            var phases = measure ? new BatchPhases() : null;
+            long startupStarted = measure ? Stopwatch.GetTimestamp() : 0;
             IGaDevice[] devices = [];
             GaArtifactCandidate[] candidates = [];
             if (policy != GaPolicy.CpuOnly)
@@ -56,22 +72,28 @@ internal static class GaDemo
 
             var contract = new GaContractIdentity(GaCpuAdapterRowCodec.SystemId, "demo.fixed-movement/1",
                 GaCpuAdapterRowCodec.SourceDigest, GaCpuAdapterRowCodec.IrDigest, GaCpuAdapterRowCodec.ComponentSchemaDigest,
-                GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion);
+                GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion)
+            {
+                EventCapacity = GaCpuAdapterRowCodec.EventCapacity,
+                UsesSnapshot = GaCpuAdapterRowCodec.UsesSnapshot
+            };
             var request = new GaSystemRequest(contract, candidates);
             using var startup = GaStartup.Select(policy.Value, [request], devices, allowExperimental: true);
+            long startupTicks = measure ? Stopwatch.GetTimestamp() - startupStarted : 0;
             var decision = startup.Decisions[0];
             Console.WriteLine($"GA route={decision.Route} reason={decision.Reason} device={decision.Device?.Device} api={decision.Device?.ApiVersion} driver={decision.Device?.Driver} profile={decision.ComputeProfile} qualification={decision.Qualification} artifact={decision.ArtifactId}");
             if (!startup.Succeeded)
                 return 1;
-            var workload = decision.Route == GaRoute.Gpu
+            DeterministicWorkload<byte> Workload(GaTickSnapshot snapshot) => decision.Route == GaRoute.Gpu
                 ? new DeterministicWorkload<byte>().AddBatchSystem(SystemStage.Update, GaCpuAdapterRowCodec.CreateQuery(),
                     new GaBatchProcessor<byte>(startup, GaCpuAdapterRowCodec.SystemId,
                         GaCpuAdapterRowCodec.SourceDigest, GaCpuAdapterRowCodec.IrDigest, GaCpuAdapterRowCodec.ComponentSchemaDigest,
-                        GaCpuAdapterRowCodec.WordsPerRow, GaCpuAdapterRowCodec.Pack<byte>, GaCpuAdapterRowCodec.Apply<byte>))
-                : CpuWorkload();
-            VerifyTicks(workload, count, ticks, chunkCapacity, budget);
+                        GaCpuAdapterRowCodec.WordsPerRow, GaCpuAdapterRowCodec.Pack<byte>, GaCpuAdapterRowCodec.Apply<byte>,
+                        GaCpuAdapterRowCodec.EventCapacity, phases is null ? null : phases.Record, snapshot))
+                : CpuWorkload(snapshot);
+            VerifyTicks(Workload, count, ticks, chunkCapacity, budget, warmup, phases, startupTicks, decision);
             if (decision.Route == GaRoute.Gpu)
-                VerifyFault(workload, chunkCapacity, budget);
+                VerifyFault(Workload, chunkCapacity, budget);
             return 0;
         }
         catch (Exception error)
@@ -124,47 +146,138 @@ internal static class GaDemo
         }
     }
 
-    private static void VerifyTicks(DeterministicWorkload<byte> selected, int count, int ticks, int chunkCapacity, int budget)
+    private static void VerifyTicks(Func<GaTickSnapshot, DeterministicWorkload<byte>> selected, int count, int ticks, int chunkCapacity, int budget,
+        int warmup, BatchPhases? phases, long startupTicks, GaStartupDecision decision)
     {
-        using var cpuWorld = new World(new WorldOptions(32));
+        using var cpuWorld = new World(new WorldOptions(phases == null ? 32 : chunkCapacity));
         using var selectedWorld = new World(new WorldOptions(chunkCapacity));
         var cpuEntities = Seed(cpuWorld, count, fault: false);
         var selectedEntities = Seed(selectedWorld, count, fault: false);
-        using var cpu = new DeterministicRunner<byte>(cpuWorld, CpuWorkload(), workerCount: 2);
-        using var runner = new DeterministicRunner<byte>(selectedWorld, selected);
+        var cpuSnapshot = new GaTickSnapshot();
+        var selectedSnapshot = new GaTickSnapshot();
+        long runnerSetupStarted = phases is null ? 0 : Stopwatch.GetTimestamp();
+        using var cpu = new DeterministicRunner<byte>(cpuWorld, CpuWorkload(cpuSnapshot), workerCount: 2);
+        long cpuRunnerSetupTicks = phases is null ? 0 : Stopwatch.GetTimestamp() - runnerSetupStarted;
+        runnerSetupStarted = phases is null ? 0 : Stopwatch.GetTimestamp();
+        using var runner = new DeterministicRunner<byte>(selectedWorld, selected(selectedSnapshot));
+        long selectedRunnerSetupTicks = phases is null ? 0 : Stopwatch.GetTimestamp() - runnerSetupStarted;
         using var cpuCheckpoint = new MemoryStream();
         using var selectedCheckpoint = new MemoryStream();
         Compare(0);
+        var previousCells = new int[count];
         long pending = 0;
-        for (long tick = 1; tick <= ticks; tick++)
+        long eventCount = 0;
+        var samples = phases is null ? null : new TickSample[ticks];
+        long completedTicks = (long)warmup + ticks;
+        for (long tick = 1; tick <= completedTicks; tick++)
         {
+            for (int row = 0; row < count; row++)
+                previousCells[row] = cpuWorld.Get<GaPosition>(cpuEntities[row]).Cell;
+
+            bool sample = samples != null && tick > warmup;
+            long cpuBefore = sample ? GC.GetTotalAllocatedBytes(precise: true) : 0;
+            long cpuStart = sample ? Stopwatch.GetTimestamp() : 0;
+            BindSnapshot(cpuWorld, cpuSnapshot, tick);
             cpu.BeginTick(tick, 0, Fixed.One);
-            var cpuStatus = cpu.Advance(int.MaxValue);
+            var cpuStatus = Advance(cpu, phases is null ? int.MaxValue : budget);
+            long cpuTicks = sample ? Stopwatch.GetTimestamp() - cpuStart : 0;
+            long cpuBytes = sample ? GC.GetTotalAllocatedBytes(precise: true) - cpuBefore : 0;
             if (cpuStatus != DeterministicTickStatus.Completed)
                 throw new InvalidOperationException($"CPU runner faulted on tick {tick}.", cpu.Fault);
 
             var last = runner.LastCompleted;
+            phases?.Reset();
+            long selectedBefore = sample ? GC.GetTotalAllocatedBytes(precise: true) : 0;
+            long selectedStart = sample ? Stopwatch.GetTimestamp() : 0;
+            BindSnapshot(selectedWorld, selectedSnapshot, tick);
             runner.BeginTick(tick, 0, Fixed.One);
-            VerifyLease(selectedWorld, selectedEntities[0]);
-            var status = Advance(runner, budget, () =>
+            if (phases is null)
+                VerifyLease(selectedWorld, selectedEntities[0]);
+            var status = Advance(runner, budget, out int pendingPolls, phases is null ? () =>
             {
-                pending++;
                 VerifyLease(selectedWorld, selectedEntities[0]);
                 if (!ReferenceEquals(last, runner.LastCompleted))
                     throw new InvalidOperationException("The runner published a tick while its work was pending.");
-            });
+            } : null);
+            long selectedTicks = sample ? Stopwatch.GetTimestamp() - selectedStart : 0;
+            long selectedBytes = sample ? GC.GetTotalAllocatedBytes(precise: true) - selectedBefore : 0;
+            pending += pendingPolls;
             if (status != DeterministicTickStatus.Completed || runner.LastCompleted?.TickIndex != tick)
                 throw new InvalidOperationException($"Selected runner faulted on tick {tick}.", runner.Fault);
             Compare(tick);
+            VerifyEvents(tick, cpu.LastCompleted!.Events, runner.LastCompleted!.Events);
+            eventCount += runner.LastCompleted.Events.Count;
+            if (sample)
+            {
+                if (decision.Route == GaRoute.Gpu && (phases!.Rows != count || phases.Batches == 0))
+                    throw new InvalidDataException($"GA timing missed a submitted row at tick {tick}.");
+                samples![(int)(tick - warmup - 1)] = new TickSample(tick, Microseconds(cpuTicks), cpuBytes,
+                    Microseconds(selectedTicks), selectedBytes, phases!.Batches, phases.Rows, pendingPolls,
+                    Microseconds(phases.Pack), Microseconds(phases.Device), Microseconds(phases.Apply));
+            }
             // Exercise fresh device packing after external edits to a completed world.
-            if (tick < ticks && (tick & 1) == 0)
+            if (tick < completedTicks && (tick & 1) == 0)
             {
                 cpuWorld.Get<GaPosition>(cpuEntities[0]).X += Fixed.FromRaw(11);
                 selectedWorld.Get<GaPosition>(selectedEntities[0]).X += Fixed.FromRaw(11);
+                cpuWorld.Get<GaSignal>(cpuEntities[0]).Value -= 13;
+                selectedWorld.Get<GaSignal>(selectedEntities[0]).Value -= 13;
             }
         }
         var hash = Convert.ToHexString(SHA256.HashData(cpuCheckpoint.GetBuffer().AsSpan(0, (int)cpuCheckpoint.Length)));
-        Console.WriteLine($"GA runner parity verifiedStates={ticks + 1L} entities={count} pendingPolls={pending} checkpointSha256={hash}");
+        Console.WriteLine($"GA runner parity verifiedStates={completedTicks + 1} entities={count} events={eventCount} pendingPolls={pending} checkpointSha256={hash}");
+        if (samples != null)
+            Console.WriteLine(JsonSerializer.Serialize(new
+            {
+                kind = "ga-runner-timing",
+                route = decision.Route.ToString(),
+                decision.Device,
+                decision.ComputeProfile,
+                qualification = decision.Qualification?.ToString(),
+                decision.ArtifactId,
+                os = RuntimeInformation.OSDescription,
+                runtime = RuntimeInformation.FrameworkDescription,
+                architecture = RuntimeInformation.ProcessArchitecture.ToString(),
+                entities = count,
+                chunkCapacity,
+                jobBudget = budget,
+                cpuWorkerCount = 2,
+                warmupTicks = warmup,
+                startupMicroseconds = Microseconds(startupTicks),
+                cpuRunnerSetupMicroseconds = Microseconds(cpuRunnerSetupTicks),
+                selectedRunnerSetupMicroseconds = Microseconds(selectedRunnerSetupTicks),
+                checkpointSha256 = hash,
+                samples
+            }));
+
+        void VerifyEvents(long tick, IReadOnlyList<DeterministicEvent> expected, IReadOnlyList<DeterministicEvent> actual)
+        {
+            int index = 0;
+            for (int row = 0; row < count; row++)
+            {
+                Entity entity = cpuEntities[row];
+                int ordinal = 0;
+                if (cpuWorld.Get<GaVelocity>(entity).Divide)
+                    CompareEvent(entity, ordinal++, previousCells[row]);
+                CompareEvent(entity, ordinal, cpuWorld.Get<GaPosition>(entity).Cell);
+            }
+            if (index != expected.Count || index != actual.Count)
+                throw new InvalidDataException($"GA runner emitted extra events at tick {tick}.");
+
+            void CompareEvent(Entity entity, int ordinal, int value)
+            {
+                if (index >= expected.Count || index >= actual.Count)
+                    throw new InvalidDataException($"GA runner omitted an event at tick {tick}.");
+                var left = expected[index];
+                var right = actual[index++];
+                if (!left.Key.Equals(right.Key) || left.Key.TickIndex != tick ||
+                    left.Key.Stage != SystemStage.Update || left.Key.SystemOrder != 0 ||
+                    left.Key.SourceKind != DeterministicSourceKind.Entity || left.Key.SourceId != entity.Id ||
+                    left.Key.SourceGeneration != entity.Version || left.Key.LocalOrdinal != ordinal ||
+                    left.Get<int>() != value || right.Get<int>() != value)
+                    throw new InvalidDataException($"GA event parity diverged at tick {tick}, entity {entity.Id}, ordinal {ordinal}.");
+            }
+        }
 
         void Compare(long tick)
         {
@@ -179,8 +292,17 @@ internal static class GaDemo
                 if (left.Id != right.Id || left.Version != right.Version ||
                     cpuValue.X.Raw != gpuValue.X.Raw || cpuValue.Cell != gpuValue.Cell ||
                     cpuVelocity.Delta.Raw != gpuVelocity.Delta.Raw || cpuVelocity.Step.Raw != gpuVelocity.Step.Raw ||
-                    cpuVelocity.Divide != gpuVelocity.Divide)
+                    cpuVelocity.Divide != gpuVelocity.Divide || cpuVelocity.TargetId != gpuVelocity.TargetId ||
+                    cpuVelocity.TargetGeneration != gpuVelocity.TargetGeneration)
                     throw new InvalidDataException($"GA runner diverged at tick {tick}, row {row}.");
+                if (tick != 0)
+                {
+                    Entity target = cpuEntities[0];
+                    int oracle = cpuVelocity.TargetId == target.Id && cpuVelocity.TargetGeneration == target.Version
+                        ? cpuWorld.Get<GaSignal>(target).Value : -777;
+                    if (cpuValue.Cell != unchecked((int)cpuValue.X + oracle))
+                        throw new InvalidDataException($"GA snapshot lookup diverged at tick {tick}, row {row}.");
+                }
             }
             cpuCheckpoint.SetLength(0);
             selectedCheckpoint.SetLength(0);
@@ -192,14 +314,18 @@ internal static class GaDemo
         }
     }
 
-    private static void VerifyFault(DeterministicWorkload<byte> selected, int chunkCapacity, int budget)
+    private static void VerifyFault(Func<GaTickSnapshot, DeterministicWorkload<byte>> selected, int chunkCapacity, int budget)
     {
         using var cpuWorld = new World(new WorldOptions(32));
         using var gpuWorld = new World(new WorldOptions(chunkCapacity));
         var cpuEntities = Seed(cpuWorld, 131, fault: true);
         var gpuEntities = Seed(gpuWorld, 131, fault: true);
-        using var cpu = new DeterministicRunner<byte>(cpuWorld, CpuWorkload(), workerCount: 2);
-        using var gpu = new DeterministicRunner<byte>(gpuWorld, selected);
+        var cpuSnapshot = new GaTickSnapshot();
+        var gpuSnapshot = new GaTickSnapshot();
+        using var cpu = new DeterministicRunner<byte>(cpuWorld, CpuWorkload(cpuSnapshot), workerCount: 2);
+        using var gpu = new DeterministicRunner<byte>(gpuWorld, selected(gpuSnapshot));
+        BindSnapshot(cpuWorld, cpuSnapshot, 1);
+        BindSnapshot(gpuWorld, gpuSnapshot, 1);
         cpu.BeginTick(1, 0, Fixed.One);
         gpu.BeginTick(1, 0, Fixed.One);
         if (Advance(cpu, budget) != DeterministicTickStatus.Faulted ||
@@ -216,8 +342,12 @@ internal static class GaDemo
         Console.WriteLine($"GA runner fault parity source={actual.SourceOrderOrdinal} evaluation={actual.KernelFault.EvaluationOrdinal} kind={actual.KernelFault.Kind}");
     }
 
-    private static DeterministicWorkload<byte> CpuWorkload() =>
-        GaCpuAdapter.Register(new DeterministicWorkload<byte>(), SystemStage.Update);
+    private static DeterministicWorkload<byte> CpuWorkload(GaTickSnapshot snapshot) =>
+        GaCpuAdapter.Register(new DeterministicWorkload<byte>(), SystemStage.Update, snapshot);
+
+    private static void BindSnapshot(World world, GaTickSnapshot snapshot, long tick) =>
+        snapshot.Bind(tick, GaSnapshotPacket.Capture<GaSignal>(world, SnapshotLayout,
+            static (in GaSignal component, Span<uint> words) => words[0] = unchecked((uint)component.Value)));
 
     private static Entity[] Seed(World world, int count, bool fault)
     {
@@ -243,21 +373,67 @@ internal static class GaDemo
             }
             entities[row] = world.CreateEntity(position, velocity);
         }
+        world.Add(entities[0], new GaSignal { Value = -720 });
+        for (int row = 0; row < count; row++)
+        {
+            ref GaVelocity velocity = ref world.Get<GaVelocity>(entities[row]);
+            Entity target = (row % 4) switch
+            {
+                0 => entities[0],
+                1 => recycled,
+                2 => spare,
+                _ => entities[^1]
+            };
+            velocity.TargetId = target.Id;
+            velocity.TargetGeneration = target.Version;
+        }
         world.DestroyEntity(spare);
         return entities;
     }
 
     private static DeterministicTickStatus Advance(DeterministicRunner<byte> runner, int budget, Action? pending = null)
+        => Advance(runner, budget, out _, pending);
+
+    private static DeterministicTickStatus Advance(DeterministicRunner<byte> runner, int budget, out int pendingPolls,
+        Action? pending = null)
     {
         DeterministicTickStatus status;
         var wait = new SpinWait();
+        pendingPolls = 0;
         while ((status = runner.Advance(budget)) == DeterministicTickStatus.Pending)
         {
+            pendingPolls++;
             pending?.Invoke();
             wait.SpinOnce();
         }
         return status;
     }
+
+    private static double Microseconds(long ticks) => Stopwatch.GetElapsedTime(0, ticks).TotalMicroseconds;
+
+    private sealed class BatchPhases
+    {
+        internal long Pack { get; private set; }
+        internal long Device { get; private set; }
+        internal long Apply { get; private set; }
+        internal int Batches { get; private set; }
+        internal long Rows { get; private set; }
+
+        internal void Record(GaBatchTimings timing)
+        {
+            Batches++;
+            Rows += timing.Rows;
+            Pack += timing.PackTicks;
+            Device += timing.DeviceTicks;
+            Apply += timing.ApplyTicks;
+        }
+
+        internal void Reset() => (Pack, Device, Apply, Batches, Rows) = (0, 0, 0, 0, 0);
+    }
+
+    private readonly record struct TickSample(long Tick, double CpuTickMicroseconds, long CpuManagedBytes,
+        double SelectedTickMicroseconds, long SelectedManagedBytes, int Batches, long Rows, int PendingPolls,
+        double HostPackMicroseconds, double NativeTransferDispatchReadbackMicroseconds, double HostApplyMicroseconds);
 
     private static void VerifyLease(World world, Entity entity)
     {
@@ -298,13 +474,23 @@ internal static class GaDemo
             fields.Set(1, FieldValue.From(value.Delta.Raw));
             fields.Set(2, FieldValue.From(value.Step.Raw));
             fields.Set(3, FieldValue.From(value.Divide));
+            fields.Set(4, FieldValue.From(value.TargetId));
+            fields.Set(5, FieldValue.From(value.TargetGeneration));
         }
 
         public GaVelocity Read(ComponentReader fields) => new()
         {
             Delta = Fixed.FromRaw(fields.Get(1).AsInt64()),
             Step = Fixed.FromRaw(fields.Get(2).AsInt64()),
-            Divide = fields.Get(3).AsBoolean()
+            Divide = fields.Get(3).AsBoolean(),
+            TargetId = fields.Get(4).AsInt32(),
+            TargetGeneration = fields.Get(5).AsInt32()
         };
+    }
+
+    private sealed class SignalCodec : IComponentCodec<GaSignal>
+    {
+        public void Write(in GaSignal value, ComponentWriter fields) => fields.Set(1, FieldValue.From(value.Value));
+        public GaSignal Read(ComponentReader fields) => new() { Value = fields.Get(1).AsInt32() };
     }
 }

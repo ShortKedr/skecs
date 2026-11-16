@@ -30,11 +30,15 @@ public static class GaSlangEmitter
         private readonly List<GaSourceSpan> _sources = new();
         private int _indent;
         private int _temporary;
+        private int _eventCapacity;
 
         internal GaSlangModule Emit(GaProgram program, bool vulkan)
         {
+            _eventCapacity = program.EventCapacity;
             if (program.UsesFixed)
                 _code.Append(GaFixedSlangLibrary.Load()).Append('\n');
+            if (program.UsesSnapshot)
+                _code.Append(ReadSnapshotLibrary()).Append('\n');
             if (vulkan)
             {
                 Line("[[vk::binding(0, 0)]] StructuredBuffer<uint> gaInput;");
@@ -57,6 +61,10 @@ public static class GaSlangEmitter
             Line($"uint gaRow = id.x * {Word(stride)};");
             Line($"uint gaFault = id.x * {Word(GaSlangModule.FaultStride)};");
             Line("uint2 gaOrdinal = uint2(0u, 0u);");
+            if (program.UsesSnapshot)
+                SnapshotLayout(stride);
+            if (_eventCapacity != 0)
+                EventLayout(stride);
             for (int i = 0; i < program.Fields.Count; i++)
             {
                 int offset = program.Offsets[i];
@@ -81,8 +89,44 @@ public static class GaSlangEmitter
             }
             for (int i = 0; i < GaSlangModule.FaultStride; i++)
                 Line($"gaFaults[gaFault + {Word(i)}] = 0u;");
+            if (_eventCapacity != 0)
+                Line("gaOutput[gaEventRow] = gaEventCount;");
             Close();
             return new GaSlangModule(_code.ToString(), Array.AsReadOnly(_sources.ToArray()));
+        }
+
+        private static string ReadSnapshotLibrary()
+        {
+            using var stream = typeof(GaSlangEmitter).Assembly.GetManifestResourceStream("SKECS.GA.GaSnapshotV1.slang")
+                ?? throw new InvalidOperationException("Missing Slang implementation of the GA snapshot format.");
+            using var source = new StreamReader(stream);
+            return source.ReadToEnd().ReplaceLineEndings("\n");
+        }
+
+        private void SnapshotLayout(int stride)
+        {
+            Line($"uint gaSnapshotStart = 1u + gaInput[0] * {Word(stride)};");
+            Line("uint gaInputWords, gaInputStride;");
+            Line("gaInput.GetDimensions(gaInputWords, gaInputStride);");
+            Line("uint gaSnapshotWords = gaInputWords - min(gaSnapshotStart, gaInputWords);");
+            Line("GaSnapshotViewV1 gaSnapshotView;");
+            Line("bool gaSnapshotValid = gaTryOpenSnapshotV1(gaInput, gaSnapshotStart, gaSnapshotWords, 1u, gaSnapshotView);");
+        }
+
+        private void EventLayout(int stride)
+        {
+            Line($"uint gaEvents = gaInput[0] * {Word(stride)};");
+            Line("if (id.x == 0u)");
+            Open();
+            Line($"gaOutput[gaEvents] = {Word(GaEventPacket.Version)};");
+            Line("gaOutput[gaEvents + 1u] = gaInput[0];");
+            Line($"gaOutput[gaEvents + 2u] = {Word(_eventCapacity)};");
+            Line("gaOutput[gaEvents + 3u] = 1u;");
+            Close();
+            Line($"uint gaEventRow = gaEvents + {Word(GaEventPacket.HeaderWords)} + id.x * {Word(checked(_eventCapacity + 1))};");
+            Line("uint gaEventCount = 0u;");
+            // Fault returns leave the row's event count zero.
+            Line("gaOutput[gaEventRow] = 0u;");
         }
 
         private void Statement(GaStatement statement)
@@ -95,6 +139,13 @@ public static class GaSlangEmitter
                     break;
                 case GaStore assignment:
                     Line($"{Slot(assignment.Slot)} = {Value(assignment.Value)};");
+                    break;
+                case GaEmit emission:
+                    if (_eventCapacity != 0)
+                    {
+                        Line($"gaOutput[gaEventRow + 1u + gaEventCount] = {Value(emission.Value)};");
+                        Line("++gaEventCount;");
+                    }
                     break;
                 case GaIf branch:
                     Line($"if ({Value(branch.Condition)} != 0u)");
@@ -134,6 +185,8 @@ public static class GaSlangEmitter
                     return Literal(constant.Type, constant.Bits);
                 case GaLoad load:
                     return Slot(load.Slot);
+                case GaSnapshotRead read:
+                    return SnapshotRead(read);
                 case GaCast cast:
                     string bits = Value(cast.Operand);
                     if (cast.Type == GaScalar.Fixed)
@@ -173,6 +226,21 @@ public static class GaSlangEmitter
                 default:
                     throw new InvalidOperationException("Unknown GA IR value.");
             }
+        }
+
+        private string SnapshotRead(GaSnapshotRead read)
+        {
+            string id = Temp(Value(read.EntityId));
+            string generation = Temp(Value(read.Generation));
+            string result = Temp(Value(read.Fallback));
+            Line("if (gaSnapshotValid)");
+            Open();
+            string offset = Name();
+            Line($"uint {offset};");
+            Line($"if (gaTryFindSnapshotV1(gaInput, gaSnapshotView, {id}, {generation}, {offset}))");
+            Line($"    {result} = gaInput[{offset}];");
+            Close();
+            return result;
         }
 
         private string Binary(GaBinary binary)

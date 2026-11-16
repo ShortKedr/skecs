@@ -1,10 +1,14 @@
 namespace SKECS.GA;
 
+internal sealed class GaEventCapacityException() : InvalidOperationException(
+    $"An invocation may emit more than {GaEventPacket.MaximumCapacityPerSource.ToString(System.Globalization.CultureInfo.InvariantCulture)} events.");
+
 internal static class GaVerifier
 {
-    internal static bool Verify(GaProgram program)
+    internal static (bool UsesFixed, bool UsesSnapshot, int EventCapacity) Verify(GaProgram program)
     {
         bool usesFixed = program.Fields.Any(field => field.Type == GaScalar.Fixed) || program.Locals.Contains(GaScalar.Fixed);
+        bool usesSnapshot = false;
         var components = new Dictionary<string, GaFieldAccess>();
         foreach (var component in program.Components)
             Require(!string.IsNullOrWhiteSpace(component.Id) && Enum.IsDefined(component.Access)
@@ -15,8 +19,10 @@ internal static class GaVerifier
                 && !string.IsNullOrWhiteSpace(field.Path) && fields.Add((field.Component, field.Path))
                 && Enum.IsDefined(field.Type));
         Require(program.Locals.All(Enum.IsDefined));
-        CheckStatement(program.Body, new HashSet<int>());
-        return usesFixed;
+        int eventCapacity = CheckStatement(program.Body, new HashSet<int>());
+        if (eventCapacity > GaEventPacket.MaximumCapacityPerSource)
+            throw new GaEventCapacityException();
+        return (usesFixed, usesSnapshot, eventCapacity);
 
         void CheckSlot(GaSlot slot)
         {
@@ -26,14 +32,15 @@ internal static class GaVerifier
                 Require((uint)slot.Index < program.Locals.Count && program.Locals[slot.Index] == slot.Type);
         }
 
-        void CheckStatement(GaStatement statement, HashSet<int> assigned)
+        int CheckStatement(GaStatement statement, HashSet<int> assigned)
         {
             switch (statement)
             {
                 case GaBlock block:
+                    int blockCapacity = 0;
                     foreach (var child in block.Statements)
-                        CheckStatement(child, assigned);
-                    break;
+                        blockCapacity = Bound((long)blockCapacity + CheckStatement(child, assigned));
+                    return blockCapacity;
                 case GaStore store:
                     CheckSlot(store.Slot);
                     CheckValue(store.Value, assigned);
@@ -42,29 +49,33 @@ internal static class GaVerifier
                         Require(program.Fields[store.Slot.Index].Access == GaFieldAccess.ReadWrite);
                     else
                         assigned.Add(store.Slot.Index);
-                    break;
+                    return 0;
+                case GaEmit emit:
+                    CheckValue(emit.Value, assigned);
+                    Require(emit.Value.Type == GaScalar.Int32);
+                    return 1;
                 case GaIf branch:
                     CheckValue(branch.Condition, assigned);
                     Require(branch.Condition.Type == GaScalar.Bool);
                     var thenAssigned = new HashSet<int>(assigned);
                     var elseAssigned = new HashSet<int>(assigned);
-                    CheckStatement(branch.Then, thenAssigned);
-                    if (branch.Else != null)
-                        CheckStatement(branch.Else, elseAssigned);
+                    int thenCapacity = CheckStatement(branch.Then, thenAssigned);
+                    int elseCapacity = branch.Else == null ? 0 : CheckStatement(branch.Else, elseAssigned);
                     thenAssigned.IntersectWith(elseAssigned);
                     assigned.UnionWith(thenAssigned);
-                    break;
+                    return Math.Max(thenCapacity, elseCapacity);
                 case GaLoop loop:
                     CheckValue(loop.Condition, assigned);
                     Require(loop.Condition.Type == GaScalar.Bool && loop.MaximumIterations >= 0);
                     var loopAssigned = new HashSet<int>(assigned);
-                    CheckStatement(loop.Body, loopAssigned);
-                    CheckStatement(loop.Increment, loopAssigned);
-                    break;
+                    int loopCapacity = CheckStatement(loop.Body, loopAssigned) + CheckStatement(loop.Increment, loopAssigned);
+                    return Bound((long)loopCapacity * loop.MaximumIterations);
                 default:
                     throw new InvalidDataException("Unknown GA IR statement.");
             }
         }
+
+        static int Bound(long capacity) => (int)Math.Min(capacity, GaEventPacket.MaximumCapacityPerSource + 1L);
 
         void CheckValue(GaValue value, HashSet<int> assigned)
         {
@@ -111,6 +122,14 @@ internal static class GaVerifier
                     CheckValue(selected.False, assigned);
                     Require(selected.Condition.Type == GaScalar.Bool &&
                         selected.True.Type == selected.Type && selected.False.Type == selected.Type);
+                    break;
+                case GaSnapshotRead lookup:
+                    usesSnapshot = true;
+                    CheckValue(lookup.EntityId, assigned);
+                    CheckValue(lookup.Generation, assigned);
+                    CheckValue(lookup.Fallback, assigned);
+                    Require(lookup.EntityId.Type == GaScalar.Int32 && lookup.Generation.Type == GaScalar.Int32 &&
+                        lookup.Fallback.Type == GaScalar.Int32);
                     break;
                 default:
                     throw new InvalidDataException("Unknown GA IR value.");

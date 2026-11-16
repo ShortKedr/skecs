@@ -10,7 +10,13 @@ namespace SKECS.GA;
 
 public sealed record GaContractIdentity(
     string SystemId, string SimulationContractId, string SourceDigest, string IrDigest,
-    string ComponentSchemaDigest, int NumericVersion, int SubsetVersion, int IrVersion);
+    string ComponentSchemaDigest, int NumericVersion, int SubsetVersion, int IrVersion)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int EventCapacity { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UsesSnapshot { get; init; }
+}
 
 public enum GaArtifactFormat { SpirV, Dxil, Dxbc, MetalLibrary, Wgsl }
 
@@ -81,6 +87,11 @@ public sealed record GaArtifactManifest(
             throw Invalid("Unsupported manifest schema version.");
         if (Contract is null || Contract.NumericVersion < 1 || Contract.SubsetVersion < 1 || Contract.IrVersion < 1)
             throw Invalid("Invalid contract versions.");
+        if (Contract.EventCapacity is < 0 or > GaEventPacket.MaximumCapacityPerSource ||
+            Contract.EventCapacity != 0 && (Contract.SubsetVersion < 2 || Contract.IrVersion < 2))
+            throw Invalid("Invalid contract event capacity.");
+        if (Contract.UsesSnapshot && (Contract.SubsetVersion < 3 || Contract.IrVersion < 3))
+            throw Invalid("Invalid contract version for scalar snapshot lookup.");
         ValidateText(Contract.SystemId, "system ID");
         ValidateText(Contract.SimulationContractId, "simulation contract ID");
         ValidateDigest(Contract.SourceDigest, "source");

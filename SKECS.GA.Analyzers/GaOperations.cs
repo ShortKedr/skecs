@@ -104,6 +104,35 @@ public static partial class GaSemanticAnalysis
         {
             var method = invocation.TargetMethod;
             var location = invocation.Syntax.GetLocation();
+            if (Equal(method.ContainingType, context) && method.Name == "Emit" && IsRuntimeSystemContext())
+            {
+                if (method is not { IsStatic: false, Arity: 0, ReturnsVoid: true } ||
+                    method.Parameters.Length != 1 ||
+                    method.Parameters[0].RefKind != RefKind.None ||
+                    method.Parameters[0].Type.SpecialType != SpecialType.System_Int32 ||
+                    invocation.Instance is not IParameterReferenceOperation receiver ||
+                    receiver.Parameter.RefKind != RefKind.In ||
+                    !Equal(receiver.Parameter.ContainingSymbol, entry))
+                    Report(Stream, location, "Call Emit(int) directly on the entry point's in SystemContext parameter.");
+                return;
+            }
+            if (Equal(method.ContainingType, context) && method.Name == "ReadSnapshotInt32" && IsRuntimeSystemContext())
+            {
+                if (method is not { IsStatic: false, Arity: 0 } ||
+                    method.ReturnType.SpecialType != SpecialType.System_Int32 ||
+                    method.Parameters.Length != 3 ||
+                    method.Parameters.Any(parameter => parameter.RefKind != RefKind.None ||
+                        parameter.Type.SpecialType != SpecialType.System_Int32) ||
+                    invocation.Arguments.Length != 3 ||
+                    invocation.Arguments[0].Parameter?.Ordinal != 0 ||
+                    invocation.Arguments[1].Parameter?.Ordinal != 1 ||
+                    invocation.Arguments[2].Parameter?.Ordinal != 2 ||
+                    invocation.Instance is not IParameterReferenceOperation receiver ||
+                    receiver.Parameter.RefKind != RefKind.In ||
+                    !Equal(receiver.Parameter.ContainingSymbol, entry))
+                    Report(Unknown, location, "Call ReadSnapshotInt32 directly on the entry point's in SystemContext parameter, with arguments in declaration order.");
+                return;
+            }
             if (AnalyzeIntrinsic(method, location))
             {
                 CheckBorrowedArguments(invocation.Arguments, null, location);
@@ -124,6 +153,11 @@ public static partial class GaSemanticAnalysis
             CheckBorrowedArguments(invocation.Arguments, invocation.Instance, location);
             VisitMethod(method, location);
         }
+
+        private bool IsRuntimeSystemContext() =>
+            context is { IsRefLikeType: true } && context.ContainingAssembly.Identity.Name == "SKECS.GA" &&
+            context.DeclaringSyntaxReferences.Length == 0 &&
+            Equal(context.ContainingAssembly, compilation.GetTypeByMetadataName("SKECS.GA.SecsSystemAttribute")?.ContainingAssembly);
 
         private void AnalyzeProperty(IPropertyReferenceOperation property)
         {

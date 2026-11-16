@@ -61,7 +61,11 @@ internal static class GaArtifactPackager
         var manifest = new GaArtifactManifest(GaArtifactManifest.CurrentSchemaVersion,
             new GaContractIdentity(program.SystemId, simulationContractId, program.SourceDigest,
                 GaIrDigest.Program(program), GaIrDigest.Schema(program), GaProgram.NumericVersion,
-                GaProgram.SubsetVersion, GaProgram.IrVersion),
+                GaProgram.SubsetVersion, GaProgram.IrVersion)
+            {
+                EventCapacity = program.EventCapacity,
+                UsesSnapshot = program.UsesSnapshot
+            },
             toolchain, GaSlangModule.EntryPoint, bindings, usage,
             new GaKernelRequirements(program.UsesFixed ? GaComputeProfiles.WideFixedEmulated : GaComputeProfiles.Portable32,
                 [], GaSlangModule.ThreadsPerGroup, 1, 1, 0, 0),

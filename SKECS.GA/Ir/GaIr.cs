@@ -28,11 +28,14 @@ internal sealed record GaBinary(GaScalar Type, GaBinaryOperator Operator, GaValu
     : GaValue(Type, Source);
 internal sealed record GaSelect(GaScalar Type, GaValue Condition, GaValue True, GaValue False, GaSourceSpan Source)
     : GaValue(Type, Source);
+internal sealed record GaSnapshotRead(GaValue EntityId, GaValue Generation, GaValue Fallback, GaSourceSpan Source)
+    : GaValue(GaScalar.Int32, Source);
 
 internal readonly record struct GaSlot(bool IsField, int Index, GaScalar Type);
 internal abstract record GaStatement;
 internal sealed record GaBlock(IReadOnlyList<GaStatement> Statements) : GaStatement;
 internal sealed record GaStore(GaSlot Slot, GaValue Value) : GaStatement;
+internal sealed record GaEmit(GaValue Value) : GaStatement;
 internal sealed record GaIf(GaValue Condition, GaStatement Then, GaStatement? Else) : GaStatement;
 internal sealed record GaLoop(GaValue Condition, GaStatement Body, GaStatement Increment, int MaximumIterations)
     : GaStatement;
@@ -54,19 +57,23 @@ public sealed class GaProgram
             Offsets[i] = WordCount;
             WordCount = checked(WordCount + (fields[i].Type == GaScalar.Fixed ? 2 : 1));
         }
-        UsesFixed = GaVerifier.Verify(this);
+        (UsesFixed, UsesSnapshot, EventCapacity) = GaVerifier.Verify(this);
     }
 
     // Initial word-based portable profile. Later profiles must explicitly extend this identity.
-    public const int SubsetVersion = 1;
+    public const int SubsetVersion = 3;
     public const int NumericVersion = SKECS.Numerics.Fixed.NumericContractVersion;
-    public const int IrVersion = 1;
+    public const int IrVersion = 3;
     public string SystemId { get; }
     public string SourceDigest { get; }
     public IReadOnlyList<GaComponent> Components { get; }
     public IReadOnlyList<GaField> Fields { get; }
     public int WordCount { get; }
     public bool UsesFixed { get; }
+    /// <summary>Whether the program requires an immutable Int32 snapshot binding.</summary>
+    public bool UsesSnapshot { get; }
+    /// <summary>The verified maximum number of Int32 events emitted by one invocation.</summary>
+    public int EventCapacity { get; }
     internal int[] Offsets { get; }
     internal IReadOnlyList<GaScalar> Locals { get; }
     internal GaBlock Body { get; }

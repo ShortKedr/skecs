@@ -14,12 +14,17 @@ param(
     [int]$JobBudget = 1,
     [string]$DotNetSdkVersion = '8.0.428',
     [string[]]$PackageSource,
-    [switch]$VulkanValidation
+    [switch]$VulkanValidation,
+    [switch]$Measure,
+    [ValidateRange(0, [int]::MaxValue)]
+    [int]$WarmupTicks = 8
 )
 
 $ErrorActionPreference = 'Stop'
 $Policy = $Policy.ToLowerInvariant()
 $Backend = $Backend.ToLowerInvariant()
+$configuration = if ($Measure) { 'Release' } else { 'Debug' }
+$buildConfiguration = $configuration.ToLowerInvariant()
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $dotnet = (Get-Command dotnet -CommandType Application | Select-Object -First 1).Source
 $dotnetRoot = Split-Path $dotnet
@@ -68,7 +73,7 @@ try {
         $slang = Join-Path $native 'ga-slang-probe.exe'
     }
     $buildFlags = @(
-        '--artifacts-path', $build, '-m:1', '-nr:false', '-p:UseSharedCompilation=false', '-p:NuGetAudit=false',
+        '--artifacts-path', $build, '-c', $configuration, '-m:1', '-nr:false', '-p:UseSharedCompilation=false', '-p:NuGetAudit=false',
         "-p:RestorePackagesPath=$(Join-Path $ga 'packages')"
     )
     if (-not $PackageSource) {
@@ -81,7 +86,7 @@ try {
     foreach ($source in $PackageSource) { $buildFlags += @('--source', $source) }
     & $dotnet $sdk build (Join-Path $PSScriptRoot 'build/Ga.Build.csproj') @buildFlags
     if ($LASTEXITCODE -ne 0) { throw 'GA Demo compiler build failed.' }
-    $cli = Join-Path $build 'bin/Ga.Build/debug'
+    $cli = Join-Path $build "bin/Ga.Build/$buildConfiguration"
     $request = [ordered]@{
         sourceRoot = Join-Path $workspace 'SKECS.Demo'
         sources = @('GaMovement.cs')
@@ -106,9 +111,11 @@ try {
     $bundle = ($json | ConvertFrom-Json).outputDirectory
     & $dotnet $sdk build (Join-Path $workspace 'SKECS.Demo/SKECS.Demo.csproj') @buildFlags "-p:GaDemoBundleDirectory=$bundle"
     if ($LASTEXITCODE -ne 0) { throw 'GA Demo build failed.' }
-    $demo = Join-Path $build 'bin/SKECS.Demo/debug/SKECS.Demo.dll'
+    $demo = Join-Path $build "bin/SKECS.Demo/$buildConfiguration/SKECS.Demo.dll"
+    $mode = @('ga')
+    if ($Measure) { $mode += @('--measure', $WarmupTicks) }
     foreach ($index in $DeviceIndex) {
-        & $dotnet $demo ga $Policy $bundle $nativeLibrary $index $Entities $Ticks $ChunkCapacity $JobBudget $Backend
+        & $dotnet $demo @mode $Policy $bundle $nativeLibrary $index $Entities $Ticks $ChunkCapacity $JobBudget $Backend
         if ($LASTEXITCODE -ne 0) { throw "GA Demo failed on device index $index." }
     }
 }

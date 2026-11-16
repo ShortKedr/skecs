@@ -106,7 +106,13 @@ public static partial class GaSemanticAnalysis
             foreach (var parameter in entry.Parameters)
             {
                 var type = parameter.Type;
-                if (Equal(type, context) || Equal(type, entity))
+                if (Equal(type, context))
+                {
+                    if (parameter.RefKind != RefKind.In || !components.Add(type))
+                        Report(Write, Source(parameter), "Declare a single in SystemContext parameter.");
+                    continue;
+                }
+                if (Equal(type, entity))
                 {
                     if (parameter.RefKind is not (RefKind.None or RefKind.In) || !components.Add(type))
                         Report(Write, Source(parameter), $"Pass '{type.Name}' once as a read-only input.");

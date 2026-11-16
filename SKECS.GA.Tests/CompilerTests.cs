@@ -143,6 +143,55 @@ public sealed class CompilerTests
         }
     }
 
+    [Fact]
+    public void IntEventsAreBoundedAndPublishOnlyForSuccessfulRows()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                context.Emit(p.Point.X);
+                if (v.Flag)
+                    for (int i = 0; i < 3; ++i)
+                        context.Emit(i);
+                p.Point.X /= v.Y;
+                context.Emit(p.Point.X);
+            }
+            """);
+        Assert.Equal(5, program.EventCapacity);
+
+        uint[] row = [12, 1, 3];
+        int[] events = new int[program.EventCapacity];
+        Assert.Null(GaInterpreter.Execute(program, row, events, out int count));
+        Assert.Equal(5, count);
+        Assert.Equal(new[] { 12, 0, 1, 2, 4 }, events);
+        Assert.Equal(4u, row[0]);
+
+        row = [12, 1, 0];
+        Array.Fill(events, -1);
+        Assert.Equal(GaFaultKind.DivideByZero, GaInterpreter.Execute(program, row, events, out count)!.Value.Kind);
+        Assert.Equal(0, count);
+        Assert.Equal(12u, row[0]);
+        Assert.All(events, value => Assert.Equal(-1, value));
+    }
+
+    [Fact]
+    public void EventCapacityOverflowProducesACompilerDiagnostic()
+    {
+        var result = Analyze("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 65536; ++i)
+                {
+                    context.Emit(i);
+                    context.Emit(v.X);
+                }
+                p.Point.X = v.X;
+            }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+    }
+
     private static GaProgram Compile(string body)
     {
         var result = Analyze(body);

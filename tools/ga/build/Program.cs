@@ -135,18 +135,30 @@ static async Task<GaBuildOutput> Publish(GaBuildRequest request, string requestD
         string destination = Path.Combine(outputRoot, request.ArtifactName + "-" + contentId);
         await File.WriteAllBytesAsync(Path.Combine(staging, reportName), reportBytes);
 
-        try
+        for (int attempt = 0; ; attempt++)
         {
-            Directory.Move(staging, destination);
-        }
-        catch (IOException) when (Directory.Exists(destination))
-        {
-            var reportFile = new BuildFile(reportName, contentId);
-            var existing = Directory.EnumerateFileSystemEntries(destination).ToArray();
-            if (existing.Length != files.Length + 1 || !files.Append(reportFile).All(file =>
-                    File.Exists(Path.Combine(destination, file.Path)) &&
-                    GaArtifactManifest.ComputeDigest(File.ReadAllBytes(Path.Combine(destination, file.Path))) == file.Digest))
-                throw new IOException($"Existing GA output directory '{destination}' failed its content checks.");
+            try
+            {
+                Directory.Move(staging, destination);
+                break;
+            }
+            catch (Exception failure) when (Directory.Exists(destination) &&
+                failure is IOException or UnauthorizedAccessException)
+            {
+                var reportFile = new BuildFile(reportName, contentId);
+                var existing = Directory.EnumerateFileSystemEntries(destination).ToArray();
+                if (existing.Length != files.Length + 1 || !files.Append(reportFile).All(file =>
+                        File.Exists(Path.Combine(destination, file.Path)) &&
+                        GaArtifactManifest.ComputeDigest(File.ReadAllBytes(Path.Combine(destination, file.Path))) == file.Digest))
+                    throw new IOException($"Existing GA output directory '{destination}' failed its content checks.", failure);
+                break;
+            }
+            catch (Exception failure) when (OperatingSystem.IsWindows() && attempt < 4 && Directory.Exists(staging) &&
+                (failure is UnauthorizedAccessException || failure is IOException &&
+                    (failure.HResult & 0xffff) is 32 or 33))
+            {
+                await Task.Delay(25 * (attempt + 1));
+            }
         }
         return new GaBuildOutput(destination, contentId, report);
     }

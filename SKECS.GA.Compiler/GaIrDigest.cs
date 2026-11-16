@@ -28,6 +28,8 @@ internal static class GaIrDigest
 
     private static void WriteSchema(BinaryWriter writer, GaProgram program)
     {
+        writer.Write(program.UsesSnapshot);
+        writer.Write(program.EventCapacity);
         writer.Write(program.Components.Count);
         foreach (var component in program.Components)
         {
@@ -75,6 +77,10 @@ internal static class GaIrDigest
                 WriteStatement(writer, loop.Body);
                 WriteStatement(writer, loop.Increment);
                 break;
+            case GaEmit emit:
+                writer.Write((byte)4);
+                WriteValue(writer, emit.Value);
+                break;
             default:
                 throw new InvalidOperationException("Unknown GA IR statement.");
         }
@@ -116,6 +122,12 @@ internal static class GaIrDigest
                 WriteValue(writer, select.Condition);
                 WriteValue(writer, select.True);
                 WriteValue(writer, select.False);
+                break;
+            case GaSnapshotRead lookup:
+                writer.Write((byte)6);
+                WriteValue(writer, lookup.EntityId);
+                WriteValue(writer, lookup.Generation);
+                WriteValue(writer, lookup.Fallback);
                 break;
             default:
                 throw new InvalidOperationException("Unknown GA IR value.");

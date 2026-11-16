@@ -34,7 +34,7 @@ public static class GaCpuAdapterEmitter
         internal string Emit(string className)
         {
             // Emit the row body first to find the exact field writes and fault paths it uses.
-            _indent = 5;
+            _indent = program.UsesSnapshot ? 4 : 5;
             Statement(program.Body);
             var body = _code.ToString();
             _code.Clear();
@@ -55,7 +55,15 @@ public static class GaCpuAdapterEmitter
         private void Register()
         {
             Line("public static global::SKECS.DeterministicWorkload<TInput> Register<TInput>(");
-            Line("    global::SKECS.DeterministicWorkload<TInput> workload, global::SKECS.SystemStage stage)");
+            if (program.UsesSnapshot)
+            {
+                Line("    global::SKECS.DeterministicWorkload<TInput> workload, global::SKECS.SystemStage stage,");
+                Line("    global::SKECS.GA.GaTickSnapshot snapshot)");
+            }
+            else
+            {
+                Line("    global::SKECS.DeterministicWorkload<TInput> workload, global::SKECS.SystemStage stage)");
+            }
             Line("    where TInput : unmanaged");
             Open();
             Line("global::System.ArgumentNullException.ThrowIfNull(workload);");
@@ -65,22 +73,41 @@ public static class GaCpuAdapterEmitter
                 var access = component.Access == GaFieldAccess.Read ? "Read" : "ReadWrite";
                 Line($"query.With<{component.Id}>().{access}<{component.Id}>();");
             }
-            Line("return workload.AddSystem(stage, query, new __GaProcessor<TInput>());");
+            if (program.UsesSnapshot)
+                Line("return workload.AddBatchSystem(stage, query, new global::SKECS.GA.GaSnapshotCpuBatch<TInput>(snapshot, __GaExecute<TInput>));");
+            else
+                Line("return workload.AddSystem(stage, query, new __GaProcessor<TInput>());");
             Close();
             Line();
         }
 
         private void Processor(string body)
         {
-            Line("private readonly struct __GaProcessor<TInput> : global::SKECS.IDeterministicJobProcessor<TInput>");
-            Line("    where TInput : unmanaged");
-            Open();
-            Line("public void Execute(global::SKECS.DeterministicJob<TInput> job)");
+            if (program.UsesSnapshot)
+            {
+                Line("private static void __GaExecute<TInput>(global::SKECS.DeterministicJob<TInput> job,");
+                Line("    global::SKECS.GA.GaSnapshotPacket snapshot) where TInput : unmanaged");
+            }
+            else
+            {
+                Line("private readonly struct __GaProcessor<TInput> : global::SKECS.IDeterministicJobProcessor<TInput>");
+                Line("    where TInput : unmanaged");
+                Open();
+                Line("public void Execute(global::SKECS.DeterministicJob<TInput> job)");
+            }
             Open();
             Line("unchecked");
             Open();
+            if (program.EventCapacity != 0)
+            {
+                string capacity = Number(program.EventCapacity);
+                string allocation = program.EventCapacity <= 128 ? "stackalloc" : "new";
+                Line($"global::System.Span<int> stagedEvents = {allocation} int[{capacity}];");
+            }
             Line("for (int row = 0; row < job.Count; row++)");
             Open();
+            if (program.EventCapacity != 0)
+                Line("int eventCount = 0;");
             foreach (var index in program.Fields.Select(field => _components[field.Component]).Distinct().Order())
                 Line($"var component{Number(index)} = job.Read<{program.Components[index].Id}>(row);");
             for (int index = 0; index < program.Locals.Count; index++)
@@ -90,10 +117,17 @@ public static class GaCpuAdapterEmitter
             _code.Append(body);
             foreach (int index in _writable.Order())
                 Line($"job.Write(row, component{Number(index)});");
+            if (program.EventCapacity != 0)
+            {
+                Line("var eventSource = job.ForEntity(row);");
+                Line("for (int i = 0; i < eventCount; i++)");
+                Line("    eventSource.Emit(stagedEvents[i]);");
+            }
             Close();
             Close();
             Close();
-            Close();
+            if (!program.UsesSnapshot)
+                Close();
         }
 
         private void Statement(GaStatement statement)
@@ -114,6 +148,13 @@ public static class GaCpuAdapterEmitter
                             expression = $"({field.ClrEnumType})({expression})";
                     }
                     Line($"{Slot(store.Slot)} = {expression};");
+                    break;
+                case GaEmit emission:
+                    if (program.EventCapacity != 0)
+                    {
+                        Line($"stagedEvents[eventCount] = {Expression(emission.Value)};");
+                        Line("eventCount++;");
+                    }
                     break;
                 case GaIf branch:
                     Line($"if ({Expression(branch.Condition)})");
@@ -147,6 +188,8 @@ public static class GaCpuAdapterEmitter
         {
             GaConstant constant => Constant(constant),
             GaLoad load => Load(load.Slot),
+            GaSnapshotRead read =>
+                $"snapshot.ReadInt32({Expression(read.EntityId)}, {Expression(read.Generation)}, {Expression(read.Fallback)})",
             GaCast cast => Convert(cast),
             GaUnary unary => Unary(unary),
             GaBinary binary => Binary(binary),

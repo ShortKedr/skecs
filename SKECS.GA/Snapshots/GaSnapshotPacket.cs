@@ -175,6 +175,19 @@ public sealed class GaSnapshotPacket
         return false;
     }
 
+    public int ReadInt32(int id, int generation, int fallback)
+    {
+        RequireInt32Layout();
+        return TryGet(new GaSnapshotKey(id, generation), out var values)
+            ? unchecked((int)values[0]) : fallback;
+    }
+
+    internal void RequireInt32Layout()
+    {
+        if (Layout.Fields is not [GaScalar.Int32])
+            throw new ArgumentException("The scalar lookup requires exactly one Int32 snapshot field.");
+    }
+
     public void WriteLittleEndian(Span<byte> destination)
     {
         if (destination.Length != (long)_words.Length * sizeof(uint))
