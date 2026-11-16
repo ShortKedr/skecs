@@ -56,7 +56,7 @@ bool testDevice(uint32_t index, const std::vector<uint32_t>& spirv, bool softwar
     context.reset();
 
     constexpr uint32_t sentinel = 0xBADC0DEu;
-    for (uint32_t rowCount : {1u, 5u, 65u})
+    for (uint32_t rowCount : {1u, 5u, 65u, 1u, 65u, 65u, 129u, 5u})
     {
         std::vector<uint32_t> input{rowCount};
         std::vector<uint32_t> quotient(rowCount + 1, sentinel), remainder(rowCount + 1, sentinel);

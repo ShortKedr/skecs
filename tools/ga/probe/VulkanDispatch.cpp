@@ -35,10 +35,25 @@ uint32_t findComputeQueue(VkPhysicalDevice physicalDevice)
 
 struct Allocation
 {
+    explicit Allocation(VkDevice device) : device(device) {}
+    Allocation(const Allocation&) = delete;
+    Allocation& operator=(const Allocation&) = delete;
+
+    VkDevice device;
     VkBuffer buffer{};
     VkDeviceMemory memory{};
     void* mapped{};
+    VkDeviceSize capacity{};
+    VkDeviceSize descriptorRange{};
     bool coherent{};
+
+    ~Allocation()
+    {
+        if (mapped)
+            vkUnmapMemory(device, memory);
+        vkDestroyBuffer(device, buffer, nullptr);
+        vkFreeMemory(device, memory, nullptr);
+    }
 };
 
 struct PipelineResources
@@ -65,38 +80,39 @@ struct PipelineResources
 
 struct DispatchResources
 {
+    explicit DispatchResources(VkDevice device) : device(device) {}
+
     VkDevice device;
     VkDescriptorPool descriptorPool{};
     VkCommandPool commandPool{};
+    VkCommandBuffer command{};
     VkFence fence{};
-    std::vector<Allocation> buffers;
+    std::vector<VkDescriptorSet> sets;
+    std::vector<std::unique_ptr<Allocation>> buffers;
+    bool pending{};
 
     ~DispatchResources()
     {
+        if (pending)
+            vkDeviceWaitIdle(device);
         vkDestroyFence(device, fence, nullptr);
         vkDestroyCommandPool(device, commandPool, nullptr);
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        for (const auto& buffer : buffers)
-        {
-            if (buffer.mapped)
-                vkUnmapMemory(device, buffer.memory);
-            vkDestroyBuffer(device, buffer.buffer, nullptr);
-            vkFreeMemory(device, buffer.memory, nullptr);
-        }
     }
 };
 
-void allocateBuffer(
-    VkPhysicalDevice physicalDevice, VkDevice device, const BufferBinding& binding, Allocation& allocation)
+std::unique_ptr<Allocation> allocateBuffer(VkPhysicalDevice physicalDevice, VkDevice device,
+    VkDescriptorType type, VkDeviceSize size)
 {
+    auto allocation = std::make_unique<Allocation>(device);
     VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bufferInfo.size = binding.words.size() * sizeof(uint32_t);
-    bufferInfo.usage = binding.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+    bufferInfo.size = size;
+    bufferInfo.usage = type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
         ? VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT : VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-    check(vkCreateBuffer(device, &bufferInfo, nullptr, &allocation.buffer), "vkCreateBuffer");
+    check(vkCreateBuffer(device, &bufferInfo, nullptr, &allocation->buffer), "vkCreateBuffer");
 
     VkMemoryRequirements requirements;
-    vkGetBufferMemoryRequirements(device, allocation.buffer, &requirements);
+    vkGetBufferMemoryRequirements(device, allocation->buffer, &requirements);
     VkPhysicalDeviceMemoryProperties properties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &properties);
     uint32_t memoryType = properties.memoryTypeCount;
@@ -106,8 +122,8 @@ void allocateBuffer(
         if (!(requirements.memoryTypeBits & (1u << index)) || !(flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))
             continue;
         memoryType = index;
-        allocation.coherent = (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
-        if (allocation.coherent)
+        allocation->coherent = (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0;
+        if (allocation->coherent)
             break;
     }
     if (memoryType == properties.memoryTypeCount)
@@ -116,15 +132,11 @@ void allocateBuffer(
     VkMemoryAllocateInfo memoryInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     memoryInfo.allocationSize = requirements.size;
     memoryInfo.memoryTypeIndex = memoryType;
-    check(vkAllocateMemory(device, &memoryInfo, nullptr, &allocation.memory), "vkAllocateMemory");
-    check(vkBindBufferMemory(device, allocation.buffer, allocation.memory, 0), "vkBindBufferMemory");
-    check(vkMapMemory(device, allocation.memory, 0, VK_WHOLE_SIZE, 0, &allocation.mapped), "vkMapMemory");
-    std::memcpy(allocation.mapped, binding.words.data(), static_cast<size_t>(bufferInfo.size));
-    if (!allocation.coherent)
-    {
-        VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, allocation.memory, 0, VK_WHOLE_SIZE};
-        check(vkFlushMappedMemoryRanges(device, 1, &range), "vkFlushMappedMemoryRanges");
-    }
+    check(vkAllocateMemory(device, &memoryInfo, nullptr, &allocation->memory), "vkAllocateMemory");
+    check(vkBindBufferMemory(device, allocation->buffer, allocation->memory, 0), "vkBindBufferMemory");
+    check(vkMapMemory(device, allocation->memory, 0, VK_WHOLE_SIZE, 0, &allocation->mapped), "vkMapMemory");
+    allocation->capacity = size;
+    return allocation;
 }
 
 using SetBindings = std::vector<std::map<uint32_t, VkDescriptorSetLayoutBinding>>;
@@ -213,6 +225,7 @@ struct VulkanKernel::Impl
     uint32_t queueFamily{};
     uint32_t pushConstantBytes{};
     PipelineResources resources;
+    std::unique_ptr<DispatchResources> dispatch;
     std::vector<VkDescriptorPoolSize> poolSizes;
     std::vector<std::array<uint32_t, 5>> signature;
     std::mutex executeLock;
@@ -323,53 +336,82 @@ void VulkanKernel::execute(uint32_t groups, std::span<const uint32_t> pushConsta
 
     std::lock_guard guard(impl->executeLock);
     const auto& pipeline = impl->resources;
-    DispatchResources resources{pipeline.device};
-    std::vector<VkDescriptorSet> sets(pipeline.setLayouts.size());
-    if (!sets.empty())
+    if (!impl->dispatch)
     {
-        VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-        poolInfo.maxSets = static_cast<uint32_t>(sets.size());
-        poolInfo.poolSizeCount = static_cast<uint32_t>(impl->poolSizes.size());
-        poolInfo.pPoolSizes = impl->poolSizes.data();
-        check(vkCreateDescriptorPool(resources.device, &poolInfo, nullptr, &resources.descriptorPool), "vkCreateDescriptorPool");
-        VkDescriptorSetAllocateInfo setsInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-        setsInfo.descriptorPool = resources.descriptorPool;
-        setsInfo.descriptorSetCount = static_cast<uint32_t>(sets.size());
-        setsInfo.pSetLayouts = pipeline.setLayouts.data();
-        check(vkAllocateDescriptorSets(resources.device, &setsInfo, sets.data()), "vkAllocateDescriptorSets");
+        auto dispatch = std::make_unique<DispatchResources>(pipeline.device);
+        dispatch->sets.resize(pipeline.setLayouts.size());
+        if (!dispatch->sets.empty())
+        {
+            VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+            poolInfo.maxSets = static_cast<uint32_t>(dispatch->sets.size());
+            poolInfo.poolSizeCount = static_cast<uint32_t>(impl->poolSizes.size());
+            poolInfo.pPoolSizes = impl->poolSizes.data();
+            check(vkCreateDescriptorPool(pipeline.device, &poolInfo, nullptr, &dispatch->descriptorPool), "vkCreateDescriptorPool");
+            VkDescriptorSetAllocateInfo setsInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            setsInfo.descriptorPool = dispatch->descriptorPool;
+            setsInfo.descriptorSetCount = static_cast<uint32_t>(dispatch->sets.size());
+            setsInfo.pSetLayouts = pipeline.setLayouts.data();
+            check(vkAllocateDescriptorSets(pipeline.device, &setsInfo, dispatch->sets.data()), "vkAllocateDescriptorSets");
+        }
+        VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        poolInfo.queueFamilyIndex = impl->queueFamily;
+        check(vkCreateCommandPool(pipeline.device, &poolInfo, nullptr, &dispatch->commandPool), "vkCreateCommandPool");
+        VkCommandBufferAllocateInfo commandInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        commandInfo.commandPool = dispatch->commandPool;
+        commandInfo.commandBufferCount = 1;
+        check(vkAllocateCommandBuffers(pipeline.device, &commandInfo, &dispatch->command), "vkAllocateCommandBuffers");
+        VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        check(vkCreateFence(pipeline.device, &fenceInfo, nullptr, &dispatch->fence), "vkCreateFence");
+        dispatch->buffers.resize(bindings.size());
+        impl->dispatch = std::move(dispatch);
     }
-    resources.buffers.resize(bindings.size());
+
+    auto& resources = *impl->dispatch;
+    if (resources.pending)
+    {
+        const VkResult idle = vkQueueWaitIdle(pipeline.queue);
+        resources.pending = idle != VK_SUCCESS && idle != VK_ERROR_DEVICE_LOST;
+        check(idle, "vkQueueWaitIdle");
+    }
+    // Release the recorded descriptor references before updating or replacing any buffers.
+    check(vkResetCommandPool(pipeline.device, resources.commandPool, 0), "vkResetCommandPool");
     for (size_t index = 0; index < bindings.size(); ++index)
     {
         const auto& binding = bindings[index];
         auto& allocation = resources.buffers[index];
-        allocateBuffer(impl->physicalDevice, resources.device, binding, allocation);
-        VkDescriptorBufferInfo bufferInfo{allocation.buffer, 0, binding.words.size() * sizeof(uint32_t)};
-        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        write.dstSet = sets[binding.set];
-        write.dstBinding = binding.binding;
-        write.dstArrayElement = binding.arrayElement;
-        write.descriptorCount = 1;
-        write.descriptorType = binding.type;
-        write.pBufferInfo = &bufferInfo;
-        vkUpdateDescriptorSets(resources.device, 1, &write, 0, nullptr);
+        const size_t bytes = binding.words.size() * sizeof(uint32_t);
+        if (!allocation || allocation->capacity < bytes)
+            allocation = allocateBuffer(impl->physicalDevice, pipeline.device, binding.type, bytes);
+        std::memcpy(allocation->mapped, binding.words.data(), bytes);
+        if (!allocation->coherent)
+        {
+            VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, allocation->memory, 0, VK_WHOLE_SIZE};
+            check(vkFlushMappedMemoryRanges(pipeline.device, 1, &range), "vkFlushMappedMemoryRanges");
+        }
+        if (allocation->descriptorRange != bytes)
+        {
+            // OpArrayLength must see the current logical length even after a larger dispatch.
+            VkDescriptorBufferInfo bufferInfo{allocation->buffer, 0, bytes};
+            VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            write.dstSet = resources.sets[binding.set];
+            write.dstBinding = binding.binding;
+            write.dstArrayElement = binding.arrayElement;
+            write.descriptorCount = 1;
+            write.descriptorType = binding.type;
+            write.pBufferInfo = &bufferInfo;
+            vkUpdateDescriptorSets(pipeline.device, 1, &write, 0, nullptr);
+            allocation->descriptorRange = bytes;
+        }
     }
 
-    VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    poolInfo.queueFamilyIndex = impl->queueFamily;
-    check(vkCreateCommandPool(resources.device, &poolInfo, nullptr, &resources.commandPool), "vkCreateCommandPool");
-    VkCommandBufferAllocateInfo commandInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    commandInfo.commandPool = resources.commandPool;
-    commandInfo.commandBufferCount = 1;
-    VkCommandBuffer command;
-    check(vkAllocateCommandBuffers(resources.device, &commandInfo, &command), "vkAllocateCommandBuffers");
+    const VkCommandBuffer command = resources.command;
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     check(vkBeginCommandBuffer(command, &beginInfo), "vkBeginCommandBuffer");
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline);
-    if (!sets.empty())
+    if (!resources.sets.empty())
         vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipelineLayout, 0,
-            static_cast<uint32_t>(sets.size()), sets.data(), 0, nullptr);
+            static_cast<uint32_t>(resources.sets.size()), resources.sets.data(), 0, nullptr);
     if (!pushConstants.empty())
         vkCmdPushConstants(command, pipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, impl->pushConstantBytes, pushConstants.data());
     vkCmdDispatch(command, groups, 1, 1);
@@ -378,21 +420,20 @@ void VulkanKernel::execute(uint32_t groups, std::span<const uint32_t> pushConsta
         0, 1, &readback, 0, nullptr, 0, nullptr);
     check(vkEndCommandBuffer(command), "vkEndCommandBuffer");
 
-    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    check(vkCreateFence(resources.device, &fenceInfo, nullptr, &resources.fence), "vkCreateFence");
+    check(vkResetFences(pipeline.device, 1, &resources.fence), "vkResetFences");
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &command;
     check(vkQueueSubmit(pipeline.queue, 1, &submit, resources.fence), "vkQueueSubmit");
-    const VkResult wait = vkWaitForFences(resources.device, 1, &resources.fence, VK_TRUE, UINT64_MAX);
-    if (wait != VK_SUCCESS && wait != VK_ERROR_DEVICE_LOST)
-        vkQueueWaitIdle(pipeline.queue);
+    resources.pending = true;
+    const VkResult wait = vkWaitForFences(pipeline.device, 1, &resources.fence, VK_TRUE, UINT64_MAX);
+    resources.pending = wait != VK_SUCCESS && wait != VK_ERROR_DEVICE_LOST;
     check(wait, "vkWaitForFences");
 
     for (size_t index = 0; index < bindings.size(); ++index)
     {
         auto& binding = bindings[index];
-        const auto& allocation = resources.buffers[index];
+        const auto& allocation = *resources.buffers[index];
         if (!binding.readback)
             continue;
         if (!allocation.coherent)
