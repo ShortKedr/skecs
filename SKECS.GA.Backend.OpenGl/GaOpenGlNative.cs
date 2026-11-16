@@ -53,11 +53,12 @@ internal sealed unsafe class GaOpenGlNative : SafeHandle
 
     private nint Export(string operation) => NativeLibrary.GetExport(handle, "skecs_ga_gl_" + operation);
 
-    internal Lease OpenContext()
+    internal Lease OpenContext(bool systemEs)
     {
         nint context;
         byte* error = stackalloc byte[ErrorCapacity];
-        Check(_open(&context, error, ErrorCapacity), error, "open the OpenGL runtime");
+        Check(_open(&context, error, ErrorCapacity), error,
+            systemEs ? "open the system EGL OpenGL ES runtime" : "open the OpenGL runtime");
         return TakeLease(context, _close);
     }
 

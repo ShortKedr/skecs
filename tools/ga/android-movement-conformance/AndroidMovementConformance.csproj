@@ -14,6 +14,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../SKECS.GA.Backend.Vulkan/SKECS.GA.Backend.Vulkan.csproj" />
+    <ProjectReference Include="../../../SKECS.GA.Backend.OpenGl/SKECS.GA.Backend.OpenGl.csproj" />
     <Compile Include="../movement-conformance/MovementKernel.cs" Link="MovementKernel.cs" />
     <Compile Include="../movement-conformance/MovementFixture.cs" Link="MovementFixture.cs" />
     <Compile Include="$(Bundle)/ga-adapter.g.cs" />
@@ -23,8 +24,17 @@
     <AndroidNativeLibrary Include="$(NativeArm64)" Abi="arm64-v8a" />
     <AndroidNativeLibrary Include="$(NativeX64)" Abi="x86_64" />
   </ItemGroup>
+  <ItemGroup Condition="'$(GlesBundle)' != ''">
+    <AndroidAsset Include="$(GlesBundle)/movement.manifest.json;$(GlesBundle)/movement.content-id;$(GlesBundle)/movement.glsl;$(GlesBundle)/movement.layout;$(GlesBundle)/movement.source-map.json"
+                  Link="bundle-gles/%(Filename)%(Extension)" />
+    <AndroidNativeLibrary Include="$(GlesNativeArm64)" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(GlesNativeX64)" Abi="x86_64" />
+  </ItemGroup>
   <Target Name="ValidateConformanceInputs" BeforeTargets="PrepareForBuild">
     <Error Condition="'$(Bundle)' == '' Or !Exists('$(Bundle)/movement.spv')" Text="Set Bundle to the packaged Movement Vulkan artifact directory." />
     <Error Condition="!Exists('$(NativeArm64)') Or !Exists('$(NativeX64)')" Text="Set NativeArm64 and NativeX64 to API 28 libga-vulkan-native.so libraries." />
+    <Error Condition="('$(GlesBundle)' != '' Or '$(GlesNativeArm64)' != '' Or '$(GlesNativeX64)' != '') And
+                       (!Exists('$(GlesBundle)/movement.glsl') Or !Exists('$(GlesNativeArm64)') Or !Exists('$(GlesNativeX64)'))"
+           Text="Provide the Movement GLES bundle and API 28 GLES native libraries for both Android ABIs." />
   </Target>
 </Project>

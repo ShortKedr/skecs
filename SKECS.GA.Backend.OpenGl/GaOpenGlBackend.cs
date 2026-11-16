@@ -22,12 +22,12 @@ public sealed class GaOpenGlBackend : IDisposable
     private readonly HashSet<uint> _probed = new();
     private bool _disposed;
 
-    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context, bool isEs, GaAngleRenderer renderer)
+    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context, bool isEs, bool requiresCurrentEsCodegen)
     {
         _api = api;
         _context = context;
         _isEs = isEs;
-        _requiresCurrentEsCodegen = isEs && renderer == GaAngleRenderer.D3D11;
+        _requiresCurrentEsCodegen = requiresCurrentEsCodegen;
         var devices = new IGaDevice[api.GetDeviceCount(context)];
         for (uint i = 0; i < devices.Length; i++)
             devices[i] = new Device(this, i, api.GetDevice(context, i));
@@ -37,7 +37,15 @@ public sealed class GaOpenGlBackend : IDisposable
     public IReadOnlyList<IGaDevice> Devices { get; }
 
     public static GaOpenGlBackend Open(string nativeLibraryPath) =>
-        OpenCore(nativeLibraryPath, null, default);
+        OpenWindows(nativeLibraryPath, null, default);
+
+    /// <summary>Opens the Android system EGL driver on a dedicated headless OpenGL ES 3.1 context.</summary>
+    public static GaOpenGlBackend OpenSystemEs(string nativeLibraryPath)
+    {
+        if (!OperatingSystem.IsAndroid() || RuntimeInformation.ProcessArchitecture is not (Architecture.Arm64 or Architecture.X64))
+            throw new PlatformNotSupportedException("The GA system OpenGL ES adapter requires an Android ARM64 or x64 process.");
+        return OpenCore(nativeLibraryPath, isEs: true, requiresCurrentEsCodegen: true);
+    }
 
     public static GaOpenGlBackend OpenEs(string nativeLibraryPath, string angleDirectory, GaAngleRenderer renderer)
         => OpenEsCore(nativeLibraryPath, angleDirectory, renderer, null);
@@ -55,7 +63,7 @@ public sealed class GaOpenGlBackend : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(angleDirectory);
         if (!Enum.IsDefined(renderer))
             throw new ArgumentOutOfRangeException(nameof(renderer));
-        return OpenCore(nativeLibraryPath, Path.GetFullPath(angleDirectory), renderer, pciId);
+        return OpenWindows(nativeLibraryPath, Path.GetFullPath(angleDirectory), renderer, pciId);
     }
 
     public static GaOpenGlBackend OpenEsFromEnvironment(string nativeLibraryPath)
@@ -81,18 +89,25 @@ public sealed class GaOpenGlBackend : IDisposable
         return OpenEs(nativeLibraryPath, directory, renderer, vendorId, deviceId);
     }
 
-    private static GaOpenGlBackend OpenCore(string nativeLibraryPath, string? angleDirectory, GaAngleRenderer renderer,
+    private static GaOpenGlBackend OpenWindows(string nativeLibraryPath, string? angleDirectory, GaAngleRenderer renderer,
         (ushort Vendor, ushort Device)? pciId = null)
     {
         if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
             throw new PlatformNotSupportedException("The GA OpenGL adapters require a Windows x64 process.");
 
+        bool isEs = angleDirectory is not null;
+        return OpenCore(nativeLibraryPath, isEs, isEs && renderer == GaAngleRenderer.D3D11, angleDirectory, renderer, pciId);
+    }
+
+    private static GaOpenGlBackend OpenCore(string nativeLibraryPath, bool isEs, bool requiresCurrentEsCodegen,
+        string? angleDirectory = null, GaAngleRenderer renderer = default, (ushort Vendor, ushort Device)? pciId = null)
+    {
         var api = new GaOpenGlNative(nativeLibraryPath);
         GaOpenGlNative.Lease? context = null;
         try
         {
-            context = angleDirectory is null ? api.OpenContext() : api.OpenEsContext(angleDirectory, renderer, pciId);
-            return new GaOpenGlBackend(api, context, angleDirectory is not null, renderer);
+            context = angleDirectory is null ? api.OpenContext(isEs) : api.OpenEsContext(angleDirectory, renderer, pciId);
+            return new GaOpenGlBackend(api, context, isEs, requiresCurrentEsCodegen);
         }
         catch
         {
@@ -103,10 +118,17 @@ public sealed class GaOpenGlBackend : IDisposable
     }
 
     public static bool TryOpen(string nativeLibraryPath, [NotNullWhen(true)] out GaOpenGlBackend? backend, out string? error)
+        => TryOpenCore(nativeLibraryPath, systemEs: false, out backend, out error);
+
+    public static bool TryOpenSystemEs(string nativeLibraryPath, [NotNullWhen(true)] out GaOpenGlBackend? backend, out string? error)
+        => TryOpenCore(nativeLibraryPath, systemEs: true, out backend, out error);
+
+    private static bool TryOpenCore(string nativeLibraryPath, bool systemEs,
+        [NotNullWhen(true)] out GaOpenGlBackend? backend, out string? error)
     {
         try
         {
-            backend = Open(nativeLibraryPath);
+            backend = systemEs ? OpenSystemEs(nativeLibraryPath) : Open(nativeLibraryPath);
             error = null;
             return true;
         }
@@ -163,7 +185,7 @@ public sealed class GaOpenGlBackend : IDisposable
 
             if (_requiresCurrentEsCodegen && !currentEsCodegen)
                 return new(null, GaStartupReason.IncompatibleManifest,
-                    "Rebuild this GLSL ES bundle with the current Ga.Build for correct Fixed and typed event output on ANGLE D3D11.");
+                    "Rebuild this GLSL ES bundle with the current Ga.Build. This route requires GLSL ES codegen version 2.");
 
             if (!device.SupportsCompute(_isEs) || requirements.RequiredFeatures.Count != 0)
                 return new(null, GaStartupReason.MissingCapability,

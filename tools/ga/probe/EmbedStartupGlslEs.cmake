@@ -1,0 +1,11 @@
+string(TOLOWER "${EXPECTED_SHA256}" expected_sha)
+file(SHA256 "${INPUT}" actual_sha)
+if(NOT actual_sha STREQUAL expected_sha)
+    message(FATAL_ERROR "Prebuilt startup GLSL ES SHA-256 mismatch")
+endif()
+
+file(READ "${INPUT}" shader)
+if(NOT shader MATCHES "^#version 310 es[\r]?\n" OR shader MATCHES "\\)GA_STARTUP\"")
+    message(FATAL_ERROR "Startup input must be a GLSL ES 3.10 shader")
+endif()
+file(WRITE "${OUTPUT}" "constexpr char startupGlslEs[] = R\"GA_STARTUP(${shader})GA_STARTUP\";\n")

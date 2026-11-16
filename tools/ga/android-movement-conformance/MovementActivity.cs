@@ -3,6 +3,7 @@ using Android.App;
 using Android.Util;
 using Android.Widget;
 using SKECS.GA;
+using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 
 [Activity(Name = "org.skecs.ga.movement.MainActivity", Label = "SKECS GA Movement",
@@ -24,8 +25,9 @@ public sealed class MovementActivity : Activity
         SetContentView(_status);
         string mode = Intent?.GetStringExtra("mode") ?? "auto";
         string profile = Intent?.GetStringExtra("profile") ?? "short";
+        string backend = Intent?.GetStringExtra("backend") ?? "vulkan";
         var cancellation = _lifetime.Token;
-        _ = Task.Run(() => Run(mode, profile, cancellation));
+        _ = Task.Run(() => Run(mode, profile, backend, cancellation));
     }
 
     protected override void OnResume()
@@ -60,7 +62,7 @@ public sealed class MovementActivity : Activity
         base.OnDestroy();
     }
 
-    private async Task Run(string mode, string profile, CancellationToken cancellation)
+    private async Task Run(string mode, string profile, string backend, CancellationToken cancellation)
     {
         try
         {
@@ -71,50 +73,65 @@ public sealed class MovementActivity : Activity
                 "gpu" => GaPolicy.RequireGpu,
                 _ => throw new ArgumentException($"Unknown Movement mode '{mode}'.")
             };
+            bool useGles = backend switch
+            {
+                "vulkan" => false,
+                "gles" => true,
+                _ => throw new ArgumentException($"Unknown Movement backend '{backend}'.")
+            };
+            string assets = useGles ? "bundle-gles" : "bundle";
             var contract = MovementFixture.CreateContract();
-            var artifact = GaArtifactCandidate.Load(ReadAsset("movement.manifest.json"),
-                Encoding.UTF8.GetString(ReadAsset("movement.content-id")).Trim(),
-                ReadAsset("movement.spv"), ReadAsset("movement.layout"), ReadAsset("movement.source-map.json"));
+            var artifact = GaArtifactCandidate.Load(ReadAsset(assets, "movement.manifest.json"),
+                Encoding.UTF8.GetString(ReadAsset(assets, "movement.content-id")).Trim(),
+                ReadAsset(assets, useGles ? "movement.glsl" : "movement.spv"),
+                ReadAsset(assets, "movement.layout"), ReadAsset(assets, "movement.source-map.json"));
             if (artifact.Bundle is null)
                 throw new InvalidDataException(artifact.Error);
 
-            GaVulkanBackend? backend = null;
+            GaVulkanBackend? vulkan = null;
+            GaOpenGlBackend? gles = null;
             if (policy != GaPolicy.CpuOnly)
             {
                 string? nativeDirectory = ApplicationInfo?.NativeLibraryDir;
                 if (string.IsNullOrEmpty(nativeDirectory))
-                    Report("vulkanUnavailable=Android reported no native library directory");
+                    Report($"{backend}Unavailable=Android reported no native library directory");
                 else
                 {
-                    var library = Path.Combine(nativeDirectory,
-                        mode == "fallback" ? "libga-vulkan-unavailable.so" : "libga-vulkan-native.so");
-                    if (!GaVulkanBackend.TryOpen(library, out backend, out string? error))
-                        Report($"vulkanUnavailable={error}");
+                    string libraryStem = useGles ? "libga-opengl" : "libga-vulkan";
+                    string library = Path.Combine(nativeDirectory,
+                        libraryStem + (mode == "fallback" ? "-unavailable.so" : "-native.so"));
+                    string? error;
+                    bool opened = useGles
+                        ? GaOpenGlBackend.TryOpenSystemEs(library, out gles, out error)
+                        : GaVulkanBackend.TryOpen(library, out vulkan, out error);
+                    if (!opened)
+                        Report($"{backend}Unavailable={error}");
                 }
             }
-            using (backend)
-            using (var startup = GaStartup.Select(policy, [new(contract, [artifact])], backend?.Devices ?? [],
+            using (vulkan)
+            using (gles)
+            using (var startup = GaStartup.Select(policy, [new(contract, [artifact])], vulkan?.Devices ?? gles?.Devices ?? [],
                 allowExperimental: true))
             {
                 var decision = startup.Decisions.Single();
                 if (!startup.Succeeded || mode == "fallback" && decision.Reason != GaStartupReason.NoComputeApi)
                     throw new InvalidOperationException($"Route {decision.Route}, {decision.Reason}: {decision.Detail}");
                 Report($"mode={mode} route={decision.Route} reason={decision.Reason} device={decision.Device} " +
-                    $"manifest={artifact.Bundle.ContentId} abi={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
+                    $"manifest={artifact.Bundle.ContentId} abi={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture} backend={backend}");
                 var gpu = decision.Route == GaRoute.Gpu ? startup : null;
                 await MovementFixture.Run(profile, $"Android {mode} {decision.Route}", gpu, contract, Report,
                     BeforeTick, cancellation);
-                Report($"result=passed mode={mode} route={decision.Route} profile={profile}");
+                Report($"result=passed mode={mode} route={decision.Route} profile={profile} backend={backend}");
                 SetStatus($"Passed — {decision.Route} ({profile})", cancellation);
             }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            Report($"result=cancelled mode={mode} profile={profile}");
+            Report($"result=cancelled mode={mode} profile={profile} backend={backend}");
         }
         catch (Exception failure)
         {
-            Log.Error(Tag, $"result=failed mode={mode} profile={profile} {failure}");
+            Log.Error(Tag, $"result=failed mode={mode} profile={profile} backend={backend} {failure}");
             SetStatus($"Failed — {failure.Message}", cancellation);
         }
     }
@@ -138,9 +155,9 @@ public sealed class MovementActivity : Activity
         }
     }
 
-    private byte[] ReadAsset(string name)
+    private byte[] ReadAsset(string folder, string name)
     {
-        using var input = Assets!.Open("bundle/" + name);
+        using var input = Assets!.Open($"{folder}/{name}");
         using var output = new MemoryStream();
         input.CopyTo(output);
         return output.ToArray();

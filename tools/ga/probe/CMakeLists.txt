@@ -61,6 +61,27 @@ target_include_directories(ga-vulkan-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}
 target_link_libraries(ga-vulkan-native PRIVATE Vulkan::Vulkan Threads::Threads)
 set_target_properties(ga-vulkan-native PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
 
+if(ANDROID)
+    set(SKECS_GA_STARTUP_GLSL_ES "" CACHE FILEPATH "Verified startup shader translated to GLSL ES 3.10")
+    set(SKECS_GA_STARTUP_GLSL_ES_SHA256 "" CACHE STRING "SHA-256 of the prebuilt startup GLSL ES shader")
+    if(SKECS_GA_STARTUP_GLSL_ES)
+        get_filename_component(startup_gles "${SKECS_GA_STARTUP_GLSL_ES}" ABSOLUTE)
+        set(startup_gles_header "${CMAKE_CURRENT_BINARY_DIR}/StartupGlslEs.h")
+        add_custom_command(OUTPUT "${startup_gles_header}"
+            COMMAND "${CMAKE_COMMAND}" "-DINPUT=${startup_gles}" "-DOUTPUT=${startup_gles_header}"
+                "-DEXPECTED_SHA256=${SKECS_GA_STARTUP_GLSL_ES_SHA256}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/EmbedStartupGlslEs.cmake"
+            DEPENDS "${startup_gles}" EmbedStartupGlslEs.cmake
+            VERBATIM)
+        add_library(ga-opengl-native SHARED GaOpenGlNative.cpp "${startup_gles_header}")
+        target_compile_features(ga-opengl-native PRIVATE cxx_std_20)
+        target_include_directories(ga-opengl-native PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+        target_link_libraries(ga-opengl-native PRIVATE EGL GLESv3 Threads::Threads)
+        target_link_options(ga-opengl-native PRIVATE "LINKER:-z,max-page-size=16384" "LINKER:--exclude-libs,ALL")
+        set_target_properties(ga-opengl-native PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+    endif()
+endif()
+
 if(SKECS_GA_SLANG_ROOT)
     find_path(skecs_slang_include NAMES slang/slang.h slang.h
         PATHS "${SKECS_GA_SLANG_ROOT}" PATH_SUFFIXES include Include NO_DEFAULT_PATH REQUIRED)

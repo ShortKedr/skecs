@@ -1,10 +1,16 @@
 #include "GaOpenGlNative.h"
 
+#if defined(__ANDROID__)
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES3/gl31.h>
+#else
 #include <windows.h>
 #include <GL/gl.h>
 #include <d3d11.h>
 #include <vulkan/vulkan_core.h>
 #include <wrl/client.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -36,14 +42,22 @@
 
 namespace
 {
+#if !defined(__ANDROID__)
 #include "StartupGlsl.h"
+#endif
 #include "StartupGlslEs.h"
 
 static_assert(sizeof(GaOpenGlDevice) == 668);
 
+#if defined(__ANDROID__)
+template<class Result, class... Arguments>
+using GlFunction = Result(GL_APIENTRY*)(Arguments...);
+using Sync = GLsync;
+#else
 template<class Result, class... Arguments>
 using GlFunction = Result(APIENTRY*)(Arguments...);
 using Sync = void*;
+#endif
 using BufferSize = std::ptrdiff_t;
 using Clock = std::chrono::steady_clock;
 
@@ -65,6 +79,9 @@ void require(bool condition, std::string_view message)
         throw std::runtime_error(std::string(message));
 }
 
+#if defined(__ANDROID__)
+#include "AndroidEgl.h"
+#else
 template<class Function>
 Function bindWgl(const char* name)
 {
@@ -157,11 +174,19 @@ public:
     }
 };
 
+#endif
+
 struct Gl
 {
+#if defined(__ANDROID__)
+    static constexpr bool isEs = true;
+#define SKECS_GA_GL_PROC(member, entry) entry
+#else
     const AngleDisplay* angle;
+    const bool isEs;
 
-    explicit Gl(const AngleDisplay* angle) : angle(angle) {}
+    explicit Gl(const AngleDisplay* angle) : angle(angle), isEs(angle != nullptr) {}
+#define SKECS_GA_GL_PROC(member, entry) bind<decltype(member)>(#entry)
 
     template<class Function>
     Function bind(const char* name) const
@@ -174,44 +199,56 @@ struct Gl
         return std::bit_cast<Function>(address);
     }
 
-    GlFunction<const GLubyte*, GLenum> getString = angle ? bind<decltype(getString)>("glGetString") : glGetString;
-    GlFunction<GLenum> getError = angle ? bind<decltype(getError)>("glGetError") : glGetError;
-    GlFunction<void, GLenum, GLint*> getInteger = angle ? bind<decltype(getInteger)>("glGetIntegerv") : glGetIntegerv;
-    GlFunction<void, GLenum, GLuint, GLint*> getIndexedInteger = bind<decltype(getIndexedInteger)>("glGetIntegeri_v");
-    GlFunction<void, GLenum, int64_t*> getInteger64 = bind<decltype(getInteger64)>("glGetInteger64v");
-    GlFunction<GLuint, GLenum> createShader = bind<decltype(createShader)>("glCreateShader");
-    GlFunction<void, GLuint, GLsizei, const char* const*, const GLint*> source = bind<decltype(source)>("glShaderSource");
-    GlFunction<void, GLuint> compile = bind<decltype(compile)>("glCompileShader");
-    GlFunction<void, GLuint> deleteShader = bind<decltype(deleteShader)>("glDeleteShader");
-    GlFunction<void, GLuint, GLenum, GLint*> shaderParameter = bind<decltype(shaderParameter)>("glGetShaderiv");
-    GlFunction<void, GLuint, GLsizei, GLsizei*, char*> shaderLog = bind<decltype(shaderLog)>("glGetShaderInfoLog");
-    GlFunction<GLuint> createProgram = bind<decltype(createProgram)>("glCreateProgram");
-    GlFunction<void, GLuint, GLuint> attach = bind<decltype(attach)>("glAttachShader");
-    GlFunction<void, GLuint> link = bind<decltype(link)>("glLinkProgram");
-    GlFunction<void, GLuint, GLenum, GLint*> programParameter = bind<decltype(programParameter)>("glGetProgramiv");
-    GlFunction<void, GLuint, GLsizei, GLsizei*, char*> programLog = bind<decltype(programLog)>("glGetProgramInfoLog");
-    GlFunction<void, GLuint> deleteProgram = bind<decltype(deleteProgram)>("glDeleteProgram");
-    GlFunction<void, GLuint> use = bind<decltype(use)>("glUseProgram");
+#endif
+#if defined(__ANDROID__)
+    GlFunction<const GLubyte*, GLenum> getString = glGetString;
+    GlFunction<GLenum> getError = glGetError;
+    GlFunction<void, GLenum, GLint*> getInteger = glGetIntegerv;
+#else
+    GlFunction<const GLubyte*, GLenum> getString = isEs ? SKECS_GA_GL_PROC(getString, glGetString) : glGetString;
+    GlFunction<GLenum> getError = isEs ? SKECS_GA_GL_PROC(getError, glGetError) : glGetError;
+    GlFunction<void, GLenum, GLint*> getInteger = isEs ? SKECS_GA_GL_PROC(getInteger, glGetIntegerv) : glGetIntegerv;
+#endif
+    GlFunction<void, GLenum, GLuint, GLint*> getIndexedInteger = SKECS_GA_GL_PROC(getIndexedInteger, glGetIntegeri_v);
+    GlFunction<void, GLenum, int64_t*> getInteger64 = SKECS_GA_GL_PROC(getInteger64, glGetInteger64v);
+    GlFunction<GLuint, GLenum> createShader = SKECS_GA_GL_PROC(createShader, glCreateShader);
+    GlFunction<void, GLuint, GLsizei, const char* const*, const GLint*> source = SKECS_GA_GL_PROC(source, glShaderSource);
+    GlFunction<void, GLuint> compile = SKECS_GA_GL_PROC(compile, glCompileShader);
+    GlFunction<void, GLuint> deleteShader = SKECS_GA_GL_PROC(deleteShader, glDeleteShader);
+    GlFunction<void, GLuint, GLenum, GLint*> shaderParameter = SKECS_GA_GL_PROC(shaderParameter, glGetShaderiv);
+    GlFunction<void, GLuint, GLsizei, GLsizei*, char*> shaderLog = SKECS_GA_GL_PROC(shaderLog, glGetShaderInfoLog);
+    GlFunction<GLuint> createProgram = SKECS_GA_GL_PROC(createProgram, glCreateProgram);
+    GlFunction<void, GLuint, GLuint> attach = SKECS_GA_GL_PROC(attach, glAttachShader);
+    GlFunction<void, GLuint> link = SKECS_GA_GL_PROC(link, glLinkProgram);
+    GlFunction<void, GLuint, GLenum, GLint*> programParameter = SKECS_GA_GL_PROC(programParameter, glGetProgramiv);
+    GlFunction<void, GLuint, GLsizei, GLsizei*, char*> programLog = SKECS_GA_GL_PROC(programLog, glGetProgramInfoLog);
+    GlFunction<void, GLuint> deleteProgram = SKECS_GA_GL_PROC(deleteProgram, glDeleteProgram);
+    GlFunction<void, GLuint> use = SKECS_GA_GL_PROC(use, glUseProgram);
     GlFunction<void, GLuint, GLenum, GLenum, GLint*> interfaceParameter =
-        bind<decltype(interfaceParameter)>("glGetProgramInterfaceiv");
+        SKECS_GA_GL_PROC(interfaceParameter, glGetProgramInterfaceiv);
     GlFunction<void, GLuint, GLenum, GLuint, GLsizei, const GLenum*, GLsizei, GLsizei*, GLint*> resourceParameter =
-        bind<decltype(resourceParameter)>("glGetProgramResourceiv");
-    GlFunction<void, GLsizei, GLuint*> genBuffers = bind<decltype(genBuffers)>("glGenBuffers");
-    GlFunction<void, GLsizei, const GLuint*> deleteBuffers = bind<decltype(deleteBuffers)>("glDeleteBuffers");
-    GlFunction<void, GLenum, GLuint> bindBuffer = bind<decltype(bindBuffer)>("glBindBuffer");
-    GlFunction<void, GLenum, GLuint, GLuint> bindBufferBase = bind<decltype(bindBufferBase)>("glBindBufferBase");
+        SKECS_GA_GL_PROC(resourceParameter, glGetProgramResourceiv);
+    GlFunction<void, GLsizei, GLuint*> genBuffers = SKECS_GA_GL_PROC(genBuffers, glGenBuffers);
+    GlFunction<void, GLsizei, const GLuint*> deleteBuffers = SKECS_GA_GL_PROC(deleteBuffers, glDeleteBuffers);
+    GlFunction<void, GLenum, GLuint> bindBuffer = SKECS_GA_GL_PROC(bindBuffer, glBindBuffer);
+    GlFunction<void, GLenum, GLuint, GLuint> bindBufferBase = SKECS_GA_GL_PROC(bindBufferBase, glBindBufferBase);
     GlFunction<void, GLenum, GLuint, GLuint, BufferSize, BufferSize> bindBufferRange =
-        angle ? bind<decltype(bindBufferRange)>("glBindBufferRange") : nullptr;
-    GlFunction<void, GLenum, BufferSize, const void*, GLenum> upload = bind<decltype(upload)>("glBufferData");
-    GlFunction<void, GLenum, BufferSize, BufferSize, const void*> overwrite = bind<decltype(overwrite)>("glBufferSubData");
-    GlFunction<void, GLenum, BufferSize, BufferSize, void*> read = angle ? nullptr : bind<decltype(read)>("glGetBufferSubData");
-    GlFunction<void*, GLenum, BufferSize, BufferSize, GLbitfield> map = angle ? bind<decltype(map)>("glMapBufferRange") : nullptr;
-    GlFunction<GLboolean, GLenum> unmap = angle ? bind<decltype(unmap)>("glUnmapBuffer") : nullptr;
-    GlFunction<void, GLuint, GLuint, GLuint> dispatch = bind<decltype(dispatch)>("glDispatchCompute");
-    GlFunction<void, GLbitfield> barrier = bind<decltype(barrier)>("glMemoryBarrier");
-    GlFunction<Sync, GLenum, GLbitfield> fence = bind<decltype(fence)>("glFenceSync");
-    GlFunction<GLenum, Sync, GLbitfield, uint64_t> wait = bind<decltype(wait)>("glClientWaitSync");
-    GlFunction<void, Sync> deleteSync = bind<decltype(deleteSync)>("glDeleteSync");
+        isEs ? SKECS_GA_GL_PROC(bindBufferRange, glBindBufferRange) : nullptr;
+    GlFunction<void, GLenum, BufferSize, const void*, GLenum> upload = SKECS_GA_GL_PROC(upload, glBufferData);
+    GlFunction<void, GLenum, BufferSize, BufferSize, const void*> overwrite = SKECS_GA_GL_PROC(overwrite, glBufferSubData);
+#if defined(__ANDROID__)
+    GlFunction<void, GLenum, BufferSize, BufferSize, void*> read = nullptr;
+#else
+    GlFunction<void, GLenum, BufferSize, BufferSize, void*> read = isEs ? nullptr : SKECS_GA_GL_PROC(read, glGetBufferSubData);
+#endif
+    GlFunction<void*, GLenum, BufferSize, BufferSize, GLbitfield> map = isEs ? SKECS_GA_GL_PROC(map, glMapBufferRange) : nullptr;
+    GlFunction<GLboolean, GLenum> unmap = isEs ? SKECS_GA_GL_PROC(unmap, glUnmapBuffer) : nullptr;
+    GlFunction<void, GLuint, GLuint, GLuint> dispatch = SKECS_GA_GL_PROC(dispatch, glDispatchCompute);
+    GlFunction<void, GLbitfield> barrier = SKECS_GA_GL_PROC(barrier, glMemoryBarrier);
+    GlFunction<Sync, GLenum, GLbitfield> fence = SKECS_GA_GL_PROC(fence, glFenceSync);
+    GlFunction<GLenum, Sync, GLbitfield, uint64_t> wait = SKECS_GA_GL_PROC(wait, glClientWaitSync);
+    GlFunction<void, Sync> deleteSync = SKECS_GA_GL_PROC(deleteSync, glDeleteSync);
+#undef SKECS_GA_GL_PROC
 
     std::string_view text(GLenum property) const
     {
@@ -232,7 +269,7 @@ struct Gl
 
     void readStorage(BufferSize length, uint32_t* destination) const
     {
-        if (angle)
+        if (isEs)
         {
             constexpr GLbitfield mapReadBit = 0x0001;
             const auto* data = map(shaderStorageBuffer, 0, length, mapReadBit);
@@ -249,9 +286,9 @@ struct Gl
 
 GLuint build(const Gl& gl, std::string_view source)
 {
-    const auto version = gl.angle ? std::string_view("#version 310 es") : std::string_view("#version 430");
+    const auto version = gl.isEs ? std::string_view("#version 310 es") : std::string_view("#version 430");
     require(source.starts_with(version) && source.find('\0') == std::string_view::npos,
-        gl.angle ? "expected GLSL ES 310 source" : "expected desktop GLSL 430 source");
+        gl.isEs ? "expected GLSL ES 310 source" : "expected desktop GLSL 430 source");
     const auto shader = gl.createShader(computeShader);
     GLuint program = 0;
     try
@@ -358,7 +395,7 @@ GaOpenGlDevice deviceInfo(const Gl& gl)
     gl.getInteger(maxComputeSsboBlocks, &blocks);
     gl.getInteger64(maxSsboBytes, &bufferBytes);
     gl.check("OpenGL device limits");
-    const bool versionSupported = gl.angle ? version.starts_with("OpenGL ES ") && (major > 3 || (major == 3 && minor >= 1))
+    const bool versionSupported = gl.isEs ? version.starts_with("OpenGL ES ") && (major > 3 || (major == 3 && minor >= 1))
         : major > 4 || (major == 4 && minor >= 3);
     require(versionSupported && groups > 0 && groupSize >= 64 && invocations >= 64
         && bindings > 7 && blocks >= 3 && bufferBytes >= static_cast<int64_t>(sizeof(uint32_t)),
@@ -453,7 +490,7 @@ public:
                 gl.upload(shaderStorageBuffer, length, payload[i].data(), dynamicCopy);
                 bufferSizes[i] = length;
             }
-            if (gl.angle)
+            if (gl.isEs)
                 // ANGLE D3D11 needs the indexed size to refresh its UAV view on a shrink.
                 gl.bindBufferRange(shaderStorageBuffer, locations[i], buffers[i], 0, length);
             else
@@ -493,15 +530,24 @@ class ContextWorker
     Job* pending = nullptr;
     bool stopping = false;
 
-    void run(const std::filesystem::path& directory, uint32_t renderer, AnglePciId pci,
+    void run(
+#if !defined(__ANDROID__)
+        const std::filesystem::path& directory, uint32_t renderer, AnglePciId pci,
+#endif
         std::promise<GaOpenGlDevice> ready)
     {
         // Native contexts and their surfaces stay on the same worker thread.
+#if !defined(__ANDROID__)
         std::optional<AngleDisplay> angle;
+#endif
         NativeContext context;
         std::optional<Gl> gl;
         try
         {
+#if defined(__ANDROID__)
+            context.open();
+            gl.emplace();
+#else
             if (!directory.empty())
             {
                 angle.emplace(directory, renderer, pci);
@@ -511,6 +557,7 @@ class ContextWorker
             const auto* display = angle ? &*angle : nullptr;
             context.open(display);
             gl.emplace(display);
+#endif
             ready.set_value(deviceInfo(*gl));
         }
         catch (...)
@@ -543,11 +590,19 @@ class ContextWorker
     }
 
 public:
+#if defined(__ANDROID__)
+    ContextWorker()
+#else
     ContextWorker(std::filesystem::path directory = {}, uint32_t renderer = 0, AnglePciId pci = {})
+#endif
     {
         std::promise<GaOpenGlDevice> ready;
         auto initialized = ready.get_future();
-        worker = std::thread(&ContextWorker::run, this, std::move(directory), renderer, pci, std::move(ready));
+        worker = std::thread(&ContextWorker::run, this,
+#if !defined(__ANDROID__)
+            std::move(directory), renderer, pci,
+#endif
+            std::move(ready));
         try
         {
             device = initialized.get();
@@ -585,6 +640,7 @@ public:
     }
 };
 
+#if !defined(__ANDROID__)
 class AngleLease
 {
     struct Registry
@@ -644,23 +700,40 @@ public:
     ContextWorker& get() const { return *worker; }
 };
 
+#endif
+
 struct DeviceContext
 {
     GaOpenGlDevice device;
+#if defined(__ANDROID__)
+    std::shared_ptr<ContextWorker> es;
+
+    ContextWorker* esWorker() const { return es.get(); }
+#else
     std::shared_ptr<const AngleLease> angle;
+
+    ContextWorker* esWorker() const { return angle ? &angle->get() : nullptr; }
+#endif
 };
 
 class Kernel
 {
     DeviceContext owner;
+#if !defined(__ANDROID__)
     std::unique_ptr<ContextWorker> wgl;
+#endif
     ContextWorker& worker;
     std::optional<Pipeline> pipeline;
 
 public:
     Kernel(DeviceContext context, std::string_view source, uint32_t workgroupX, Locations bindings)
-        : owner(std::move(context)), wgl(owner.angle ? nullptr : std::make_unique<ContextWorker>()),
-          worker(owner.angle ? owner.angle->get() : *wgl)
+        : owner(std::move(context)),
+#if defined(__ANDROID__)
+          worker(*owner.esWorker())
+#else
+          wgl(owner.esWorker() ? nullptr : std::make_unique<ContextWorker>()),
+          worker(owner.esWorker() ? *owner.esWorker() : *wgl)
+#endif
     {
         const auto& actual = worker.info();
         const auto& device = owner.device;
@@ -719,11 +792,16 @@ const DeviceContext& getDevice(void* context, uint32_t index)
     return *static_cast<DeviceContext*>(context);
 }
 
-DeviceContext* openWglDevice()
+DeviceContext* openDefaultDevice()
 {
+#if defined(__ANDROID__)
+    auto es = std::make_shared<ContextWorker>();
+    return new DeviceContext{es->info(), std::move(es)};
+#else
     NativeContext context;
     context.open(nullptr);
     return new DeviceContext{deviceInfo(Gl(nullptr)), {}};
+#endif
 }
 
 void writeError(char* error, uint32_t capacity, const char* text)
@@ -757,6 +835,7 @@ int32_t perform(char* error, uint32_t errorCapacity, Work work) noexcept
     return 1;
 }
 
+#if !defined(__ANDROID__)
 int32_t openEsDevice(const wchar_t* angleDirectory, uint32_t renderer, std::optional<AnglePciId> pci,
     void** context, char* error, uint32_t errorCapacity)
 {
@@ -777,6 +856,7 @@ int32_t openEsDevice(const wchar_t* angleDirectory, uint32_t renderer, std::opti
         *context = new DeviceContext{angle->get().info(), std::move(angle)};
     });
 }
+#endif
 }
 
 int32_t skecs_ga_gl_open(void** context, char* error, uint32_t errorCapacity)
@@ -785,10 +865,11 @@ int32_t skecs_ga_gl_open(void** context, char* error, uint32_t errorCapacity)
     {
         require(context != nullptr, "OpenGL context destination is required");
         *context = nullptr;
-        *context = openWglDevice();
+        *context = openDefaultDevice();
     });
 }
 
+#if !defined(__ANDROID__)
 int32_t skecs_ga_gl_open_es(const wchar_t* angleDirectory, uint32_t renderer,
     void** context, char* error, uint32_t errorCapacity)
 {
@@ -800,6 +881,8 @@ int32_t skecs_ga_gl_open_es_device(const wchar_t* angleDirectory, uint32_t rende
 {
     return openEsDevice(angleDirectory, renderer, AnglePciId{vendorId, deviceId}, context, error, errorCapacity);
 }
+
+#endif
 
 void skecs_ga_gl_close(void* context)
 {
@@ -835,16 +918,20 @@ int32_t skecs_ga_gl_probe(void* context, uint32_t index, char* error, uint32_t e
         quotients.fill(sentinel);
         remainders.fill(sentinel);
         for (size_t i = 0; i < values.size(); ++i)
-            input[i + 1] = std::bit_cast<uint32_t>(values[i]);
+            input[i + 1] = static_cast<uint32_t>(values[i]);
         const auto& owner = getDevice(context, index);
-        const auto source = owner.angle ? std::string_view(startupGlslEs) : std::string_view(startupGlsl);
+#if defined(__ANDROID__)
+        constexpr std::string_view source = startupGlslEs;
+#else
+        const auto source = owner.esWorker() ? std::string_view(startupGlslEs) : std::string_view(startupGlsl);
+#endif
         Kernel kernel(owner, source, 64, {3, 5, 7});
         kernel.dispatch(1, input, quotients, remainders);
         for (size_t i = 0; i < values.size(); ++i)
-            require(quotients[i] == std::bit_cast<uint32_t>(values[i] / 3)
-                && remainders[i] == std::bit_cast<uint32_t>(values[i] % 3), "OpenGL startup arithmetic mismatch");
+            require(quotients[i] == static_cast<uint32_t>(values[i] / 3)
+                && remainders[i] == static_cast<uint32_t>(values[i] % 3), "OpenGL startup arithmetic mismatch");
         require(quotients.back() == sentinel && remainders.back() == sentinel, "OpenGL startup overwrote guard words");
-        if (owner.angle)
+        if (owner.esWorker())
             probeEsBufferSizes(owner);
     });
 }
