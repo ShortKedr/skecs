@@ -12,6 +12,8 @@ public static class GaInterpreter
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (program.UsesCommands)
+            throw new InvalidOperationException("Use the Execute overload with ordered output storage for this program.");
         if (program.EventCapacity != 0)
             throw new InvalidOperationException("Use the Execute overload with event storage for this program.");
         return Execute(program, row, Span<int>.Empty, out _);
@@ -27,20 +29,36 @@ public static class GaInterpreter
 
     /// <summary>Executes one row against the provided immutable snapshot binding.</summary>
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row, Span<int> events, out int eventCount,
-        GaSnapshotPacket? snapshot)
+        GaSnapshotPacket? snapshot) => ExecuteCore(program, row, events, out eventCount, snapshot, outputs: null);
+
+    /// <summary>Executes one row and appends its ordered events and commands only on success.</summary>
+    public static GaKernelFault? Execute(GaProgram program, Span<uint> row, ICollection<GaOutputRecord> outputs,
+        GaSnapshotPacket? snapshot = null)
+    {
+        ArgumentNullException.ThrowIfNull(outputs);
+        return ExecuteCore(program, row, Span<int>.Empty, out _, snapshot, outputs);
+    }
+
+    private static GaKernelFault? ExecuteCore(GaProgram program, Span<uint> row, Span<int> events, out int eventCount,
+        GaSnapshotPacket? snapshot, ICollection<GaOutputRecord>? outputs)
     {
         ArgumentNullException.ThrowIfNull(program);
         eventCount = 0;
+        if (program.UsesCommands && outputs is null)
+            throw new InvalidOperationException("Use the Execute overload with ordered output storage for this program.");
         if (program.UsesSnapshot && snapshot is null)
             throw new InvalidOperationException("The GA program requires an Int32 snapshot binding.");
         if (program.UsesSnapshot && (snapshot!.Layout.Fields.Length != 1 || snapshot.Layout.Fields[0] != GaScalar.Int32))
             throw new ArgumentException("The GA snapshot binding must contain one Int32 field.", nameof(snapshot));
         if (row.Length != program.WordCount)
             throw new ArgumentException("The row length must match the packed GA schema.", nameof(row));
-        if (events.Length < program.EventCapacity)
-            throw new ArgumentException("The destination must hold the verified event capacity.", nameof(events));
-        if (MemoryMarshal.Cast<uint, int>(row).Overlaps(events[..program.EventCapacity]))
-            throw new ArgumentException("Event storage must not overlap the component row.", nameof(events));
+        if (outputs is null)
+        {
+            if (events.Length < program.EventCapacity)
+                throw new ArgumentException("The destination must hold the verified event capacity.", nameof(events));
+            if (MemoryMarshal.Cast<uint, int>(row).Overlaps(events[..program.EventCapacity]))
+                throw new ArgumentException("Event storage must not overlap the component row.", nameof(events));
+        }
         for (int i = 0; i < program.Fields.Count; i++)
             if (program.Fields[i].Type == GaScalar.Bool && row[program.Offsets[i]] > 1)
                 throw new ArgumentException($"Field {i} is not a canonical boolean.", nameof(row));
@@ -49,17 +67,27 @@ public static class GaInterpreter
         Span<ulong> locals = program.Locals.Count <= 64
             ? stackalloc ulong[program.Locals.Count]
             : new ulong[program.Locals.Count];
-        Span<int> nextEvents = program.EventCapacity <= 128
-            ? stackalloc int[program.EventCapacity]
-            : new int[program.EventCapacity];
+        Span<int> tickets = program.TicketLocalCount <= 64
+            ? stackalloc int[program.TicketLocalCount]
+            : new int[program.TicketLocalCount];
+        int eventCapacity = outputs is null ? program.EventCapacity : 0;
+        int outputCapacity = outputs is null ? 0 : program.EventCapacity;
+        Span<int> nextEvents = eventCapacity <= 128 ? stackalloc int[eventCapacity] : new int[eventCapacity];
+        Span<GaOutputRecord> nextOutputs = outputCapacity <= 128
+            ? stackalloc GaOutputRecord[outputCapacity]
+            : new GaOutputRecord[outputCapacity];
         row.CopyTo(next);
-        var executor = new Executor(next, locals, nextEvents, program.Offsets, snapshot);
+        var executor = new Executor(next, locals, tickets, nextEvents, nextOutputs, program.Offsets, snapshot);
         executor.Run(program.Body);
         if (executor.Fault == null)
         {
+            if (outputs is null)
+                nextEvents[..executor.OutputCount].CopyTo(events);
+            else
+                foreach (var output in nextOutputs[..executor.OutputCount])
+                    outputs.Add(output);
             next.CopyTo(row);
-            eventCount = executor.EventCount;
-            nextEvents[..eventCount].CopyTo(events);
+            eventCount = executor.OutputCount;
         }
         return executor.Fault;
     }
@@ -68,18 +96,23 @@ public static class GaInterpreter
     {
         private readonly Span<uint> _row;
         private readonly Span<ulong> _locals;
+        private readonly Span<int> _tickets;
         private readonly Span<int> _events;
+        private readonly Span<GaOutputRecord> _outputs;
         private readonly int[] _offsets;
         private readonly GaSnapshotPacket? _snapshot;
         private ulong _evaluationOrdinal;
         internal GaKernelFault? Fault { get; private set; }
-        internal int EventCount { get; private set; }
+        internal int OutputCount { get; private set; }
 
-        internal Executor(Span<uint> row, Span<ulong> locals, Span<int> events, int[] offsets, GaSnapshotPacket? snapshot)
+        internal Executor(Span<uint> row, Span<ulong> locals, Span<int> tickets, Span<int> events, Span<GaOutputRecord> outputs,
+            int[] offsets, GaSnapshotPacket? snapshot)
         {
             _row = row;
             _locals = locals;
+            _tickets = tickets;
             _events = events;
+            _outputs = outputs;
             _offsets = offsets;
             _snapshot = snapshot;
         }
@@ -123,7 +156,26 @@ public static class GaInterpreter
                 case GaEmit emit:
                     int value = unchecked((int)Read(emit.Value));
                     if (Fault == null)
-                        _events[EventCount++] = value;
+                    {
+                        if (_outputs.IsEmpty)
+                            _events[OutputCount++] = value;
+                        else
+                            _outputs[OutputCount++] = GaOutputRecord.EmitInt32(value);
+                    }
+                    break;
+                case GaDestroy destroy:
+                    int entityId = unchecked((int)Read(destroy.EntityId));
+                    int generation = unchecked((int)Read(destroy.Generation));
+                    if (Fault == null)
+                        _outputs[OutputCount++] = GaOutputRecord.DestroyEntity(entityId, generation);
+                    break;
+                case GaCreate create:
+                    if (create.TicketSlot >= 0)
+                        _tickets[create.TicketSlot] = OutputCount;
+                    _outputs[OutputCount++] = GaOutputRecord.CreateEntity();
+                    break;
+                case GaDestroyTicket destroy:
+                    _outputs[OutputCount++] = GaOutputRecord.DestroyTicket(_tickets[destroy.TicketSlot]);
                     break;
                 case GaIf branch:
                     if (Read(branch.Condition) != 0)

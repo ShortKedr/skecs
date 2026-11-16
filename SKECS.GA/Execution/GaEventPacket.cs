@@ -2,7 +2,7 @@ namespace SKECS.GA;
 
 public delegate TEvent GaEventDecoder<TEvent>(ReadOnlySpan<uint> words) where TEvent : unmanaged;
 
-/// <summary>Bounded event readback with one ordered slice per logical source.</summary>
+/// <summary>Bounded output readback with one ordered slice per logical source.</summary>
 /// <remarks>Words are version, source count, capacity per source and event width, followed by
 /// one count word and capacity fixed-width event slots for each source. The enclosing batch assigns
 /// the source order. The backing words must remain unchanged while this view is in use.</remarks>
@@ -58,6 +58,31 @@ public readonly ref struct GaEventPacket
         if ((uint)source >= SourceCount)
             throw new ArgumentOutOfRangeException(nameof(source));
         Apply(source, job.ForJob(), decode);
+    }
+
+    internal void ValidateMixedRecords(int successfulSources)
+    {
+        for (int source = 0; source < successfulSources; source++)
+        {
+            int offset = source * _sourceWords;
+            int count = (int)_slots[offset++];
+            var records = _slots.Slice(offset, count * EventWords);
+            for (int item = 0; item < count; item++)
+                GaOutputRecord.Read(records.Slice(item * EventWords, EventWords)).ValidateTicket(records, item);
+        }
+    }
+
+    internal void ApplyMixedEntityRows<TInput>(DeterministicJob<TInput> job, int firstSource, int successfulRows)
+        where TInput : unmanaged
+    {
+        for (int row = 0; row < successfulRows; row++)
+        {
+            int offset = (firstSource + row) * _sourceWords;
+            int count = (int)_slots[offset++];
+            var replay = new GaOutputRecord.Replay(job.ForEntity(row), count);
+            for (int item = 0; item < count; item++, offset += EventWords)
+                replay.Apply(GaOutputRecord.Read(_slots.Slice(offset, EventWords)), item);
+        }
     }
 
     private void Apply<TEvent>(int source, DeterministicSource target, GaEventDecoder<TEvent> decode)

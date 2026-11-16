@@ -30,6 +30,12 @@ public static partial class GaSemanticAnalysis
                 case IVariableDeclaratorOperation local when local.Symbol.RefKind != RefKind.None:
                     Report(Write, location, "Use a value local instead of a ref alias.");
                     return;
+                case IVariableDeclaratorOperation local when IsEntityTicket(local.Symbol.Type):
+                    if (local.Initializer?.Value is IInvocationOperation createCall && IsTicketCreation(createCall))
+                        ticketLocals.Add(local.Symbol);
+                    else
+                        Report(Stream, location, "Initialize a GA ticket local directly with the entry context's Create().");
+                    break;
                 case IVariableDeclaratorOperation local:
                     CheckType(local.Symbol.Type, location);
                     break;
@@ -95,8 +101,16 @@ public static partial class GaSemanticAnalysis
                     return;
             }
 
-            if (operation.Type is { } type && !(operation is IInstanceReferenceOperation && Equal(type, entry.ContainingType)))
-                CheckType(type, location, operation is IParameterReferenceOperation);
+            if (operation.Type is { } type)
+            {
+                if (IsEntityTicket(type))
+                {
+                    if (!IsTicketUse(operation))
+                        Report(Stream, location, "Keep GA tickets in their initial local and pass them directly to Destroy.");
+                }
+                else if (!(operation is IInstanceReferenceOperation && Equal(type, entry.ContainingType)))
+                    CheckType(type, location, operation is IParameterReferenceOperation);
+            }
             base.Visit(operation);
         }
 
@@ -104,16 +118,38 @@ public static partial class GaSemanticAnalysis
         {
             var method = invocation.TargetMethod;
             var location = invocation.Syntax.GetLocation();
+            if (IsTicketDestruction(method))
+            {
+                if (!IsEntryContext(invocation.Instance) ||
+                    invocation.Arguments.Length != 1 ||
+                    invocation.Arguments[0] is not { Parameter.Ordinal: 0, Value: ILocalReferenceOperation local } ||
+                    !ticketLocals.Contains(local.Local))
+                    Report(Stream, location, "Call Destroy(ticket) directly on the entry context with a local initialized by Create().");
+                return;
+            }
+            if (Equal(method.ContainingType, context) && method.Name == "Create" && IsEntityTicket(method.ReturnType))
+                return;
             if (Equal(method.ContainingType, context) && method.Name == "Emit" && IsRuntimeSystemContext())
             {
                 if (method is not { IsStatic: false, Arity: 0, ReturnsVoid: true } ||
                     method.Parameters.Length != 1 ||
                     method.Parameters[0].RefKind != RefKind.None ||
                     method.Parameters[0].Type.SpecialType != SpecialType.System_Int32 ||
-                    invocation.Instance is not IParameterReferenceOperation receiver ||
-                    receiver.Parameter.RefKind != RefKind.In ||
-                    !Equal(receiver.Parameter.ContainingSymbol, entry))
+                    !IsEntryContext(invocation.Instance))
                     Report(Stream, location, "Call Emit(int) directly on the entry point's in SystemContext parameter.");
+                return;
+            }
+            if (Equal(method.ContainingType, context) && method.Name == "Destroy" && IsRuntimeSystemContext())
+            {
+                if (method is not { IsStatic: false, Arity: 0, ReturnsVoid: true } ||
+                    method.Parameters.Length != 2 ||
+                    method.Parameters.Any(parameter => parameter.RefKind != RefKind.None ||
+                        parameter.Type.SpecialType != SpecialType.System_Int32) ||
+                    invocation.Arguments.Length != 2 ||
+                    invocation.Arguments[0].Parameter?.Ordinal != 0 ||
+                    invocation.Arguments[1].Parameter?.Ordinal != 1 ||
+                    !IsEntryContext(invocation.Instance))
+                    Report(Stream, location, "Call Destroy(int, int) directly on the entry point's in SystemContext parameter, with arguments in declaration order.");
                 return;
             }
             if (Equal(method.ContainingType, context) && method.Name == "ReadSnapshotInt32" && IsRuntimeSystemContext())
@@ -127,9 +163,7 @@ public static partial class GaSemanticAnalysis
                     invocation.Arguments[0].Parameter?.Ordinal != 0 ||
                     invocation.Arguments[1].Parameter?.Ordinal != 1 ||
                     invocation.Arguments[2].Parameter?.Ordinal != 2 ||
-                    invocation.Instance is not IParameterReferenceOperation receiver ||
-                    receiver.Parameter.RefKind != RefKind.In ||
-                    !Equal(receiver.Parameter.ContainingSymbol, entry))
+                    !IsEntryContext(invocation.Instance))
                     Report(Unknown, location, "Call ReadSnapshotInt32 directly on the entry point's in SystemContext parameter, with arguments in declaration order.");
                 return;
             }
@@ -153,6 +187,37 @@ public static partial class GaSemanticAnalysis
             CheckBorrowedArguments(invocation.Arguments, invocation.Instance, location);
             VisitMethod(method, location);
         }
+
+        private bool IsEntryContext(IOperation? receiver) =>
+            receiver is IParameterReferenceOperation reference &&
+            reference.Parameter.RefKind == RefKind.In &&
+            Equal(reference.Parameter.ContainingSymbol, entry);
+
+        private bool IsEntityTicket(ITypeSymbol type) =>
+            type.IsRefLikeType && Equal(type, ticket) && Equal(type.ContainingAssembly, context?.ContainingAssembly) &&
+            IsRuntimeSystemContext();
+
+        private bool IsTicketCreation(IInvocationOperation invocation) =>
+            invocation.TargetMethod is { Name: "Create", IsStatic: false, Arity: 0, Parameters.Length: 0 } method &&
+            Equal(method.ContainingType, context) && IsEntityTicket(method.ReturnType) && IsEntryContext(invocation.Instance);
+
+        private bool IsTicketDestruction(IMethodSymbol method) =>
+            method is { Name: "Destroy", IsStatic: false, Arity: 0, ReturnsVoid: true } &&
+            Equal(method.ContainingType, context) &&
+            method.Parameters.Length == 1 && method.Parameters[0].RefKind == RefKind.None &&
+            IsEntityTicket(method.Parameters[0].Type);
+
+        private bool IsTicketUse(IOperation operation) => operation switch
+        {
+            IInvocationOperation invocation => IsTicketCreation(invocation) &&
+                (invocation.Parent is IExpressionStatementOperation ||
+                invocation.Parent is IVariableInitializerOperation { Parent: IVariableDeclaratorOperation initializer } &&
+                    ticketLocals.Contains(initializer.Symbol)),
+            ILocalReferenceOperation local => ticketLocals.Contains(local.Local) &&
+                local.Parent is IArgumentOperation { Parameter.Ordinal: 0, Parent: IInvocationOperation invocation } &&
+                IsTicketDestruction(invocation.TargetMethod),
+            _ => false
+        };
 
         private bool IsRuntimeSystemContext() =>
             context is { IsRefLikeType: true } && context.ContainingAssembly.Identity.Name == "SKECS.GA" &&
@@ -195,7 +260,7 @@ public static partial class GaSemanticAnalysis
             if (!Equal(method.ContainingType, context))
                 return false;
 
-            var descriptor = method.Name is "Emit" or "get_Commands" ? Stream : Unknown;
+            var descriptor = method.Name is "Emit" or "Create" or "Destroy" or "get_Commands" ? Stream : Unknown;
             Report(descriptor, location, $"Register and lower scoped context operation '{method.Name}' before using it in a GA kernel.");
             return true;
         }

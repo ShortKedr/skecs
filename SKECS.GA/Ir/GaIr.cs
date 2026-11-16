@@ -36,13 +36,17 @@ internal abstract record GaStatement;
 internal sealed record GaBlock(IReadOnlyList<GaStatement> Statements) : GaStatement;
 internal sealed record GaStore(GaSlot Slot, GaValue Value) : GaStatement;
 internal sealed record GaEmit(GaValue Value) : GaStatement;
+internal sealed record GaDestroy(GaValue EntityId, GaValue Generation) : GaStatement;
+internal sealed record GaCreate(int TicketSlot) : GaStatement;
+internal sealed record GaDestroyTicket(int TicketSlot) : GaStatement;
 internal sealed record GaIf(GaValue Condition, GaStatement Then, GaStatement? Else) : GaStatement;
 internal sealed record GaLoop(GaValue Condition, GaStatement Body, GaStatement Increment, int MaximumIterations)
     : GaStatement;
 
 public sealed class GaProgram
 {
-    internal GaProgram(string systemId, string sourceDigest, GaComponent[] components, GaField[] fields, GaScalar[] locals, GaBlock body)
+    internal GaProgram(string systemId, string sourceDigest, GaComponent[] components, GaField[] fields,
+        GaScalar[] locals, GaBlock body, int ticketLocalCount)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(systemId);
         SystemId = systemId;
@@ -50,6 +54,7 @@ public sealed class GaProgram
         Components = Array.AsReadOnly((GaComponent[])components.Clone());
         Fields = Array.AsReadOnly((GaField[])fields.Clone());
         Locals = Array.AsReadOnly((GaScalar[])locals.Clone());
+        TicketLocalCount = ticketLocalCount;
         Body = body;
         Offsets = new int[fields.Length];
         for (int i = 0; i < fields.Length; i++)
@@ -57,13 +62,13 @@ public sealed class GaProgram
             Offsets[i] = WordCount;
             WordCount = checked(WordCount + (fields[i].Type == GaScalar.Fixed ? 2 : 1));
         }
-        (UsesFixed, UsesSnapshot, EventCapacity) = GaVerifier.Verify(this);
+        (UsesFixed, UsesSnapshot, UsesCommands, EventCapacity) = GaVerifier.Verify(this);
     }
 
     // Initial word-based portable profile. Later profiles must explicitly extend this identity.
-    public const int SubsetVersion = 3;
+    public const int SubsetVersion = 5;
     public const int NumericVersion = SKECS.Numerics.Fixed.NumericContractVersion;
-    public const int IrVersion = 3;
+    public const int IrVersion = 5;
     public string SystemId { get; }
     public string SourceDigest { get; }
     public IReadOnlyList<GaComponent> Components { get; }
@@ -72,7 +77,11 @@ public sealed class GaProgram
     public bool UsesFixed { get; }
     /// <summary>Whether the program requires an immutable Int32 snapshot binding.</summary>
     public bool UsesSnapshot { get; }
-    /// <summary>The verified maximum number of Int32 events emitted by one invocation.</summary>
+    /// <summary>Whether the program can stage structural commands for the commit barrier.</summary>
+    public bool UsesCommands { get; }
+    /// <summary>The number of distinct ticket locals in the verified system.</summary>
+    public int TicketLocalCount { get; }
+    /// <summary>The verified maximum number of events and commands staged by one invocation.</summary>
     public int EventCapacity { get; }
     internal int[] Offsets { get; }
     internal IReadOnlyList<GaScalar> Locals { get; }

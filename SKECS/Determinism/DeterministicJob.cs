@@ -92,6 +92,10 @@ public readonly ref struct DeterministicSource
 
     public void Destroy(Entity entity) => Destroy(new CommandTarget(entity));
 
+    /// <summary>Queues destruction of an ID and generation in this job's world.</summary>
+    public void Destroy(int entityId, int generation) =>
+        Destroy(new Entity(entityId, generation, _buffer?.WorldId ?? 0));
+
     public void Destroy(CreateTicket ticket) => Destroy(new CommandTarget(ticket));
 
     public void Add<T>(Entity entity, T value) where T : unmanaged => Component(ComponentCommand.Add, new CommandTarget(entity), value);

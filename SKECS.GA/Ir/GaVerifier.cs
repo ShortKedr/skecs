@@ -1,14 +1,16 @@
 namespace SKECS.GA;
 
 internal sealed class GaEventCapacityException() : InvalidOperationException(
-    $"An invocation may emit more than {GaEventPacket.MaximumCapacityPerSource.ToString(System.Globalization.CultureInfo.InvariantCulture)} events.");
+    $"An invocation may produce more than {GaEventPacket.MaximumCapacityPerSource.ToString(System.Globalization.CultureInfo.InvariantCulture)} events and commands.");
 
 internal static class GaVerifier
 {
-    internal static (bool UsesFixed, bool UsesSnapshot, int EventCapacity) Verify(GaProgram program)
+    internal static (bool UsesFixed, bool UsesSnapshot, bool UsesCommands, int EventCapacity) Verify(GaProgram program)
     {
         bool usesFixed = program.Fields.Any(field => field.Type == GaScalar.Fixed) || program.Locals.Contains(GaScalar.Fixed);
         bool usesSnapshot = false;
+        bool usesCommands = false;
+        var declaredTickets = new HashSet<int>();
         var components = new Dictionary<string, GaFieldAccess>();
         foreach (var component in program.Components)
             Require(!string.IsNullOrWhiteSpace(component.Id) && Enum.IsDefined(component.Access)
@@ -18,11 +20,12 @@ internal static class GaVerifier
             Require(components.TryGetValue(field.Component, out var access) && access == field.Access
                 && !string.IsNullOrWhiteSpace(field.Path) && fields.Add((field.Component, field.Path))
                 && Enum.IsDefined(field.Type));
-        Require(program.Locals.All(Enum.IsDefined));
-        int eventCapacity = CheckStatement(program.Body, new HashSet<int>());
+        Require(program.Locals.All(Enum.IsDefined) && program.TicketLocalCount >= 0);
+        int eventCapacity = CheckStatement(program.Body, new HashSet<int>(), new HashSet<int>());
+        Require(declaredTickets.Count == program.TicketLocalCount);
         if (eventCapacity > GaEventPacket.MaximumCapacityPerSource)
             throw new GaEventCapacityException();
-        return (usesFixed, usesSnapshot, eventCapacity);
+        return (usesFixed, usesSnapshot, usesCommands, eventCapacity);
 
         void CheckSlot(GaSlot slot)
         {
@@ -32,14 +35,14 @@ internal static class GaVerifier
                 Require((uint)slot.Index < program.Locals.Count && program.Locals[slot.Index] == slot.Type);
         }
 
-        int CheckStatement(GaStatement statement, HashSet<int> assigned)
+        int CheckStatement(GaStatement statement, HashSet<int> assigned, HashSet<int> assignedTickets)
         {
             switch (statement)
             {
                 case GaBlock block:
                     int blockCapacity = 0;
                     foreach (var child in block.Statements)
-                        blockCapacity = Bound((long)blockCapacity + CheckStatement(child, assigned));
+                        blockCapacity = Bound((long)blockCapacity + CheckStatement(child, assigned, assignedTickets));
                     return blockCapacity;
                 case GaStore store:
                     CheckSlot(store.Slot);
@@ -54,21 +57,46 @@ internal static class GaVerifier
                     CheckValue(emit.Value, assigned);
                     Require(emit.Value.Type == GaScalar.Int32);
                     return 1;
+                case GaDestroy destroy:
+                    usesCommands = true;
+                    CheckValue(destroy.EntityId, assigned);
+                    CheckValue(destroy.Generation, assigned);
+                    Require(destroy.EntityId.Type == GaScalar.Int32 && destroy.Generation.Type == GaScalar.Int32);
+                    return 1;
+                case GaCreate create:
+                    usesCommands = true;
+                    if (create.TicketSlot != -1)
+                    {
+                        Require((uint)create.TicketSlot < (uint)program.TicketLocalCount &&
+                            assignedTickets.Add(create.TicketSlot));
+                        declaredTickets.Add(create.TicketSlot);
+                    }
+                    return 1;
+                case GaDestroyTicket destroy:
+                    usesCommands = true;
+                    Require(assignedTickets.Contains(destroy.TicketSlot));
+                    return 1;
                 case GaIf branch:
                     CheckValue(branch.Condition, assigned);
                     Require(branch.Condition.Type == GaScalar.Bool);
                     var thenAssigned = new HashSet<int>(assigned);
                     var elseAssigned = new HashSet<int>(assigned);
-                    int thenCapacity = CheckStatement(branch.Then, thenAssigned);
-                    int elseCapacity = branch.Else == null ? 0 : CheckStatement(branch.Else, elseAssigned);
+                    var thenTickets = new HashSet<int>(assignedTickets);
+                    var elseTickets = new HashSet<int>(assignedTickets);
+                    int thenCapacity = CheckStatement(branch.Then, thenAssigned, thenTickets);
+                    int elseCapacity = branch.Else == null ? 0 : CheckStatement(branch.Else, elseAssigned, elseTickets);
                     thenAssigned.IntersectWith(elseAssigned);
                     assigned.UnionWith(thenAssigned);
+                    thenTickets.IntersectWith(elseTickets);
+                    assignedTickets.UnionWith(thenTickets);
                     return Math.Max(thenCapacity, elseCapacity);
                 case GaLoop loop:
                     CheckValue(loop.Condition, assigned);
                     Require(loop.Condition.Type == GaScalar.Bool && loop.MaximumIterations >= 0);
                     var loopAssigned = new HashSet<int>(assigned);
-                    int loopCapacity = CheckStatement(loop.Body, loopAssigned) + CheckStatement(loop.Increment, loopAssigned);
+                    var loopTickets = new HashSet<int>(assignedTickets);
+                    int loopCapacity = CheckStatement(loop.Body, loopAssigned, loopTickets) +
+                        CheckStatement(loop.Increment, loopAssigned, loopTickets);
                     return Bound((long)loopCapacity * loop.MaximumIterations);
                 default:
                     throw new InvalidDataException("Unknown GA IR statement.");

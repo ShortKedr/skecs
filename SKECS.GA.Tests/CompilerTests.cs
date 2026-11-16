@@ -192,6 +192,137 @@ public sealed class CompilerTests
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
     }
 
+    [Fact]
+    public void DestroySharesTheEventOrderAndStagesOnlySuccessfulInvocations()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                p.Point.X = 42;
+                context.Emit(-11);
+                context.Destroy(entityId: 120 / p.Point.Y, generation: checked(v.X + 1));
+                context.Emit(p.Point.X);
+            }
+            """);
+        Assert.True(program.UsesCommands);
+        Assert.Equal(3, program.EventCapacity);
+        Assert.Equal(new[] { "Point.X", "Point.Y", "X" }, program.Fields.Select(field => field.Path));
+
+        uint[] row = [7, 4, 9];
+        var outputs = new List<GaOutputRecord> { GaOutputRecord.EmitInt32(1) };
+        Assert.Throws<InvalidOperationException>(() => GaInterpreter.Execute(program, row));
+        Assert.Throws<InvalidOperationException>(() => GaInterpreter.Execute(program, row, new int[3], out _));
+        Assert.Null(GaInterpreter.Execute(program, row, outputs));
+        Assert.Equal(42u, row[0]);
+        Assert.Equal(new[]
+        {
+            GaOutputRecord.EmitInt32(1),
+            GaOutputRecord.EmitInt32(-11),
+            GaOutputRecord.DestroyEntity(30, 10),
+            GaOutputRecord.EmitInt32(42)
+        }, outputs);
+
+        row = [7, 0, int.MaxValue];
+        var fault = GaInterpreter.Execute(program, row, outputs);
+        Assert.True(fault.HasValue);
+        Assert.Equal(GaFaultKind.DivideByZero, fault.Value.Kind);
+        Assert.Equal(0ul, fault.Value.EvaluationOrdinal);
+        Assert.Equal(7u, row[0]);
+        Assert.Equal(4, outputs.Count);
+
+        row = [7, 4, int.MaxValue];
+        fault = GaInterpreter.Execute(program, row, outputs);
+        Assert.True(fault.HasValue);
+        Assert.Equal(GaFaultKind.Overflow, fault.Value.Kind);
+        Assert.Equal(1ul, fault.Value.EvaluationOrdinal);
+        Assert.Equal(7u, row[0]);
+        Assert.Equal(4, outputs.Count);
+    }
+
+    [Fact]
+    public void TicketsUseTheCreatingOutputOrdinalAcrossBranchesAndIterations()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                context.Emit(-1);
+                context.Create();
+                var outer = context.Create();
+                if (v.X > 0)
+                {
+                    var branch = context.Create();
+                    context.Destroy(outer);
+                    context.Destroy(branch);
+                }
+                for (int i = 0; i < 2; ++i)
+                {
+                    var local = context.Create();
+                    context.Emit(i);
+                    context.Destroy(local);
+                }
+                p.Point.X = 100 / v.Y;
+                context.Destroy(outer);
+            }
+            """);
+        Assert.Equal(5, GaProgram.SubsetVersion);
+        Assert.Equal(5, GaProgram.IrVersion);
+        Assert.True(program.UsesCommands);
+        Assert.Equal(3, program.TicketLocalCount);
+        Assert.Equal(13, program.EventCapacity);
+        Assert.Equal(new[] { "X", "Point.X", "Y" }, program.Fields.Select(field => field.Path));
+
+        uint[] row = [1, 7, 5];
+        var outputs = new List<GaOutputRecord> { GaOutputRecord.EmitInt32(9) };
+        Assert.Null(GaInterpreter.Execute(program, row, outputs));
+        Assert.Equal(new[] { 1u, 20u, 5u }, row);
+        Assert.Equal(new[]
+        {
+            GaOutputRecord.EmitInt32(9),
+            GaOutputRecord.EmitInt32(-1), GaOutputRecord.CreateEntity(), GaOutputRecord.CreateEntity(),
+            GaOutputRecord.CreateEntity(), GaOutputRecord.DestroyTicket(2), GaOutputRecord.DestroyTicket(3),
+            GaOutputRecord.CreateEntity(), GaOutputRecord.EmitInt32(0), GaOutputRecord.DestroyTicket(6),
+            GaOutputRecord.CreateEntity(), GaOutputRecord.EmitInt32(1), GaOutputRecord.DestroyTicket(9),
+            GaOutputRecord.DestroyTicket(2)
+        }, outputs);
+
+        outputs.Clear();
+        row = [0, 7, 5];
+        Assert.Null(GaInterpreter.Execute(program, row, outputs));
+        Assert.Equal(new[]
+        {
+            GaOutputRecord.EmitInt32(-1), GaOutputRecord.CreateEntity(), GaOutputRecord.CreateEntity(),
+            GaOutputRecord.CreateEntity(), GaOutputRecord.EmitInt32(0), GaOutputRecord.DestroyTicket(3),
+            GaOutputRecord.CreateEntity(), GaOutputRecord.EmitInt32(1), GaOutputRecord.DestroyTicket(6),
+            GaOutputRecord.DestroyTicket(2)
+        }, outputs);
+
+        row = [1, 7, 0];
+        var fault = GaInterpreter.Execute(program, row, outputs);
+        Assert.True(fault.HasValue);
+        Assert.Equal(GaFaultKind.DivideByZero, fault.Value.Kind);
+        Assert.Equal(new[] { 1u, 7u, 0u }, row);
+        Assert.Equal(10, outputs.Count);
+    }
+
+    [Theory]
+    [InlineData("context.Destroy(default(GaEntityTicket));")]
+    [InlineData("var ticket = new GaEntityTicket(); context.Destroy(ticket);")]
+    [InlineData("var first = context.Create(); var second = first; context.Destroy(second);")]
+    [InlineData("var ticket = context.Create(); ticket = context.Create();")]
+    [InlineData("context.Destroy(context.Create());")]
+    [InlineData("var alias = context; var ticket = alias.Create(); context.Destroy(ticket);")]
+    public void RejectsTicketsWithoutTheirOriginalCreateLocal(string statements)
+    {
+        var result = Analyze($$"""
+            public void Execute(in SystemContext context, ref Position p)
+            {
+                {{statements}}
+            }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0006");
+    }
+
     private static GaProgram Compile(string body)
     {
         var result = Analyze(body);

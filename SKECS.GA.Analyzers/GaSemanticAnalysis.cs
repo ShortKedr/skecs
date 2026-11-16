@@ -83,10 +83,12 @@ public static partial class GaSemanticAnalysis
         private readonly CancellationToken cancellationToken;
         private readonly INamedTypeSymbol? entity;
         private readonly INamedTypeSymbol? context;
+        private readonly INamedTypeSymbol? ticket;
         private readonly INamedTypeSymbol? fixedType;
         private readonly List<IMethodSymbol> callChain = new();
         private readonly Dictionary<ITypeParameterSymbol, ITypeSymbol> typeArguments = new(SymbolEqualityComparer.Default);
         private readonly HashSet<IMethodSymbol> verified = new(SymbolEqualityComparer.Default);
+        private readonly HashSet<ILocalSymbol> ticketLocals = new(SymbolEqualityComparer.Default);
         private readonly HashSet<(string Id, SyntaxTree? Tree, int Start, string Reason)> reported = new();
         private readonly ImmutableArray<Diagnostic>.Builder diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
 
@@ -97,6 +99,7 @@ public static partial class GaSemanticAnalysis
             this.cancellationToken = cancellationToken;
             entity = compilation.GetTypeByMetadataName("SKECS.Entity");
             context = compilation.GetTypeByMetadataName("SKECS.GA.SystemContext");
+            ticket = compilation.GetTypeByMetadataName("SKECS.GA.GaEntityTicket");
             fixedType = compilation.GetTypeByMetadataName("SKECS.Numerics.Fixed");
         }
 

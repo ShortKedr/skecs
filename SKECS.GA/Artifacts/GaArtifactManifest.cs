@@ -16,6 +16,8 @@ public sealed record GaContractIdentity(
     public int EventCapacity { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool UsesSnapshot { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UsesCommands { get; init; }
 }
 
 public enum GaArtifactFormat { SpirV, Dxil, Dxbc, MetalLibrary, Wgsl }
@@ -92,6 +94,8 @@ public sealed record GaArtifactManifest(
             throw Invalid("Invalid contract event capacity.");
         if (Contract.UsesSnapshot && (Contract.SubsetVersion < 3 || Contract.IrVersion < 3))
             throw Invalid("Invalid contract version for scalar snapshot lookup.");
+        if (Contract.UsesCommands && (Contract.SubsetVersion < 4 || Contract.IrVersion < 4))
+            throw Invalid("Invalid contract version for structural commands.");
         ValidateText(Contract.SystemId, "system ID");
         ValidateText(Contract.SimulationContractId, "simulation contract ID");
         ValidateDigest(Contract.SourceDigest, "source");

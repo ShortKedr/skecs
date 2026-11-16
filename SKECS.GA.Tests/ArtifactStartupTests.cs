@@ -136,12 +136,66 @@ public sealed class ArtifactStartupTests
         Assert.Equal(2, device.Disposed);
     }
 
+    [Theory]
+    [InlineData(99u, 0u, 0u)]
+    [InlineData(GaOutputRecord.EmitInt32Kind, 9u, 1u)]
+    [InlineData(GaOutputRecord.CreateEntityKind, 1u, 0u)]
+    [InlineData(GaOutputRecord.DestroyTicketKind, 0u, 0u)]
+    [InlineData(GaOutputRecord.DestroyTicketKind, 1u, 0u)]
+    [InlineData(GaOutputRecord.DestroyTicketKind, uint.MaxValue, 0u)]
+    public void InvalidMixedOutputIsRejectedBeforeAnyBatchWrite(uint kind, uint first, uint second)
+    {
+        var fixture = new Fixture(mixedOutputs: true);
+        var device = new TestDevice { CreateKernel = () => new InvalidOutputKernel(kind, first, second) };
+        using var startup = GaStartup.Select(GaPolicy.RequireGpu,
+            [new(fixture.Contract, [fixture.Load()])], [device]);
+        var writes = 0;
+        var identity = fixture.Contract;
+        var processor = new GaBatchProcessor<byte>(startup, identity.SystemId, identity.SourceDigest,
+            identity.IrDigest, identity.ComponentSchemaDigest, 1, static (_, _) => { },
+            (_, count, _) => writes += count, identity.EventCapacity, observe: null, snapshot: null, usesCommands: true);
+        using var world = new World();
+        world.CreateEntity(new CommandTestComponent(1));
+        world.CreateEntity(new CommandTestComponent(2));
+        using var runner = new DeterministicRunner<byte>(world,
+            new DeterministicWorkload<byte>().AddBatchSystem(SystemStage.Update,
+                new DeterministicQuery().With<CommandTestComponent>(), processor));
+        runner.BeginTick(1, 0, SKECS.Numerics.Fixed.One);
+        Assert.True(System.Threading.SpinWait.SpinUntil(() =>
+            runner.Advance(1) != DeterministicTickStatus.Pending, TimeSpan.FromSeconds(5)));
+        Assert.IsType<InvalidDataException>(runner.Fault);
+        Assert.Equal(0, writes);
+        Assert.Null(runner.LastCompleted);
+    }
+
+    private readonly record struct CommandTestComponent(int Value);
+
+    private sealed class InvalidOutputKernel(uint kind, uint first, uint second) : GaPackedKernel(64, 1, 128, [])
+    {
+        protected override void Dispatch(uint groups, uint[] input, uint[] output, uint[] faults)
+        {
+            uint[] packet =
+            [
+                GaEventPacket.Version, 2, 2, GaOutputRecord.Words,
+                1, GaOutputRecord.CreateEntityKind, 0, 0, 0, 0, 0,
+                2, GaOutputRecord.EmitInt32Kind, 7, 0, kind, first, second
+            ];
+            packet.CopyTo(output, 2);
+        }
+
+        protected override void Release() { }
+    }
+
     private sealed class Fixture
     {
-        public Fixture(string systemId = "Movement")
+        public Fixture(string systemId = "Movement", bool mixedOutputs = false)
         {
             var digest = GaArtifactManifest.ComputeDigest(Shader);
-            Contract = new GaContractIdentity(systemId, "test/v1", digest, digest, digest, 1, 1, 1);
+            Contract = mixedOutputs
+                ? new GaContractIdentity(systemId, "test/v1", digest, digest, digest,
+                    GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion)
+                    { EventCapacity = 2, UsesCommands = true }
+                : new GaContractIdentity(systemId, "test/v1", digest, digest, digest, 1, 1, 1);
             var tool = new GaToolchain("2025.6.1", "SPIRV", GaArtifactFormat.SpirV, "spirv_1_3", [], ["B=1", "A=0"], []);
             var layout = new GaResourceLayout(8, 4, 8, [new("x", 0, 4, 0, 0), new("y", 4, 4, 0, 0)]);
             GaResourceBinding[] bindings =
@@ -175,6 +229,7 @@ public sealed class ArtifactStartupTests
         public int Prepared { get; private set; }
         public int Disposed { get; private set; }
         public bool ThrowOnFirstDispose { get; init; }
+        public Func<IGaPreparedKernel>? CreateKernel { get; init; }
         public GaQualification Qualification { get; init; } = GaQualification.Qualified;
         public GaStartupReason Failure { get; set; }
         public GaArtifactFormat Format => GaArtifactFormat.SpirV;
@@ -185,7 +240,7 @@ public sealed class ArtifactStartupTests
         public GaPreparation Prepare(GaArtifactBundle artifact)
         {
             Prepared++;
-            return new GaPreparation(Failure == GaStartupReason.None ? new TestHandle(this) : null, Failure);
+            return new GaPreparation(Failure == GaStartupReason.None ? CreateKernel?.Invoke() ?? new TestHandle(this) : null, Failure);
         }
 
         private sealed class TestHandle(TestDevice device) : IGaPreparedKernel

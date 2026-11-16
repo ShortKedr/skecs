@@ -51,7 +51,40 @@ public sealed class GaEventPacketTests
 
     private static int ReadCount(uint[] words) => new GaEventPacket(words).SourceCount;
 
+    [Fact]
+    public void InvalidCpuTicketDoesNotEnqueueThePrecedingCreate()
+    {
+        using var world = new World();
+        world.CreateEntity(new Value(1));
+        using var runner = new DeterministicRunner<byte>(world,
+            new DeterministicWorkload<byte>().AddSystem(SystemStage.Update,
+                new DeterministicQuery().With<Value>(), new RejectInvalidTicket()));
+        runner.BeginTick(1, 0, Fixed.One);
+
+        Assert.Equal(DeterministicTickStatus.Completed, runner.Advance(1));
+        var published = Assert.Single(runner.LastCompleted!.Events);
+        Assert.Equal(0, published.Key.LocalOrdinal);
+        Assert.Equal(17, published.Get<int>());
+        Assert.Equal(1, world.GetStorageStatistics().EntityCount);
+    }
+
     private readonly record struct Value(int Number);
+
+    private readonly struct RejectInvalidTicket : IDeterministicJobProcessor<byte>
+    {
+        public void Execute(DeterministicJob<byte> job)
+        {
+            var source = job.ForEntity(0);
+            try
+            {
+                GaOutputRecord.ApplySource(source, [GaOutputRecord.CreateEntity(), GaOutputRecord.DestroyTicket(9)]);
+            }
+            catch (InvalidDataException)
+            {
+                source.Emit(17);
+            }
+        }
+    }
 
     private readonly struct EmitPacket : IDeterministicJobProcessor<byte>
     {

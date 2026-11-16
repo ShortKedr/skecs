@@ -1,5 +1,8 @@
 namespace SKECS.GA;
 
+/// <summary>Refers to an entity created by an earlier command in the same invocation.</summary>
+public readonly ref struct GaEntityTicket { }
+
 /// <summary>Access to operations bound by a compiled GA system.</summary>
 public readonly ref struct SystemContext
 {
@@ -10,4 +13,16 @@ public readonly ref struct SystemContext
     /// <summary>Reads the bound Int32 snapshot, returning the fallback for an absent or stale key.</summary>
     public int ReadSnapshotInt32(int entityId, int generation, int fallback) =>
         throw new InvalidOperationException("Run a GA system through its compiled adapter to read snapshots.");
+
+    /// <summary>Requests destruction of the given entity generation at the system commit barrier.</summary>
+    public void Destroy(int entityId, int generation) =>
+        throw new InvalidOperationException("Run a GA system through its compiled adapter to enqueue commands.");
+
+    /// <summary>Requests entity creation at the system commit barrier.</summary>
+    public GaEntityTicket Create() =>
+        throw new InvalidOperationException("Run a GA system through its compiled adapter to enqueue commands.");
+
+    /// <summary>Requests destruction of an earlier creation from this invocation.</summary>
+    public void Destroy(GaEntityTicket ticket) =>
+        throw new InvalidOperationException("Run a GA system through its compiled adapter to enqueue commands.");
 }

@@ -366,6 +366,91 @@ public sealed class GaSystemAnalyzerTests
             diagnostic.Id == "GA0004" && Text(diagnostic) == "alias.ReadSnapshotInt32(1, 2, -3)");
     }
 
+    [Fact]
+    public async Task AdmitsDestroyOnTheEntryContext()
+    {
+        const string source = """
+            using SKECS.GA;
+            [SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(in SystemContext context, in int id)
+                {
+                    context.Destroy(entityId: id, generation: 2);
+                }
+            }
+            """;
+
+        Assert.Empty(await Analyze(source, useRuntime: true));
+    }
+
+    [Fact]
+    public async Task RejectsDestroyOnCopiedContextAndReorderedArguments()
+    {
+        const string source = """
+            using SKECS.GA;
+            [SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(in SystemContext context, in int id)
+                {
+                    var alias = context;
+                    alias.Destroy(id, 2);
+                    context.Destroy(generation: 2, entityId: id);
+                }
+            }
+            """;
+
+        var diagnostics = await Analyze(source, useRuntime: true);
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "GA0006" && Text(diagnostic) == "alias.Destroy(id, 2)");
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "GA0006" && Text(diagnostic) == "context.Destroy(generation: 2, entityId: id)");
+    }
+
+    [Fact]
+    public async Task AdmitsTicketCreationAndDestructionInTheSameEntryInvocation()
+    {
+        const string source = """
+            using SKECS.GA;
+            [SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(in SystemContext context, in int count)
+                {
+                    if (count > 0)
+                    {
+                        GaEntityTicket ticket = context.Create();
+                        context.Destroy(ticket: ticket);
+                    }
+                    context.Create();
+                }
+            }
+            """;
+        Assert.Empty(await Analyze(source, useRuntime: true));
+    }
+
+    [Fact]
+    public async Task RejectsPassingTicketsToHelpers()
+    {
+        const string source = """
+            using SKECS.GA;
+            [SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(in SystemContext context)
+                {
+                    var ticket = context.Create();
+                    Keep(ticket);
+                }
+                private static void Keep(GaEntityTicket ticket) { }
+            }
+            """;
+
+        Assert.Contains(await Analyze(source, useRuntime: true), diagnostic =>
+            diagnostic.Id == "GA0006" && Text(diagnostic) == "ticket");
+    }
+
     private static string Text(Diagnostic diagnostic) =>
         diagnostic.Location.SourceTree!.GetText().ToString(diagnostic.Location.SourceSpan);
 

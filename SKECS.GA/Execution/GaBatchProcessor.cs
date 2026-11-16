@@ -17,6 +17,7 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
     private readonly string _systemId;
     private readonly int _wordsPerRow;
     private readonly int _eventCapacity;
+    private readonly bool _usesCommands;
     private readonly PackJob _pack;
     private readonly ApplyJob _apply;
     private readonly Action<GaBatchTimings>? _observe;
@@ -40,6 +41,15 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
     public GaBatchProcessor(GaStartupResult startup, string systemId, string sourceDigest,
         string irDigest, string componentSchemaDigest, int wordsPerRow, PackJob pack, ApplyJob apply, int eventCapacity,
         Action<GaBatchTimings>? observe = null, GaTickSnapshot? snapshot = null)
+        : this(startup, systemId, sourceDigest, irDigest, componentSchemaDigest, wordsPerRow, pack, apply, eventCapacity,
+            observe, snapshot, usesCommands: false)
+    {
+    }
+
+    /// <summary>Binds a generated row codec with the stream format declared by its artifact.</summary>
+    public GaBatchProcessor(GaStartupResult startup, string systemId, string sourceDigest,
+        string irDigest, string componentSchemaDigest, int wordsPerRow, PackJob pack, ApplyJob apply, int eventCapacity,
+        Action<GaBatchTimings>? observe, GaTickSnapshot? snapshot, bool usesCommands)
     {
         ArgumentNullException.ThrowIfNull(startup);
         ArgumentException.ThrowIfNullOrWhiteSpace(systemId);
@@ -57,7 +67,8 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
         if (contract.SourceDigest != sourceDigest || contract.IrDigest != irDigest ||
             contract.ComponentSchemaDigest != componentSchemaDigest || contract.NumericVersion != GaProgram.NumericVersion ||
             contract.SubsetVersion != GaProgram.SubsetVersion || contract.IrVersion != GaProgram.IrVersion ||
-            contract.EventCapacity != eventCapacity || contract.UsesSnapshot != (snapshot is not null))
+            contract.EventCapacity != eventCapacity || contract.UsesSnapshot != (snapshot is not null) ||
+            contract.UsesCommands != usesCommands)
             throw new InvalidDataException($"The generated row codec does not match the prepared GA artifact for '{systemId}'.");
 
         _kernel = startup.GetPreparedKernel(systemId) as GaPackedKernel
@@ -65,6 +76,7 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
         _systemId = systemId;
         _wordsPerRow = wordsPerRow;
         _eventCapacity = eventCapacity;
+        _usesCommands = usesCommands;
         _pack = pack;
         _apply = apply;
         _observe = observe;
@@ -99,8 +111,11 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
         return pending;
     }
 
+    private int OutputRecordWords => _usesCommands ? GaOutputRecord.Words : 1;
+
     private int EventWords(int rowCount) =>
-        _eventCapacity == 0 || rowCount == 0 ? 0 : checked(GaEventPacket.HeaderWords + rowCount * (1 + _eventCapacity));
+        _eventCapacity == 0 || rowCount == 0 ? 0 :
+            checked(GaEventPacket.HeaderWords + rowCount * (1 + _eventCapacity * OutputRecordWords));
 
     private static int DecodeInt32Event(ReadOnlySpan<uint> words) => unchecked((int)words[0]);
 
@@ -156,12 +171,15 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
             if (eventWords != 0)
             {
                 events = new GaEventPacket(result.Output[rowWords..]);
-                if (events.SourceCount != _rowCount || events.CapacityPerSource != _owner._eventCapacity || events.EventWords != 1)
-                    throw new InvalidDataException("Graphics event readback does not match its declared Int32 stream.");
+                if (events.SourceCount != _rowCount || events.CapacityPerSource != _owner._eventCapacity ||
+                    events.EventWords != _owner.OutputRecordWords)
+                    throw new InvalidDataException("Graphics output readback does not match its declared stream.");
             }
 
             var firstFault = result.FindFirstFault();
             var successfulRows = firstFault?.Row ?? _rowCount;
+            if (eventWords != 0 && _owner._usesCommands)
+                events.ValidateMixedRecords(successfulRows);
             var endJobId = _firstJobId + _jobCount;
             var rowOffset = 0;
             for (var jobId = _firstJobId; jobId < endJobId; jobId++)
@@ -172,7 +190,12 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
                 {
                     _owner._apply(job, prefix, result.Output.Slice(rowOffset * wordsPerRow, prefix * wordsPerRow));
                     if (eventWords != 0)
-                        events.ApplyEntityRows<TInput, int>(job, rowOffset, prefix, DecodeInt32Event);
+                    {
+                        if (_owner._usesCommands)
+                            events.ApplyMixedEntityRows(job, rowOffset, prefix);
+                        else
+                            events.ApplyEntityRows<TInput, int>(job, rowOffset, prefix, DecodeInt32Event);
+                    }
                 }
                 if (prefix < job.Count && firstFault is { } failure)
                 {

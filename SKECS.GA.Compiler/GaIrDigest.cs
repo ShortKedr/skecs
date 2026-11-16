@@ -15,6 +15,7 @@ internal static class GaIrDigest
         writer.Write(program.Locals.Count);
         foreach (var local in program.Locals)
             writer.Write((byte)local);
+        writer.Write(program.TicketLocalCount);
         WriteStatement(writer, program.Body);
     });
 
@@ -29,6 +30,7 @@ internal static class GaIrDigest
     private static void WriteSchema(BinaryWriter writer, GaProgram program)
     {
         writer.Write(program.UsesSnapshot);
+        writer.Write(program.UsesCommands);
         writer.Write(program.EventCapacity);
         writer.Write(program.Components.Count);
         foreach (var component in program.Components)
@@ -80,6 +82,19 @@ internal static class GaIrDigest
             case GaEmit emit:
                 writer.Write((byte)4);
                 WriteValue(writer, emit.Value);
+                break;
+            case GaDestroy destroy:
+                writer.Write((byte)5);
+                WriteValue(writer, destroy.EntityId);
+                WriteValue(writer, destroy.Generation);
+                break;
+            case GaCreate create:
+                writer.Write((byte)6);
+                writer.Write(create.TicketSlot);
+                break;
+            case GaDestroyTicket destroy:
+                writer.Write((byte)7);
+                writer.Write(destroy.TicketSlot);
                 break;
             default:
                 throw new InvalidOperationException("Unknown GA IR statement.");

@@ -178,9 +178,6 @@ static async Task<GpuBuildResult> BuildGpu(
 {
     if (request.Policy == GaPolicy.CpuOnly)
         return new GpuBuildResult(GpuBuildStatus.NotRequested);
-    if (program.Fields.Count == 0)
-        return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "GpuLoweringUnavailable",
-            Detail: "The packed graphics profile requires at least one component field.");
     if (request.SlangAdapter is null || !File.Exists(Path.GetFullPath(request.SlangAdapter, requestDirectory)))
         return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SlangAdapterMissing",
             Detail: "Supply the pinned Slang API adapter executable to build a GPU package.");

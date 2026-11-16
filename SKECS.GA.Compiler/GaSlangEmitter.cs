@@ -19,8 +19,6 @@ public static class GaSlangEmitter
     private static GaSlangModule Emit(GaProgram program, bool vulkan)
     {
         ArgumentNullException.ThrowIfNull(program);
-        if (program.Fields.Count == 0)
-            throw new ArgumentException("The packed graphics profile requires at least one component field.", nameof(program));
         return new Emitter().Emit(program, vulkan);
     }
 
@@ -31,10 +29,12 @@ public static class GaSlangEmitter
         private int _indent;
         private int _temporary;
         private int _eventCapacity;
+        private bool _usesCommands;
 
         internal GaSlangModule Emit(GaProgram program, bool vulkan)
         {
             _eventCapacity = program.EventCapacity;
+            _usesCommands = program.UsesCommands;
             if (program.UsesFixed)
                 _code.Append(GaFixedSlangLibrary.Load()).Append('\n');
             if (program.UsesSnapshot)
@@ -57,7 +57,7 @@ public static class GaSlangEmitter
             Line("void main(uint3 id : SV_DispatchThreadID)");
             Open();
             Line("if (id.x >= gaInput[0]) return;");
-            int stride = program.WordCount;
+            int stride = Math.Max(1, program.WordCount);
             Line($"uint gaRow = id.x * {Word(stride)};");
             Line($"uint gaFault = id.x * {Word(GaSlangModule.FaultStride)};");
             Line("uint2 gaOrdinal = uint2(0u, 0u);");
@@ -75,7 +75,11 @@ public static class GaSlangEmitter
             }
             for (int i = 0; i < program.Locals.Count; i++)
                 Line($"{Type(program.Locals[i])} {Local(i)} = {Literal(program.Locals[i], 0)};");
+            for (int i = 0; i < program.TicketLocalCount; i++)
+                Line($"uint {Ticket(i)} = {Word(uint.MaxValue)};");
             Statement(program.Body);
+            if (program.WordCount == 0)
+                Line("gaOutput[gaRow] = 0u;");
             for (int i = 0; i < program.Fields.Count; i++)
             {
                 int offset = program.Offsets[i];
@@ -115,15 +119,16 @@ public static class GaSlangEmitter
 
         private void EventLayout(int stride)
         {
+            int recordWords = _usesCommands ? GaOutputRecord.Words : 1;
             Line($"uint gaEvents = gaInput[0] * {Word(stride)};");
             Line("if (id.x == 0u)");
             Open();
             Line($"gaOutput[gaEvents] = {Word(GaEventPacket.Version)};");
             Line("gaOutput[gaEvents + 1u] = gaInput[0];");
             Line($"gaOutput[gaEvents + 2u] = {Word(_eventCapacity)};");
-            Line("gaOutput[gaEvents + 3u] = 1u;");
+            Line($"gaOutput[gaEvents + 3u] = {Word(recordWords)};");
             Close();
-            Line($"uint gaEventRow = gaEvents + {Word(GaEventPacket.HeaderWords)} + id.x * {Word(checked(_eventCapacity + 1))};");
+            Line($"uint gaEventRow = gaEvents + {Word(GaEventPacket.HeaderWords)} + id.x * {Word(checked(1 + _eventCapacity * recordWords))};");
             Line("uint gaEventCount = 0u;");
             // Fault returns leave the row's event count zero.
             Line("gaOutput[gaEventRow] = 0u;");
@@ -143,9 +148,35 @@ public static class GaSlangEmitter
                 case GaEmit emission:
                     if (_eventCapacity != 0)
                     {
-                        Line($"gaOutput[gaEventRow + 1u + gaEventCount] = {Value(emission.Value)};");
-                        Line("++gaEventCount;");
+                        string value = Value(emission.Value);
+                        if (_usesCommands)
+                            WriteOutput(GaOutputRecord.EmitInt32Kind, value, "0u");
+                        else
+                        {
+                            Line($"gaOutput[gaEventRow + 1u + gaEventCount] = {value};");
+                            Line("++gaEventCount;");
+                        }
                     }
+                    break;
+                case GaDestroy destroy:
+                    if (_eventCapacity != 0)
+                    {
+                        string entityId = Temp(Value(destroy.EntityId));
+                        string generation = Temp(Value(destroy.Generation));
+                        WriteOutput(GaOutputRecord.DestroyEntityKind, entityId, generation);
+                    }
+                    break;
+                case GaCreate create:
+                    if (_eventCapacity != 0)
+                    {
+                        if (create.TicketSlot >= 0)
+                            Line($"{Ticket(create.TicketSlot)} = gaEventCount;");
+                        WriteOutput(GaOutputRecord.CreateEntityKind, "0u", "0u");
+                    }
+                    break;
+                case GaDestroyTicket destroy:
+                    if (_eventCapacity != 0)
+                        WriteOutput(GaOutputRecord.DestroyTicketKind, Ticket(destroy.TicketSlot), "0u");
                     break;
                 case GaIf branch:
                     Line($"if ({Value(branch.Condition)} != 0u)");
@@ -176,6 +207,17 @@ public static class GaSlangEmitter
                     throw new InvalidOperationException("Unknown GA IR statement.");
             }
         }
+
+        private void WriteOutput(uint kind, string first, string second)
+        {
+            string offset = Temp($"gaEventRow + 1u + gaEventCount * {Word(GaOutputRecord.Words)}");
+            Line($"gaOutput[{offset}] = {Word(kind)};");
+            Line($"gaOutput[{offset} + 1u] = {first};");
+            Line($"gaOutput[{offset} + 2u] = {second};");
+            Line("++gaEventCount;");
+        }
+
+        private static string Ticket(int index) => "gaTicket" + index.ToString(CultureInfo.InvariantCulture);
 
         private string Value(GaValue value)
         {

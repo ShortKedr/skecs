@@ -22,6 +22,7 @@ public static class GaCpuAdapterEmitter
     private sealed class Emitter(GaProgram program)
     {
         private const string FixedType = "global::SKECS.Numerics.Fixed";
+        private const string OutputType = "global::SKECS.GA.GaOutputRecord";
         private readonly StringBuilder _code = new();
         private readonly Dictionary<string, int> _components = program.Components.Select((component, index) => (component, index))
             .ToDictionary(item => item.component.Id, item => item.index, StringComparer.Ordinal);
@@ -102,7 +103,8 @@ public static class GaCpuAdapterEmitter
             {
                 string capacity = Number(program.EventCapacity);
                 string allocation = program.EventCapacity <= 128 ? "stackalloc" : "new";
-                Line($"global::System.Span<int> stagedEvents = {allocation} int[{capacity}];");
+                string elementType = program.UsesCommands ? OutputType : "int";
+                Line($"global::System.Span<{elementType}> stagedEvents = {allocation} {elementType}[{capacity}];");
             }
             Line("for (int row = 0; row < job.Count; row++)");
             Open();
@@ -112,6 +114,8 @@ public static class GaCpuAdapterEmitter
                 Line($"var component{Number(index)} = job.Read<{program.Components[index].Id}>(row);");
             for (int index = 0; index < program.Locals.Count; index++)
                 Line($"{Scalar(program.Locals[index])} local{Number(index)} = default;");
+            for (int index = 0; index < program.TicketLocalCount; index++)
+                Line($"int ticket{Number(index)} = -1;");
             if (_sources.Count != 0)
                 Line("var faults = new __GaFaultState<TInput>(job, row);");
             _code.Append(body);
@@ -120,8 +124,13 @@ public static class GaCpuAdapterEmitter
             if (program.EventCapacity != 0)
             {
                 Line("var eventSource = job.ForEntity(row);");
-                Line("for (int i = 0; i < eventCount; i++)");
-                Line("    eventSource.Emit(stagedEvents[i]);");
+                if (program.UsesCommands)
+                    Line($"{OutputType}.ApplySource(eventSource, stagedEvents[..eventCount]);");
+                else
+                {
+                    Line("for (int i = 0; i < eventCount; i++)");
+                    Line("    eventSource.Emit(stagedEvents[i]);");
+                }
             }
             Close();
             Close();
@@ -152,7 +161,33 @@ public static class GaCpuAdapterEmitter
                 case GaEmit emission:
                     if (program.EventCapacity != 0)
                     {
-                        Line($"stagedEvents[eventCount] = {Expression(emission.Value)};");
+                        string value = Expression(emission.Value);
+                        if (program.UsesCommands)
+                            value = $"{OutputType}.EmitInt32({value})";
+                        Line($"stagedEvents[eventCount] = {value};");
+                        Line("eventCount++;");
+                    }
+                    break;
+                case GaDestroy destroy:
+                    if (program.EventCapacity != 0)
+                    {
+                        Line($"stagedEvents[eventCount] = {OutputType}.DestroyEntity({Expression(destroy.EntityId)}, {Expression(destroy.Generation)});");
+                        Line("eventCount++;");
+                    }
+                    break;
+                case GaCreate create:
+                    if (program.EventCapacity != 0)
+                    {
+                        if (create.TicketSlot >= 0)
+                            Line($"ticket{Number(create.TicketSlot)} = eventCount;");
+                        Line($"stagedEvents[eventCount] = {OutputType}.CreateEntity();");
+                        Line("eventCount++;");
+                    }
+                    break;
+                case GaDestroyTicket destroy:
+                    if (program.EventCapacity != 0)
+                    {
+                        Line($"stagedEvents[eventCount] = {OutputType}.DestroyTicket(ticket{Number(destroy.TicketSlot)});");
                         Line("eventCount++;");
                     }
                     break;

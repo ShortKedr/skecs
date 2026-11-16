@@ -8,6 +8,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private readonly Dictionary<IParameterSymbol, GaComponent> _components = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<(string Component, string Path), GaSlot> _fields = new();
     private readonly Dictionary<ILocalSymbol, GaSlot> _locals = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<ILocalSymbol, int> _ticketLocals = new(SymbolEqualityComparer.Default);
     private readonly List<GaField> _schema = new();
     private readonly List<GaScalar> _localTypes = new();
     private IParameterSymbol? _context;
@@ -42,7 +43,8 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         var components = entry.Parameters.Where(_components.ContainsKey).Select(parameter => _components[parameter]).ToArray();
         try
         {
-            return new GaProgram(systemId, sourceDigest, components, _schema.ToArray(), _localTypes.ToArray(), root);
+            return new GaProgram(systemId, sourceDigest, components, _schema.ToArray(), _localTypes.ToArray(),
+                root, _ticketLocals.Count);
         }
         catch (GaEventCapacityException error)
         {
@@ -58,14 +60,8 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 return new GaBlock(block.Operations.Select(LowerStatement).ToArray());
             case IExpressionStatementOperation expression:
                 return LowerStatement(expression.Operation);
-            case IInvocationOperation invocation when _context != null &&
-                invocation.Instance is IParameterReferenceOperation receiver &&
-                SymbolEqualityComparer.Default.Equals(receiver.Parameter, _context) &&
-                IsSystemContext(invocation.TargetMethod.ContainingType) &&
-                invocation.TargetMethod is { Name: "Emit", IsStatic: false, Arity: 0, ReturnsVoid: true } &&
-                invocation.TargetMethod.Parameters is [{ RefKind: RefKind.None, Type.SpecialType: SpecialType.System_Int32 }] &&
-                invocation.Arguments is [{ Value: var value }]:
-                return new GaEmit(LowerValue(value));
+            case IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType):
+                return LowerContextStatement(invocation);
             case IEmptyOperation:
                 return new GaBlock(Array.Empty<GaStatement>());
             case IVariableDeclarationGroupOperation group:
@@ -75,6 +71,14 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             case IVariableDeclaratorOperation declarator:
                 if (declarator.Symbol.RefKind != RefKind.None)
                     throw Unsupported(declarator, "GA locals cannot alias storage.");
+                if (IsEntityTicket(declarator.Symbol.Type))
+                {
+                    if (declarator.Initializer?.Value is not IInvocationOperation creation || !IsCreateCall(creation))
+                        throw Unsupported(declarator, "Initialize a GA ticket local directly with the entry context's Create().");
+                    int ticketSlot = _ticketLocals.Count;
+                    _ticketLocals.Add(declarator.Symbol, ticketSlot);
+                    return new GaCreate(ticketSlot);
+                }
                 var type = Scalar(declarator.Symbol.Type, declarator);
                 var local = AddLocal(type);
                 _locals.Add(declarator.Symbol, local);
@@ -107,6 +111,39 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 throw Unsupported(operation);
         }
     }
+
+    private GaStatement LowerContextStatement(IInvocationOperation invocation)
+    {
+        if (IsCreateCall(invocation))
+            return new GaCreate(-1);
+
+        var method = invocation.TargetMethod;
+        if (!IsContextReceiver(invocation) || method is not { IsStatic: false, Arity: 0, ReturnsVoid: true })
+            throw Unsupported(invocation);
+        if (method.Name == "Destroy" && method.Parameters is [{ RefKind: RefKind.None, Type: var type }] &&
+            IsEntityTicket(type))
+        {
+            if (invocation.Arguments is [{ Parameter.Ordinal: 0, Value: ILocalReferenceOperation reference }] &&
+                _ticketLocals.TryGetValue(reference.Local, out int ticketSlot))
+                return new GaDestroyTicket(ticketSlot);
+            throw Unsupported(invocation, "Pass a ticket local initialized by this invocation's Create().");
+        }
+        if (!HasInt32Parameters(method))
+            throw Unsupported(invocation);
+
+        return (method.Name, method.Parameters.Length, invocation.Arguments) switch
+        {
+            ("Emit", 1, [{ Parameter.Ordinal: 0 } value]) => new GaEmit(LowerValue(value.Value)),
+            ("Destroy", 2, [{ Parameter.Ordinal: 0 } entityId, { Parameter.Ordinal: 1 } generation]) =>
+                new GaDestroy(LowerValue(entityId.Value), LowerValue(generation.Value)),
+            _ => throw Unsupported(invocation,
+                "Call context operations directly on the in SystemContext parameter, with arguments in declaration order.")
+        };
+    }
+
+    private bool IsCreateCall(IInvocationOperation invocation) =>
+        invocation.TargetMethod is { Name: "Create", IsStatic: false, Arity: 0, Parameters.Length: 0 } method &&
+        IsSystemContext(method.ContainingType) && IsEntityTicket(method.ReturnType) && IsContextReceiver(invocation);
 
     private GaStatement LowerFor(IForLoopOperation loop)
     {
@@ -273,16 +310,22 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         if (method is not { Name: "ReadSnapshotInt32", IsStatic: false, Arity: 0 } ||
             method.ReturnType.SpecialType != SpecialType.System_Int32 ||
             method.Parameters.Length != 3 ||
-            method.Parameters.Any(parameter => parameter.RefKind != RefKind.None ||
-                parameter.Type.SpecialType != SpecialType.System_Int32) ||
+            !HasInt32Parameters(method) ||
             invocation.Arguments is not [{ Parameter.Ordinal: 0 } entityId,
                 { Parameter.Ordinal: 1 } generation, { Parameter.Ordinal: 2 } fallback] ||
-            invocation.Instance is not IParameterReferenceOperation receiver ||
-            !SymbolEqualityComparer.Default.Equals(receiver.Parameter, _context))
+            !IsContextReceiver(invocation))
             throw Unsupported(invocation, "Call ReadSnapshotInt32 directly on the in SystemContext parameter, with arguments in declaration order.");
         return new GaSnapshotRead(LowerValue(entityId.Value), LowerValue(generation.Value),
             LowerValue(fallback.Value), Source(invocation));
     }
+
+    private bool IsContextReceiver(IInvocationOperation invocation) =>
+        invocation.Instance is IParameterReferenceOperation receiver &&
+        SymbolEqualityComparer.Default.Equals(receiver.Parameter, _context);
+
+    private static bool HasInt32Parameters(IMethodSymbol method) =>
+        method.Parameters.All(parameter => parameter.RefKind == RefKind.None &&
+            parameter.Type.SpecialType == SpecialType.System_Int32);
 
     private GaValue ConvertValue(GaScalar type, IConversionOperation conversion)
     {
@@ -420,6 +463,10 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private static bool IsSystemContext(ITypeSymbol type) =>
         type.IsRefLikeType && type.ContainingAssembly?.Identity.Name == "SKECS.GA" &&
         type.DeclaringSyntaxReferences.Length == 0 && QualifiedName(type) == "global::SKECS.GA.SystemContext";
+
+    private static bool IsEntityTicket(ITypeSymbol type) =>
+        type.IsRefLikeType && type.ContainingAssembly?.Identity.Name == "SKECS.GA" &&
+        type.DeclaringSyntaxReferences.Length == 0 && QualifiedName(type) == "global::SKECS.GA.GaEntityTicket";
 
     private GaSourceSpan Source(IOperation operation)
     {

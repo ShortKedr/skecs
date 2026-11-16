@@ -64,7 +64,8 @@ internal static class GaArtifactPackager
                 GaProgram.SubsetVersion, GaProgram.IrVersion)
             {
                 EventCapacity = program.EventCapacity,
-                UsesSnapshot = program.UsesSnapshot
+                UsesSnapshot = program.UsesSnapshot,
+                UsesCommands = program.UsesCommands
             },
             toolchain, GaSlangModule.EntryPoint, bindings, usage,
             new GaKernelRequirements(program.UsesFixed ? GaComputeProfiles.WideFixedEmulated : GaComputeProfiles.Portable32,
