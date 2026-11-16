@@ -5,7 +5,7 @@ param(
     [ValidateRange(0, 2147483647)]
     [ValidateNotNullOrEmpty()]
     [int[]]$DeviceIndex = @(0),
-    [ValidateSet('smoke', 'matrix')]
+    [ValidateSet('smoke', 'matrix', 'short', 'long')]
     [ValidateNotNullOrEmpty()]
     [string[]]$Profile = @('matrix'),
     [ValidateRange(1, 1024)]

@@ -221,7 +221,7 @@ internal static class GaArtifactPackager
         string command = format switch
         {
             GaArtifactFormat.Dxil => "compile-dxil",
-            GaArtifactFormat.Dxbc => "compile-dxbc",
+            GaArtifactFormat.Dxbc => "compile-dxbc-hlsl",
             _ => "compile"
         };
         List<string> arguments = [command, source, GaSlangModule.EntryPoint, binary, reflection];

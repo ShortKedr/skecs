@@ -644,7 +644,8 @@ int main(int argc, char** argv)
 #endif
         }
         const bool buildDxil = argc == 7 && std::string_view(argv[1]) == "compile-dxil";
-        const bool buildDxbc = argc == 7 && std::string_view(argv[1]) == "compile-dxbc";
+        const bool buildDxbc = argc == 7 && (std::string_view(argv[1]) == "compile-dxbc-hlsl"
+            || std::string_view(argv[1]) == "compile-dxbc");
         const bool build = buildDxil || buildDxbc || (argc == 6 && std::string_view(argv[1]) == "compile");
         const bool d3d12 = buildDxil || (argc == 5 && std::string_view(argv[1]) == "d3d12");
 #if !SKECS_GA_PROBE_D3D12
@@ -657,7 +658,7 @@ int main(int argc, char** argv)
 #if SKECS_GA_PROBE_D3D12
             "       ga-slang-probe d3d12 <Probe.slang> <out directory> <DXC directory>\n"
             "       ga-slang-probe compile-dxil <source.slang> <entry> <out.dxil> <out.layout> <DXC directory>\n"
-            "       ga-slang-probe compile-dxbc <source.slang> <entry> <out.dxbc> <out.layout> <FXC directory>\n"
+            "       ga-slang-probe compile-dxbc-hlsl <source.slang> <entry> <out.dxbc> <out.layout> <FXC directory>\n"
 #endif
         );
         std::ifstream sourceFile(argv[build || d3d12 ? 2 : 1], std::ios::binary);

@@ -102,7 +102,7 @@ try {
     $env:Path = (Join-Path $sdk 'Bin') + [IO.Path]::PathSeparator + $oldPath
     if ($FxcDirectory) {
         $startupDxbc = Join-Path $output 'startup.api.dxbc'
-        & (Join-Path $output 'ga-slang-probe.exe') compile-dxbc (Join-Path $PSScriptRoot 'StartupProbe.slang') main `
+        & (Join-Path $output 'ga-slang-probe.exe') compile-dxbc-hlsl (Join-Path $PSScriptRoot 'StartupProbe.slang') main `
             $startupDxbc (Join-Path $output 'startup.dxbc.api.layout') $FxcDirectory
         if ($LASTEXITCODE -ne 0) {
             throw 'Slang API DXBC storage compiler probe failed.'

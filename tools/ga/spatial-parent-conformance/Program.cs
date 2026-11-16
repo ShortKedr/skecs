@@ -89,19 +89,19 @@ async Task Exercise(string profile, GaStartupResult? startup)
 void Exercise(string profile, GaStartupResult? startup)
 #endif
 {
-    var scenarios = SelectCases(profile);
+    var (scenarios, ticks) = SelectCases(profile);
     var totals = default(Totals);
     foreach (var scenario in scenarios)
 #if GA_BROWSER_CONFORMANCE
-        totals += await SpatialScenario.Run(scenario, startup, contract);
+        totals += await SpatialScenario.Run(scenario, ticks, startup, contract);
 #else
-        totals += SpatialScenario.Run(scenario, startup, contract);
+        totals += SpatialScenario.Run(scenario, ticks, startup, contract);
 #endif
     Require(totals.Witnesses == Witness.All, $"The corpus missed {Witness.All & ~totals.Witnesses}.");
     Require(totals.Queries > 0 && (startup is null ? totals.Batches == 0 : totals.Batches > 0),
         "The corpus did not execute its selected route.");
     Console.WriteLine($"SpatialParent route={(startup is null ? "cpu" : "gpu")} profile={profile} cases={scenarios.Length} " +
-        $"ticks={8 * scenarios.Length} queries={totals.Queries} candidateOccurrences={totals.Candidates} duplicates={totals.Duplicates} " +
+        $"ticks={ticks * scenarios.Length} queries={totals.Queries} candidateOccurrences={totals.Candidates} duplicates={totals.Duplicates} " +
         $"exactUnique={totals.Exact} staleTargets={totals.Stale} deviceRows={(startup is null ? 0 : totals.Queries)} " +
         $"deviceBatches={totals.Batches} witnesses={totals.Witnesses} " +
         "exactState=passed exactTypedEvents=passed bruteForceCoverage=passed sealAddClear=passed");
@@ -110,8 +110,10 @@ void Exercise(string profile, GaStartupResult? startup)
 #endif
 }
 
-static Scenario[] SelectCases(string profile)
+static (Scenario[] Scenarios, int Ticks) SelectCases(string profile)
 {
+    if (profile is "short" or "long")
+        return ([new(65, 27, 127, 64)], profile == "short" ? 1_000 : 100_000);
     int[] rows = [0, 1, 63, 64, 65, 127, 128, 129, 1024];
     uint[] seeds = [0, 1, 27, 7331, uint.MaxValue];
     int[] chunks = [1, 64, 127, 256];
@@ -129,7 +131,7 @@ static Scenario[] SelectCases(string profile)
             scenarios.Add(new Scenario(rowCount, seeds[seed], chunks[i % chunks.Length], budgets[i % budgets.Length]));
         }
     }
-    return scenarios.ToArray();
+    return (scenarios.ToArray(), 8);
 }
 
 #if !GA_BROWSER_CONFORMANCE

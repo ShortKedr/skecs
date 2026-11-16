@@ -72,9 +72,9 @@ internal sealed class SpatialScenario
     }
 
 #if GA_BROWSER_CONFORMANCE
-    public static async Task<Totals> Run(Scenario scenario, GaStartupResult? startup, GaContractIdentity contract)
+    public static async Task<Totals> Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
 #else
-    public static Totals Run(Scenario scenario, GaStartupResult? startup, GaContractIdentity contract)
+    public static Totals Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
 #endif
     {
         using var world = new World(new WorldOptions(scenario.Chunk));
@@ -99,7 +99,7 @@ internal sealed class SpatialScenario
         using var runner = new DeterministicRunner<byte>(world, workload);
 #endif
         var total = default(Totals);
-        for (int tick = 1; tick <= 8; tick++)
+        for (int tick = 1; tick <= ticks; tick++)
         {
             var (expected, packed, witnesses) = test.Prepare(tick, snapshot);
             buffer.Bind(tick, SpatialAdapterRowCodec.Buffer.Capture(CollectionsMarshal.AsSpan(packed)));
@@ -115,6 +115,8 @@ internal sealed class SpatialScenario
             if (startup is not null && deviceRows != (long)scenario.Rows * tick)
                 throw new InvalidDataException($"Incomplete device execution at {scenario}, tick {tick}.");
             total += test.Compare(runner.LastCompleted!, tick, expected, witnesses);
+            if (tick % 1_000 == 0)
+                Console.WriteLine($"progress tick={tick}/{ticks} deviceBatches={batches} deviceRows={deviceRows}");
         }
         return total with { Batches = batches };
     }
