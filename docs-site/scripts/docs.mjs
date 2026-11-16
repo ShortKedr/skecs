@@ -8,7 +8,7 @@ const site = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const root = resolve(site, '..')
 const docsBase = process.env.SKECS_DOCS_BASE || '/'
 if (!/^\/(?:[\w.-]+\/)*$/.test(docsBase) || docsBase.split('/').some(segment => segment === '.' || segment === '..')) {
-  throw new Error('SKECS_DOCS_BASE must be an absolute URL directory, e.g. /skecs/docs/')
+  throw new Error('SKECS_DOCS_BASE must be an absolute URL directory, e.g. /skecs/')
 }
 const tooling = join(root, 'artifacts/tooling')
 const temp = join(tooling, 'tmp/docs-site')

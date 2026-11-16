@@ -1,6 +1,6 @@
 param(
     [string]$OutputDirectory = "artifacts/tooling/tmp/web-publish",
-    [string]$BasePath = "/skecs/",
+    [string]$BasePath = "/skecs/demo/",
     [switch]$Interpreter,
     [string]$ArtifactsDirectory = "artifacts/tooling/tmp/web-build",
     [string]$NodeExecutable = "node",
@@ -19,7 +19,7 @@ if (-not $artifacts.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [Strin
 if ($artifacts -eq $output -or $artifacts.StartsWith($output + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($artifacts + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw "Publish and intermediate artifact directories must be separate."
 }
-if ($BasePath -notmatch '^/([a-zA-Z0-9_-]+/)*$') { throw "BasePath must be an absolute URL directory, e.g. /skecs/ or /." }
+if ($BasePath -notmatch '^/([a-zA-Z0-9_-]+/)*$') { throw "BasePath must be an absolute URL directory, e.g. /skecs/demo/ or /." }
 if (Test-Path -LiteralPath (Join-Path $output "wwwroot/build-identity.json")) {
     throw "OutputDirectory already contains a finalized site. Choose a fresh directory to preserve earlier builds."
 }
@@ -48,7 +48,7 @@ try {
     if ($html -notmatch '<base href="[^"]*"\s*/?>') { throw "Missing base URL in index.html." }
     $html = [Text.RegularExpressions.Regex]::Replace($html, '<base href="[^"]*"\s*/?>', '<base href="' + $BasePath + '">')
     if ($IncludeDocsLink) {
-        $docsLink = '<a id="skecs-docs" href="docs/" data-tip="docs" aria-label="SKECS documentation"><i data-lucide="book-open"></i></a>'
+        $docsLink = '<a id="skecs-docs" href="../" data-tip="docs" aria-label="SKECS documentation"><i data-lucide="book-open"></i></a>'
         if (-not $html.Contains('<!-- SKECS docs link -->')) { throw "Missing SKECS docs link placeholder." }
         $html = $html.Replace('<!-- SKECS docs link -->', $docsLink)
     }

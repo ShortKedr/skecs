@@ -4,7 +4,7 @@
 
 Браузерный клиент пяти независимых C#-симуляций флотов: SKECS, LeoEcsLite, LeoEcs Classic, Morpeh и StaticEcs. Production использует .NET 8 Mono AOT WebAssembly; Canvas рисует сцену. Корабли сражаются сами, пользователь управляет камерой и скоростью.
 
-[Демо](https://shortkedr.github.io/skecs/) | [Демо на русском](https://shortkedr.github.io/skecs/?lang=ru) | [Обзор SpaceBattle](../docs/space-battle/README.ru.md) | [Текущий отчёт](../docs/space-battle/REPORT.ru.md)
+[Демо](https://shortkedr.github.io/skecs/demo/) | [Демо на русском](https://shortkedr.github.io/skecs/demo/?lang=ru) | [Обзор SpaceBattle](../docs/space-battle/README.ru.md) | [Текущий отчёт](../docs/space-battle/REPORT.ru.md)
 
 Ссылка ведёт на цель развёртывания. Локальные изменения её не обновляют; опубликованная сборка может отличаться от этого checkout.
 

@@ -19,7 +19,7 @@ autonomous Space Battle sample.
 
 | Your goal | Where to go |
 | --- | --- |
-| Use the library | [Quickstart](#quickstart) · [Package installation](docs/skecs/INSTALL.md) · [API and lifetime rules](docs/skecs/README.md) · [Sample source](SKECS.Sample/Program.cs) |
+| Use the library | [Release documentation](https://shortkedr.github.io/skecs/) · [Quickstart](#quickstart) · [Package installation](docs/skecs/INSTALL.md) · [API and lifetime rules](docs/skecs/README.md) · [Sample source](SKECS.Sample/Program.cs) |
 | Work on SKECS | [Implemented optimizations](docs/SKECS_OPTIMIZATION.md) · [Tests](SKECS.Tests) |
 | Read or reproduce measurements | [ECS benchmarks](SKECS.Benchmarks/README.md) · [SpaceBattle benchmarks](SpaceBattle.Benchmarks/README.md) · [Space Battle report](docs/space-battle/REPORT.md) |
 | Run the game | [Desktop](SpaceBattle.Game/README.md) · [Web](SpaceBattle.Web/README.md) |
@@ -46,7 +46,7 @@ references, structural changes, and chunk iteration.
 
 ## Space Battle
 
-**[Play in your browser](https://shortkedr.github.io/skecs/)** ·
+**[Play in your browser](https://shortkedr.github.io/skecs/demo/)** ·
 **[Read the benchmark report](docs/space-battle/REPORT.md)**
 
 Autonomous fleets use AI steering, intercept aiming, turrets, shields, carrier

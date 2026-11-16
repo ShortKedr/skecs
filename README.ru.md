@@ -19,7 +19,7 @@
 
 | Ваша задача | Куда перейти |
 | --- | --- |
-| Использовать библиотеку | [Быстрый старт](#быстрый-старт) · [Установка пакета](docs/skecs/INSTALL.ru.md) · [API и правила времени жизни](docs/skecs/README.ru.md) · [Исходник примера](SKECS.Sample/Program.cs) |
+| Использовать библиотеку | [Документация релизов](https://shortkedr.github.io/skecs/ru/) · [Быстрый старт](#быстрый-старт) · [Установка пакета](docs/skecs/INSTALL.ru.md) · [API и правила времени жизни](docs/skecs/README.ru.md) · [Исходник примера](SKECS.Sample/Program.cs) |
 | Развивать SKECS | [Реализованные оптимизации](docs/SKECS_OPTIMIZATION.ru.md) · [Тесты](SKECS.Tests) |
 | Прочитать или воспроизвести измерения | [Бенчмарки ECS](SKECS.Benchmarks/README.ru.md) · [Бенчмарки SpaceBattle](SpaceBattle.Benchmarks/README.ru.md) · [Отчёт Space Battle](docs/space-battle/REPORT.ru.md) |
 | Запустить игру | [Desktop](SpaceBattle.Game/README.ru.md) · [Web](SpaceBattle.Web/README.ru.md) |
@@ -46,7 +46,7 @@ dotnet test SKECS.Tests/SKECS.Tests.csproj -c Release
 
 ## Space Battle
 
-**[Открыть в браузере](https://shortkedr.github.io/skecs/?lang=ru)** ·
+**[Открыть в браузере](https://shortkedr.github.io/skecs/demo/?lang=ru)** ·
 **[Читать отчёт о бенчмарках](docs/space-battle/REPORT.ru.md)**
 
 Автономные флоты используют управление через AI, стрельбу с упреждением,

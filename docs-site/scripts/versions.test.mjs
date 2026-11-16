@@ -30,7 +30,7 @@ test('unregistered versions and incorrect current version are rejected', () => {
   assert.throws(() => versionDestination(releases, '1.0.0', '2.0.0', '/2.0.0/'), /outside/)
 })
 test('switching versions on Pages stays under the documentation base', () => {
-  const base = '/skecs/docs/'
+  const base = '/skecs/'
   assert.equal(versionDestination(releases, '1.0.0', '2.0.0', `${base}1.0.0/ru/guide/install`, '', base), `${base}2.0.0/ru/guide/install`)
   assert.equal(versionDestination(releases, '1.0.0', '2.0.0', `${base}1.0.0/api/OldType`, '', base), `${base}2.0.0/?unavailable=1`)
 })

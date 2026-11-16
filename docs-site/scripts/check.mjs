@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process'
 const site = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = join(site, '.vitepress/dist')
 const docsBase = process.env.SKECS_DOCS_BASE || '/'
+const demoPath = `${docsBase}demo/`
 const registry = JSON.parse(readFileSync(join(site, 'releases.json'), 'utf8'))
 assert.ok(existsSync(join(dist, 'index.html')), 'Build the site before checking it')
 function* htmlFiles(directory) {
@@ -22,18 +23,20 @@ const anchors = new Map([...contents].map(([path, html]) => [path, new Set([...h
 let links = 0
 for (const [file, html] of contents) {
   const base = new URL(relative(dist, file).split(sep).join('/'), `http://docs.local${docsBase}`)
-  for (const match of html.matchAll(/\b(?:href|src)="([^"]+)"/g)) {
-    const url = new URL(match[1].replaceAll('&amp;', '&'), base)
+  for (const match of html.matchAll(/\b(href|src)="([^"]+)"/g)) {
+    const url = new URL(match[2].replaceAll('&amp;', '&'), base)
     if (url.origin !== base.origin) continue
+    // Pages combines the independently built demo with this documentation output.
+    if (docsBase !== '/' && match[1] === 'href' && url.pathname === demoPath) continue
     assert.ok(url.pathname.startsWith(docsBase), `Link escapes docs base in ${relative(dist, file)}: ${url.href}`)
     const path = '/' + decodeURIComponent(url.pathname.slice(docsBase.length))
     let target = resolve(dist, '.' + path)
     if (path.endsWith('/')) target = join(target, 'index.html')
     else if (!existsSync(target)) target += '.html'
     assert.ok(target.startsWith(dist + sep), `Link escapes site: ${url.href}`)
-    assert.ok(existsSync(target), `Broken link in ${relative(dist, file)}: ${match[1]}`)
+    assert.ok(existsSync(target), `Broken link in ${relative(dist, file)}: ${match[2]}`)
     if (url.hash && anchors.has(target)) {
-      assert.ok(anchors.get(target).has(decodeURIComponent(url.hash.slice(1))), `Broken anchor in ${relative(dist, file)}: ${match[1]}`)
+      assert.ok(anchors.get(target).has(decodeURIComponent(url.hash.slice(1))), `Broken anchor in ${relative(dist, file)}: ${match[2]}`)
     }
     links++
   }
@@ -65,12 +68,15 @@ for (const release of registry.releases) {
   assert.ok(query.includes('Query&lt;T1, T2&gt;'), 'Generic type parameters must remain visible')
   assert.ok(!query.includes('&amp;lt;'), 'API titles must not double-escape generic parameters')
   const home = contents.get(join(dist, prefix, 'index.html'))
+  const demo = docsBase === '/' ? 'https://shortkedr.github.io/skecs/demo/' : demoPath
+  assert.ok(home.includes(`href="${demo}${locale ? '?lang=ru' : ''}"`), 'Link to the demo in the selected language')
   assert.ok(home.includes('docs-version-select'), 'Every locale needs the version selector')
   assert.ok(home.includes(`${release.packageId}`), 'Show exact selected package identity')
   assert.ok(home.includes(release.version), 'Show selected release version')
   for (const [file, html] of contents) {
     if (!file.startsWith(join(dist, prefix))) continue
     for (const match of html.matchAll(/href="(\/[^"#?]*)/g)) {
+      if (docsBase !== '/' && match[1] === demoPath) continue
       assert.ok(match[1].startsWith(`${docsBase}${release.version}/`), `Navigation escapes release in ${file}: ${match[1]}`)
     }
   }

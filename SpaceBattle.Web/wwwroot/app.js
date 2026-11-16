@@ -321,7 +321,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       "https://github.com/ShortKedr/skecs/blob/main/docs/space-battle/" +
       (lang === "ru" ? "REPORT.ru.md" : "REPORT.md");
     const docsLink = $("skecs-docs");
-    if (docsLink) docsLink.href = lang === "ru" ? "docs/ru/" : "docs/";
+    if (docsLink) docsLink.href = lang === "ru" ? "../ru/" : "../";
     updateUI();
   }
   function accept(pointer) {

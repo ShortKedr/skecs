@@ -6,6 +6,11 @@ const { lang, theme } = useData()
 const repository = computed(() => theme.value.release)
 const ru = computed(() => lang.value.startsWith('ru'))
 const base = computed(() => withBase(ru.value ? '/ru' : '/').replace(/\/$/, ''))
+const demoUrl = computed(() => {
+  const docsBase = theme.value.docsBase
+  const demo = docsBase === '/' ? 'https://shortkedr.github.io/skecs/demo/' : `${docsBase}demo/`
+  return ru.value ? `${demo}?lang=ru` : demo
+})
 const guide = computed(() => repository.value.guides[ru.value ? 'ru' : 'en'][0])
 const tab = ref('code')
 const copied = ref(false)
@@ -116,6 +121,6 @@ const text = computed(() => ru.value ? {
 
     <aside class="docs-lifetime"><span class="docs-lifetime-icon" aria-hidden="true">i</span><div><strong>{{ text.memory }}</strong><p>{{ text.memoryNote }}</p></div><a :href="withBase(guide.sections[1].link)">{{ text.memoryLink }} →</a></aside>
 
-    <section class="docs-next" aria-labelledby="next-title"><h2 id="next-title">{{ text.next }}</h2><div><a :href="base + '/guide/performance'"><strong>{{ text.perf }} <span aria-hidden="true">→</span></strong><p>{{ text.perfNote }}</p></a><a href="https://shortkedr.github.io/skecs/" target="_blank" rel="noreferrer"><strong>{{ text.battle }} <span aria-hidden="true">↗</span></strong><p>{{ text.battleNote }}</p></a></div></section>
+    <section class="docs-next" aria-labelledby="next-title"><h2 id="next-title">{{ text.next }}</h2><div><a :href="base + '/guide/performance'"><strong>{{ text.perf }} <span aria-hidden="true">→</span></strong><p>{{ text.perfNote }}</p></a><a class="docs-demo-link" :href="demoUrl" target="_blank" rel="noreferrer"><strong>{{ text.battle }} <span aria-hidden="true">↗</span></strong><p>{{ text.battleNote }}</p></a></div></section>
   </div>
 </template>

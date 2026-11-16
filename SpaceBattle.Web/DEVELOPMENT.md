@@ -68,9 +68,9 @@ This check compares frameworks within one browser runtime; it does not establish
 
 The [GitHub Actions workflow](../.github/workflows/space-battle-pages.yml)
 builds and deploys the static demo to
-[the `/skecs/` Pages target](https://shortkedr.github.io/skecs/).
+[the `/skecs/demo/` Pages target](https://shortkedr.github.io/skecs/demo/).
 The demo links back to the bilingual benchmark report. The Russian demo URL is
-[`?lang=ru`](https://shortkedr.github.io/skecs/?lang=ru).
+[`?lang=ru`](https://shortkedr.github.io/skecs/demo/?lang=ru).
 The target link alone does not establish that a deployment has completed.
 
 Finalized output directories are immutable; choose a fresh output/build directory
@@ -86,7 +86,7 @@ $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/artifacts/tooling/tmp/playwright-browsers"
 npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
 ./tools/build-space-battle-web.ps1
 node tools/web/node_modules/playwright/cli.js install chromium webkit
-node tools/web/check-web.mjs --base /skecs/
+node tools/web/check-web.mjs --base /skecs/demo/
 ```
 
 The published site's [license inventory](wwwroot/licenses/NOTICE.txt),

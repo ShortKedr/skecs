@@ -68,9 +68,9 @@ node SpaceBattle.Web/check-frameworks.mjs --url http://localhost:8000/ --ticks 1
 
 [Workflow GitHub Actions](../.github/workflows/space-battle-pages.yml)
 собирает и развёртывает статическое демо по
-[целевому адресу Pages `/skecs/`](https://shortkedr.github.io/skecs/).
+[целевому адресу Pages `/skecs/demo/`](https://shortkedr.github.io/skecs/demo/).
 Демо содержит обратные ссылки на двуязычный отчёт о бенчмарках. Русский адрес демо:
-[`?lang=ru`](https://shortkedr.github.io/skecs/?lang=ru).
+[`?lang=ru`](https://shortkedr.github.io/skecs/demo/?lang=ru).
 Наличие целевой ссылки само по себе не подтверждает завершение развёртывания.
 
 Готовые каталоги не переиспользуются: для новой сборки выбирайте свежие output/build.
@@ -86,7 +86,7 @@ $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD/artifacts/tooling/tmp/playwright-browsers"
 npm ci --prefix tools/web --cache artifacts/tooling/tmp/npm-cache
 ./tools/build-space-battle-web.ps1
 node tools/web/node_modules/playwright/cli.js install chromium webkit
-node tools/web/check-web.mjs --base /skecs/
+node tools/web/check-web.mjs --base /skecs/demo/
 ```
 
 В опубликованном сайте есть [состав лицензионной поставки](wwwroot/licenses/NOTICE.txt),

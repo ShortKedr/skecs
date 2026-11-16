@@ -15,6 +15,8 @@ const site = path.resolve(
 const base = argument("--base", "/");
 const remote = argument("--url", null);
 const requireDocs = process.argv.includes("--require-docs");
+const serverBase = requireDocs ? new URL("../", `http://local${base}`).pathname : base;
+const serverRoot = requireDocs ? path.dirname(site) : site;
 const evidence = path.resolve(
   argument("--output", "artifacts/tooling/tmp/web-checks"),
 );
@@ -39,21 +41,18 @@ try {
         const pathname = decodeURIComponent(
           new URL(request.url, "http://local").pathname,
         );
-        if (!pathname.startsWith(base)) {
+        if (!pathname.startsWith(serverBase)) {
           response.writeHead(404).end();
           return;
         }
-        let relative = pathname.slice(base.length) || "index.html";
-        if (relative.startsWith("docs/")) {
-          // GitHub Pages serves directory indexes and extensionless HTML routes.
-          if (relative.endsWith("/")) relative += "index.html";
-          else if (!(await fs.stat(path.resolve(site, relative)).catch(() => null))) relative += ".html";
-        }
-        const file = path.resolve(site, relative);
-        if (!file.startsWith(site + path.sep)) {
+        const relative = pathname.slice(serverBase.length);
+        let file = path.resolve(serverRoot, pathname.endsWith("/") ? `${relative}index.html` : relative);
+        if (!file.startsWith(serverRoot + path.sep)) {
           response.writeHead(403).end();
           return;
         }
+        // GitHub Pages serves clean article URLs from their .html files.
+        if (requireDocs && !pathname.startsWith(base) && !(await fs.stat(file).catch(() => null))) file += ".html";
         const bytes = await fs.readFile(file);
         response
           .writeHead(200, {
@@ -479,14 +478,16 @@ try {
     /REPORT\.ru\.md$/,
   );
   if (requireDocs) {
-    const docsUrl = new URL("docs/", url).href;
-    assert.equal(await page.locator("#skecs-docs").getAttribute("href"), "docs/ru/");
+    const docsUrl = new URL("../", url).href;
+    const localizedDocsUrl = await page.locator("#skecs-docs").evaluate(link => link.href);
+    assert.equal(localizedDocsUrl, new URL("ru/", docsUrl).href);
     const docsPage = await context.newPage();
     monitor(docsPage);
-    await docsPage.goto(new URL("ru/", docsUrl).href);
+    await docsPage.goto(localizedDocsUrl);
     await docsPage.locator(".docs-home").waitFor();
     assert.equal(await docsPage.locator("html").getAttribute("lang"), "ru-RU");
     assert.match(docsPage.url().slice(docsUrl.length), /^\d+\.\d+\.\d+\/ru\/$/);
+    assert.equal(await docsPage.locator("a.docs-demo-link").evaluate(link => link.href), `${url}?lang=ru`);
     await docsPage.locator(".docs-version-trigger").click();
     await docsPage.locator('[role="menuitemradio"][aria-checked="true"]').waitFor();
     await docsPage.keyboard.press("Escape");
