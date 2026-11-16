@@ -20,6 +20,7 @@ public sealed class DiagnosticBuffer
     public int Count { get; private set; }
     public long DroppedEvents { get; private set; }
     public bool ChurnControlEnabled { get; private set; }
+    public bool PackedPlacementEnabled { get; private set; }
 
     public ref readonly DiagnosticEvent this[int index]
     {
@@ -41,11 +42,12 @@ public sealed class DiagnosticBuffer
     public void RecordDuration(string name, long elapsedTicks) =>
         Record(new DiagnosticEvent(DiagnosticEventKind.Duration, value: elapsedTicks, metadata: name));
 
-    internal void Attach(int chunkCapacity, bool churnControlEnabled = false)
+    internal void Attach(int chunkCapacity, bool churnControlEnabled = false, bool packedPlacementEnabled = false)
     {
         if (_attached) throw new InvalidOperationException("A diagnostic buffer can only be attached to one world.");
         _attached = true;
         ChurnControlEnabled = churnControlEnabled;
+        PackedPlacementEnabled = packedPlacementEnabled;
         Record(new DiagnosticEvent(DiagnosticEventKind.WorldStarted, chunkCapacity));
     }
 
@@ -93,6 +95,31 @@ public sealed class DiagnosticBuffer
         Record(new DiagnosticEvent(DiagnosticEventKind.TableResized, (int)table, tableId, capacity,
             value: bytes, metadata: componentType));
 
+    internal void DefinePackedComponent(ComponentType type, int requestedNativeBytes) =>
+        Record(new DiagnosticEvent(DiagnosticEventKind.PackedComponentDefined, type.Id, type.Size, type.Alignment,
+            value: requestedNativeBytes, metadata: type.RuntimeType));
+
+    internal void ChangePackedPage(ComponentType type, int page, long backingId,
+        long nativeBytes, long pinnedBytes, bool added, bool reused)
+    {
+        var kind = added ? reused ? DiagnosticEventKind.PackedPageReused : DiagnosticEventKind.PackedPageAllocated
+            : DiagnosticEventKind.PackedPageReturned;
+        Record(new DiagnosticEvent(kind, type.Id, page, unchecked((int)backingId), (int)(backingId >> 32),
+            nativeBytes, pinnedBytes, type.RuntimeType));
+    }
+
+    internal void ReleasePackedPage(ComponentType type, int page, long backingId) =>
+        Record(new DiagnosticEvent(DiagnosticEventKind.PackedPageReleased, type.Id, page, unchecked((int)backingId),
+            (int)(backingId >> 32), metadata: type.RuntimeType));
+
+    internal void ChangePackedRows(ComponentType type, int count, int entity, bool added, long swappedBytes = 0) =>
+        Record(new DiagnosticEvent(DiagnosticEventKind.PackedRowsChanged, type.Id, count, entity, value: added ? 1 : -1,
+            secondary: swappedBytes, metadata: type.RuntimeType));
+
+    internal void ResizePackedIndexes(ComponentType type, long indexBytes, long presenceBytes) =>
+        Record(new DiagnosticEvent(DiagnosticEventKind.PackedIndexesMeasured, type.Id, value: indexBytes,
+            secondary: presenceBytes, metadata: type.RuntimeType));
+
     internal void DisposeWorld() => Record(new DiagnosticEvent(DiagnosticEventKind.WorldDisposed));
 
     private void Record(in DiagnosticEvent entry)
@@ -122,7 +149,14 @@ public enum DiagnosticEventKind
     ChunkPooled,
     ChunkReused,
     PooledChunkAllocated,
-    PooledChunkReleased
+    PooledChunkReleased,
+    PackedComponentDefined,
+    PackedPageAllocated,
+    PackedPageReused,
+    PackedPageReturned,
+    PackedPageReleased,
+    PackedRowsChanged,
+    PackedIndexesMeasured
 }
 
 public enum DiagnosticTable
@@ -179,6 +213,13 @@ public readonly struct DiagnosticEvent
     public int TableId => Detail;
     public int TableCapacity => RelatedIndex;
     public long TablePayloadBytes => Value;
+    public int PackedComponentId => Index;
+    public int PackedPageIndex => Detail;
+    public int PackedRowCount => Detail;
+    public long PackedRowDelta => Value;
+    public long PackedSwapBytes => Secondary;
+    public long PackedIndexBytes => Value;
+    public long PackedPresenceBytes => Secondary;
     public int Frame => Index;
     public long ElapsedTicks => Value;
     public string? MeasurementName => Metadata as string;

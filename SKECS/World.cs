@@ -33,6 +33,12 @@ public sealed partial class World : IDisposable
     {
         Id = Interlocked.Increment(ref _nextWorldId);
         _options = options.ChunkCapacity == 0 ? new WorldOptions() : options;
+        if (_options.ComponentPlacement is { HasPackedPools: true } placement)
+        {
+            if (_options.ChurnControl == null)
+                throw new ArgumentException("Packed placement requires churn control.", nameof(options));
+            _adaptive = new AdaptiveStorage(placement);
+        }
         _rootArchetype = new Archetype(this, ComponentSetKey.Empty, Array.Empty<ComponentType>());
         _archetypes.Add(ComponentSetKey.Empty, _rootArchetype);
         _archetypeList.Add(_rootArchetype);
@@ -78,6 +84,7 @@ public sealed partial class World : IDisposable
 
     private EntitySlot ReserveCreation(Archetype archetype, out Entity entity, out bool acquiredBacking)
     {
+        EnsureAdaptiveTraversalAllowsStructuralChange();
         var lastFree = _freeEntityIds.Count - 1;
         var reused = lastFree >= 0;
         var id = reused ? _freeEntityIds[lastFree] : _entityRecords.Count;
@@ -114,13 +121,14 @@ public sealed partial class World : IDisposable
         _entityRecords[entity.Id] = record;
         RefreshAccessors(entity.Id, record);
         if (_diagnostics != null) RecordDiagnosticCreate(archetype, slot.ChunkIndex, entity.Id);
-        if (acquiredBacking) MaintainChurnPool();
+        if (acquiredBacking || _adaptive != null) MaintainChurnPool();
 
         return entity;
     }
 
     private void CancelCreation(Archetype archetype, EntitySlot slot, Entity entity)
     {
+        if (_adaptive != null) RemovePackedComponents(entity);
         if (_freeEntityIds.Count == 0) _entityRecords.RemoveAt(entity.Id);
         archetype.ReturnIfEmpty(slot.ChunkIndex);
     }
@@ -133,7 +141,7 @@ public sealed partial class World : IDisposable
         var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
         try
         {
-            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type1, component1);
+            WriteCreatedComponent(archetype, slot, entity, type1, component1);
         }
         catch
         {
@@ -158,9 +166,9 @@ public sealed partial class World : IDisposable
         var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
         try
         {
-            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type1, component1);
-            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type2, component2);
-            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type3, component3);
+            WriteCreatedComponent(archetype, slot, entity, type1, component1);
+            WriteCreatedComponent(archetype, slot, entity, type2, component2);
+            WriteCreatedComponent(archetype, slot, entity, type3, component3);
         }
         catch
         {
@@ -188,6 +196,12 @@ public sealed partial class World : IDisposable
             throw new ArgumentException("A creation template cannot contain duplicate component types.");
         var key = (type1, type2, type3);
         if (_creationArchetypes.TryGetValue(key, out var archetype)) return archetype;
+        if (_adaptive != null)
+        {
+            archetype = GetAdaptiveCreationArchetype(type1, type2, type3);
+            _creationArchetypes.Add(key, archetype);
+            return archetype;
+        }
         var ids = stackalloc int[3];
         ids[0] = type1;
         ids[1] = type2;
@@ -204,8 +218,8 @@ public sealed partial class World : IDisposable
         var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
         try
         {
-            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type1, component1);
-            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type2, component2);
+            WriteCreatedComponent(archetype, slot, entity, type1, component1);
+            WriteCreatedComponent(archetype, slot, entity, type2, component2);
         }
         catch
         {
@@ -219,6 +233,7 @@ public sealed partial class World : IDisposable
     {
         ThrowIfDisposed();
         var typeId = _componentTypes.GetOrCreate<T>().Id;
+        if (GetPackedPool(typeId) is { } packed) return GetPackedAccessor<T>(packed);
         foreach (var accessor in _accessors)
             if (accessor.TypeId == typeId) return new ComponentAccessor<T>(accessor);
         var storage = new AccessorStorage(typeId, this, typeof(T));
@@ -282,9 +297,11 @@ public sealed partial class World : IDisposable
     private void DestroyEntityCore(Entity entity)
     {
         var record = _entityRecords[entity.Id];
+        EnsureAdaptiveTraversalAllowsStructuralChange();
         var canReuse = record.Version < int.MaxValue;
         var grew = canReuse && _freeEntityIds.Count == _freeEntityIds.Capacity;
         if (grew) _freeEntityIds.Capacity = Math.Max(4, checked(_freeEntityIds.Capacity * 2));
+        if (_adaptive != null) RemovePackedComponents(entity);
         var removed = record.Archetype!.RemoveAt(record.ChunkIndex, record.RowIndex);
         UpdateMovedEntity(removed);
 
@@ -320,6 +337,17 @@ public sealed partial class World : IDisposable
 
     private void SetComponentCore<T>(Entity entity, int typeId, in T component) where T : unmanaged
     {
+        if (GetPackedPool(typeId) is { } pool)
+        {
+            var slot = pool.Find(entity);
+            if (slot >= 0) pool.ValueAt<T>(slot) = component;
+            else
+            {
+                AddPacked(pool, entity, component);
+                MaintainChurnPool();
+            }
+            return;
+        }
         var record = _entityRecords[entity.Id];
         if (record.Archetype!.HasComponent(typeId))
         {
@@ -335,7 +363,8 @@ public sealed partial class World : IDisposable
     {
         ValidateEntity(entity);
         var typeId = _componentTypes.GetId<T>();
-        return _entityRecords[entity.Id].Archetype!.HasComponent(typeId);
+        return GetPackedPool(typeId) is { } pool ? pool.Find(entity) >= 0
+            : _entityRecords[entity.Id].Archetype!.HasComponent(typeId);
     }
 
     public bool Remove<T>(Entity entity)
@@ -348,12 +377,19 @@ public sealed partial class World : IDisposable
 
     private bool RemoveComponentCore(Entity entity, int typeId)
     {
+        if (GetPackedPool(typeId) is { } pool)
+        {
+            if (!RemovePacked(pool, entity)) return false;
+            MaintainChurnPool();
+            return true;
+        }
         var record = _entityRecords[entity.Id];
         if (!record.Archetype!.HasComponent(typeId))
         {
             return false;
         }
 
+        EnsureAdaptiveTraversalAllowsStructuralChange();
         var transition = record.Archetype.GetRemoveTransition(typeId);
         var destination = transition.Destination;
         var slot = destination.ReserveEntity(out var acquiredBacking);
@@ -385,13 +421,20 @@ public sealed partial class World : IDisposable
     public ref T Get<T>(Entity entity)
         where T : unmanaged
     {
-        ValidateEntity(entity);
-        var typeId = _componentTypes.GetId<T>();
+        ThrowIfDisposed();
 #if NET8_0_OR_GREATER
-        ref var record = ref CollectionsMarshal.AsSpan(_entityRecords)[entity.Id];
+        var records = CollectionsMarshal.AsSpan(_entityRecords);
+        if (entity.WorldId != Id || (uint)entity.Id >= (uint)records.Length) ThrowDeadEntity(entity);
+        ref var record = ref records[entity.Id];
 #else
+        if (entity.WorldId != Id || (uint)entity.Id >= (uint)_entityRecords.Count) ThrowDeadEntity(entity);
         var record = _entityRecords[entity.Id];
 #endif
+        if (!record.Alive || record.Version != entity.Version) ThrowDeadEntity(entity);
+
+        var typeId = _componentTypes.GetId<T>();
+        if (_adaptive is { } storage && ResolvePackedPool(storage, typeId) is { } pool)
+            return ref pool.Get<T>(entity);
         return ref record.Archetype!.GetComponentRef<T>(record.ChunkIndex, record.RowIndex, typeId);
     }
 
@@ -405,6 +448,13 @@ public sealed partial class World : IDisposable
         }
 
         var typeId = _componentTypes.GetId<T>();
+        if (GetPackedPool(typeId) is { } pool)
+        {
+            var slot = pool.Find(entity);
+            if (slot >= 0) { value = pool.ValueAt<T>(slot); return true; }
+            value = default;
+            return false;
+        }
         var record = _entityRecords[entity.Id];
         if (!record.Archetype!.HasComponent(typeId))
         {
@@ -435,7 +485,7 @@ public sealed partial class World : IDisposable
         {
             var include = stackalloc int[2];
             include[0] = GetComponentType<T1>().Id;
-            include[1] = _componentTypes.GetOrCreate<T2>().Id;
+            include[1] = GetComponentType<T2>().Id;
             return new Query<T1, T2>(this, GetOrCreateQueryCache(new QueryCacheKey(ComponentSetKey.Create(include, 2), ComponentSetKey.Empty)));
         }
     }
@@ -449,8 +499,8 @@ public sealed partial class World : IDisposable
         {
             var include = stackalloc int[3];
             include[0] = GetComponentType<T1>().Id;
-            include[1] = _componentTypes.GetOrCreate<T2>().Id;
-            include[2] = _componentTypes.GetOrCreate<T3>().Id;
+            include[1] = GetComponentType<T2>().Id;
+            include[2] = GetComponentType<T3>().Id;
             return new Query<T1, T2, T3>(this, GetOrCreateQueryCache(new QueryCacheKey(ComponentSetKey.Create(include, 3), ComponentSetKey.Empty)));
         }
     }
@@ -494,8 +544,9 @@ public sealed partial class World : IDisposable
     internal ComponentType GetComponentType<T>()
         where T : unmanaged
     {
-        ThrowIfDisposed();
-        return _componentTypes.GetOrCreate<T>();
+        var type = GetAdaptiveComponentType<T>();
+        EnsureArchetypeType(type.Id);
+        return type;
     }
 
     internal QueryCacheEntry GetOrCreateQueryCache(QueryCacheKey key)
@@ -549,6 +600,13 @@ public sealed partial class World : IDisposable
     private void MoveWithAddedComponentCore<T>(Entity entity, int typeId, in T component)
         where T : unmanaged
     {
+        EnsureAdaptiveTraversalAllowsStructuralChange();
+        if (GetPackedPool(typeId) is { } pool)
+        {
+            AddPacked(pool, entity, component);
+            MaintainChurnPool();
+            return;
+        }
         var record = _entityRecords[entity.Id];
         var source = record.Archetype!;
 
@@ -610,11 +668,12 @@ public sealed partial class World : IDisposable
     private void ValidateEntity(Entity entity)
     {
         ThrowIfDisposed();
-        if (!IsAliveCore(entity))
-        {
-            throw new InvalidOperationException($"Entity {entity} is not alive in this world.");
-        }
+        if (!IsAliveCore(entity)) ThrowDeadEntity(entity);
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowDeadEntity(Entity entity) =>
+        throw new InvalidOperationException($"Entity {entity} is not alive in this world.");
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void ThrowIfDisposed()
@@ -653,6 +712,7 @@ public sealed partial class World : IDisposable
         {
             _archetypeList[i].Dispose();
         }
+        ReleasePackedPools();
         _churnPool?.Dispose();
         _diagnostics?.DisposeWorld();
     }

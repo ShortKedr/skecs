@@ -90,6 +90,17 @@ public sealed partial class World
     {
         ValidateEntity(entity);
         var typeId = _componentTypes.GetId<T>();
+        if (GetPackedPool(typeId) is { } packed)
+        {
+            if (packed.Find(entity) >= 0)
+                throw new InvalidOperationException($"Duplicate checkpoint component {typeof(T)} on {entity}.");
+            var packedCost = packed.EstimateAddBytes(entity.Id) + _adaptive!.Presence.EstimateAddBytes(entity.Id);
+            if (packedCost > remainingBytes) return false;
+            AddPacked(packed, entity, component);
+            MaintainChurnPool();
+            remainingBytes -= packedCost;
+            return true;
+        }
         var source = _entityRecords[entity.Id].Archetype!;
         if (source.HasComponent(typeId))
             throw new InvalidOperationException($"Duplicate checkpoint component {typeof(T)} on {entity}.");
@@ -140,10 +151,18 @@ public sealed partial class World
                 destination[i] = _world._freeEntityIds[destination.Length - 1 - i];
         }
 
-        public int GetComponentCount(Entity entity) => GetArchetype(entity).ComponentTypes.Length;
+        public int GetComponentCount(Entity entity)
+        {
+            var archetype = GetArchetype(entity);
+            return archetype.ComponentTypes.Length + (_world._adaptive?.Presence.Count(entity.Id) ?? 0);
+        }
 
-        public Type GetComponentType(Entity entity, int index) =>
-            GetArchetype(entity).ComponentTypes[index].RuntimeType;
+        public Type GetComponentType(Entity entity, int index)
+        {
+            var types = GetArchetype(entity).ComponentTypes;
+            if (index < types.Length || _world._adaptive == null) return types[index].RuntimeType;
+            return _world._adaptive.Presence.Get(entity.Id, index - types.Length).Type.RuntimeType;
+        }
 
         public bool Owns(Entity entity)
         {
@@ -162,6 +181,17 @@ public sealed partial class World
             _world.ThrowIfDisposed();
             if (_world.IsAliveCore(entity))
             {
+                if (_world._adaptive != null)
+                {
+                    var presence = _world._adaptive.Presence;
+                    for (var i = 0; i < presence.Count(entity.Id); i++)
+                    {
+                        var pool = presence.Get(entity.Id, i);
+                        if (pool.Type.RuntimeType != typeof(T)) continue;
+                        value = pool.Get<T>(entity);
+                        return true;
+                    }
+                }
                 var record = _world._entityRecords[entity.Id];
                 foreach (var type in record.Archetype!.ComponentTypes)
                 {

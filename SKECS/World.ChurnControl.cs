@@ -41,6 +41,8 @@ public sealed partial class World
             }
         }
 
+        if (_adaptive != null)
+            foreach (var packed in _adaptive.Pools.Values) live += packed?.LiveBytes ?? 0;
         if (_churnPool is { } pool)
             return new ChurnControlStatistics(true, _options.ChurnControl!.TargetRetainedBytes, live,
                 pool.BackingBytes - pool.EmptyBytes, pool.EmptyBytes, GetChurnTableBytes(),
@@ -66,6 +68,6 @@ public sealed partial class World
 #pragma warning restore CS8500
         bytes += (long)_freeEntityIds.Capacity * sizeof(int);
         foreach (var accessor in _accessors) bytes += accessor.ManagedBufferBytes;
-        return bytes;
+        return bytes + AdaptiveIndexBytes();
     }
 }

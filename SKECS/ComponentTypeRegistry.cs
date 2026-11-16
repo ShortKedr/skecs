@@ -48,6 +48,8 @@ internal sealed unsafe class ComponentTypeRegistry
         return slots;
     }
 
+    public ComponentType Resolve(int id) => _byId[id];
+
     public ComponentType[] ResolveAll(int[] ids)
     {
         var result = new ComponentType[ids.Length];

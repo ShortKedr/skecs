@@ -9,14 +9,16 @@ internal sealed unsafe class AccessorStorage
     private Entry[] _entries = Array.Empty<Entry>();
     private readonly World _world;
     private readonly Type _componentType;
+    private readonly PackedComponentPool? _packed;
     public int TypeId { get; }
     public long ManagedBufferBytes => (long)_entries.Length * sizeof(Entry);
 
-    public AccessorStorage(int typeId, World world, Type componentType)
+    public AccessorStorage(int typeId, World world, Type componentType, PackedComponentPool? packed = null)
     {
         TypeId = typeId;
         _world = world;
         _componentType = componentType;
+        _packed = packed;
     }
 
     internal void EnsureCapacity(int id)
@@ -42,6 +44,7 @@ internal sealed unsafe class AccessorStorage
     public bool Has(Entity entity)
     {
         _world.ThrowIfRunnerOwned();
+        if (_packed != null) return entity.WorldId == _world.Id && _packed.Find(entity) >= 0;
         return entity.WorldId == _world.Id && (uint)entity.Id < (uint)_entries.Length
             && _entries[entity.Id].Address != 0 && _entries[entity.Id].Version == entity.Version;
     }
@@ -50,6 +53,11 @@ internal sealed unsafe class AccessorStorage
     public ref T Get<T>(Entity entity) where T : unmanaged
     {
         _world.ThrowIfRunnerOwned();
+        if (_packed != null)
+        {
+            if (entity.WorldId != _world.Id) ThrowMissing();
+            return ref _packed.Get<T>(entity);
+        }
         if (entity.WorldId != _world.Id || (uint)entity.Id >= (uint)_entries.Length) ThrowMissing();
         ref var entry = ref _entries[entity.Id];
         if (entry.Address == 0 || entry.Version != entity.Version) ThrowMissing();

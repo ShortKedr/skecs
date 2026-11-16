@@ -12,7 +12,7 @@ internal static class TraceExport
     {
         using var writer = XmlWriter.Create(destination);
         writer.WriteStartElement("skecs-profiler-trace");
-        writer.WriteAttributeString("schemaVersion", session.Buffer.ChurnControlEnabled ? "2" : "1");
+        writer.WriteAttributeString("schemaVersion", session.Buffer.PackedPlacementEnabled ? "3" : session.Buffer.ChurnControlEnabled ? "2" : "1");
         writer.WriteAttributeString("scenario", scenario);
         writer.WriteAttributeString("workloadId", workloadId);
         writer.WriteAttributeString("runtime", RuntimeInformation.FrameworkDescription);
@@ -102,6 +102,48 @@ internal static class TraceExport
                 WriteNumber(writer, "payloadBytes", entry.TablePayloadBytes);
                 if (entry.ComponentType is Type componentType) WriteComponentIdentity(writer, componentType);
                 break;
+            case DiagnosticEventKind.PackedComponentDefined:
+                writer.WriteAttributeString("kind", "packedComponentDefined");
+                WritePackedType(writer, entry);
+                WriteNumber(writer, "size", entry.ComponentSize);
+                WriteNumber(writer, "alignment", entry.ComponentAlignment);
+                WriteNumber(writer, "requestedNativeBytes", entry.RequestedNativeBytes);
+                break;
+            case DiagnosticEventKind.PackedPageAllocated:
+            case DiagnosticEventKind.PackedPageReused:
+            case DiagnosticEventKind.PackedPageReturned:
+                writer.WriteAttributeString("kind", entry.Kind switch
+                {
+                    DiagnosticEventKind.PackedPageAllocated => "packedPageAllocated",
+                    DiagnosticEventKind.PackedPageReused => "packedPageReused",
+                    _ => "packedPageReturned"
+                });
+                WritePackedType(writer, entry);
+                WriteNumber(writer, "page", entry.PackedPageIndex);
+                WriteNumber(writer, "backing", entry.BackingId);
+                WriteNumber(writer, "nativeBytes", entry.NativeBytes);
+                WriteNumber(writer, "pinnedBytes", entry.PinnedBytes);
+                break;
+            case DiagnosticEventKind.PackedPageReleased:
+                writer.WriteAttributeString("kind", "packedPageReleased");
+                WritePackedType(writer, entry);
+                WriteNumber(writer, "page", entry.PackedPageIndex);
+                WriteNumber(writer, "backing", entry.BackingId);
+                break;
+            case DiagnosticEventKind.PackedRowsChanged:
+                writer.WriteAttributeString("kind", "packedRowsChanged");
+                WritePackedType(writer, entry);
+                WriteNumber(writer, "count", entry.PackedRowCount);
+                WriteNumber(writer, "entity", entry.EntityId);
+                WriteNumber(writer, "delta", entry.PackedRowDelta);
+                WriteNumber(writer, "swapBytes", entry.PackedSwapBytes);
+                break;
+            case DiagnosticEventKind.PackedIndexesMeasured:
+                writer.WriteAttributeString("kind", "packedIndexesMeasured");
+                WritePackedType(writer, entry);
+                WriteNumber(writer, "indexBytes", entry.PackedIndexBytes);
+                WriteNumber(writer, "presenceBytes", entry.PackedPresenceBytes);
+                break;
             case DiagnosticEventKind.WorldDisposed:
                 writer.WriteAttributeString("kind", "worldDisposed");
                 break;
@@ -140,6 +182,12 @@ internal static class TraceExport
     {
         writer.WriteAttributeString("assembly", type.Assembly.GetName().Name);
         writer.WriteAttributeString("type", type.FullName ?? type.Name);
+    }
+
+    private static void WritePackedType(XmlWriter writer, in DiagnosticEvent entry)
+    {
+        WriteNumber(writer, "componentId", entry.PackedComponentId);
+        WriteComponentIdentity(writer, entry.ComponentType!);
     }
 
     private static void WriteNumber(XmlWriter writer, string name, long value) =>

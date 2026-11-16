@@ -12,7 +12,7 @@ public sealed partial class World
         try
         {
             if (diagnostics == null) throw new ArgumentNullException(nameof(diagnostics));
-            diagnostics.Attach(ChunkCapacity, UsesChurnControl);
+            diagnostics.Attach(ChunkCapacity, UsesChurnControl, _adaptive != null);
             _diagnostics = diagnostics;
             RecordDiagnosticArchetype(_rootArchetype, 0);
             _churnPool?.AttachDiagnostics(diagnostics);
