@@ -25,7 +25,7 @@ internal sealed class HostSession(
         _bodies = new Entity[RowCount];
         for (int index = 0; index < _bodies.Length; index++)
             _bodies[index] = _world.CreateEntity(new HostBody { Index = index, Position = Fixed.FromRaw(17L * index - 39) });
-        _runner = new DeterministicRunner<HostInput>(_world, workload(), workerCount: 2);
+        _runner = new DeterministicRunner<HostInput>(_world, workload(), workerCount: OperatingSystem.IsBrowser() ? 1 : 2);
         Paused = false;
         Publish(generation, 0, []);
     }

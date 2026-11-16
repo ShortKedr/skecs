@@ -2,12 +2,15 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using SKECS;
 using SKECS.GA;
+#if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
+#endif
 using SKECS.Numerics;
 
+#if !GA_BROWSER_CONFORMANCE
 if (args is ["cpu", var cpuProfile])
 {
     Qualify(cpuProfile, null, null, null);
@@ -17,6 +20,7 @@ if (args is ["cpu", var cpuProfile])
 if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
     throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index> <profile>'.");
+#endif
 
 var contract = new GaContractIdentity(CarrierAdapterRowCodec.SystemId, "carrier-capacity/1",
     CarrierAdapterRowCodec.SourceDigest, CarrierAdapterRowCodec.IrDigest, CarrierAdapterRowCodec.ComponentSchemaDigest,
@@ -32,6 +36,14 @@ var contract = new GaContractIdentity(CarrierAdapterRowCodec.SystemId, "carrier-
 };
 Require(contract is { EventCapacity: 1, UsesCommands: false, UsesDomainOrder: true, TickResourceWords: 1,
     EventTypeCount: 1, EventPayloadWords: 8 }, "Unexpected carrier kernel contract.");
+#if GA_BROWSER_CONFORMANCE
+var browser = await BrowserConformance.OpenAsync(args, contract, "boundaries");
+using var backend = browser.Device;
+using var startup = browser.Startup;
+var artifact = browser.Artifact;
+string profile = browser.Profile;
+var device = backend.Info;
+#else
 string stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
@@ -40,18 +52,28 @@ var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json
 using IDisposable backend = Open(args[0], args[2], out var devices);
 Require(deviceIndex < devices.Count, $"Only {devices.Count} devices are available.");
 using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])], [devices[deviceIndex]], allowExperimental: true);
+var device = devices[deviceIndex].Info;
+string profile = args[4];
+#endif
 var selection = startup.Decisions.Single();
 Require(startup.Succeeded && selection.Route == GaRoute.Gpu, $"{selection.Reason} {selection.Detail}");
-var device = devices[deviceIndex].Info;
 var manifest = artifact.Bundle!.Manifest;
 Console.WriteLine($"api={device.Api} apiVersion={device.ApiVersion} device={device.Device} driver={device.Driver} " +
     $"source={contract.SourceDigest} ir={contract.IrDigest} subset={contract.SubsetVersion} numeric={contract.NumericVersion} " +
     $"irVersion={contract.IrVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
     $"contentId={selection.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
 Console.WriteLine("GPU stage=CarrierOrders; declared common CPU stages=Build,ObserveCommittedShips,Retire");
-Qualify(args[4], startup, contract, device);
+#if GA_BROWSER_CONFORMANCE
+await Qualify(profile, startup, contract, device);
+#else
+Qualify(profile, startup, contract, device);
+#endif
 
+#if GA_BROWSER_CONFORMANCE
+static async Task Qualify(string profile, GaStartupResult? startup, GaContractIdentity? contract, GaDeviceInfo? device)
+#else
 static void Qualify(string profile, GaStartupResult? startup, GaContractIdentity? contract, GaDeviceInfo? device)
+#endif
 {
     int ticks;
     Scenario[] cases;
@@ -81,7 +103,11 @@ static void Qualify(string profile, GaStartupResult? startup, GaContractIdentity
     var timer = Stopwatch.StartNew();
     var counts = new Coverage();
     foreach (var scenario in cases)
+#if GA_BROWSER_CONFORMANCE
+        await RunCase(scenario with { Workers = 1 }, ticks, startup, contract, counts);
+#else
         RunCase(scenario, ticks, startup, contract, counts);
+#endif
     Require(counts.Outcomes.All(count => count > 0) && counts.SameTickReceipts > 0 &&
         counts.Retired > 0 && counts.ReusedAfterRetirement > 0 && counts.DomainTies > 0,
         $"The {profile} profile missed a required path.");
@@ -91,9 +117,16 @@ static void Qualify(string profile, GaStartupResult? startup, GaContractIdentity
         $"requests={counts.Outcomes.Sum()} {results} domainTies={counts.DomainTies} observedBeforeRetire={counts.Visible} " +
         $"sameTickTickets={counts.SameTickReceipts} retired={counts.Retired} reusedAfterRetirement={counts.ReusedAfterRetirement} " +
         $"deviceBatches={counts.GpuBatches} deviceRows={counts.GpuRows} elapsedSeconds={timer.Elapsed.TotalSeconds:F2} allocator=passed");
+#if GA_BROWSER_CONFORMANCE
+    Console.WriteLine("WebGPU CarrierCapacity pendingReadback=passed");
+#endif
 }
 
+#if GA_BROWSER_CONFORMANCE
+static async Task RunCase(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity? contract, Coverage counts)
+#else
 static void RunCase(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity? contract, Coverage counts)
+#endif
 {
     BuildOrder[] orders = Enumerable.Range(0, scenario.Rows).Select(row => CarrierScenario.MakeOrder(scenario, row)).ToArray();
     var oracle = new CarrierOracle(orders);
@@ -125,12 +158,21 @@ static void RunCase(Scenario scenario, int ticks, GaStartupResult? startup, GaCo
         var expected = oracle.Advance(tick);
         cpuRunner.BeginTick(tick, frame, Fixed.One);
         gpuRunner?.BeginTick(tick, frame, Fixed.One);
+#if GA_BROWSER_CONFORMANCE
+        await RunToCompletion(cpuRunner, scenario.CpuBudget);
+#else
         RunToCompletion(cpuRunner, scenario.CpuBudget);
+#endif
         CheckEvents(cpuRunner.LastCompleted!, expected, tick, $"CPU {scenario}");
         CheckState(cpu, oracle, $"CPU {scenario} tick={tick}");
         if (gpuRunner != null && gpu != null)
         {
+#if GA_BROWSER_CONFORMANCE
+            bool waitedForReadback = await RunToCompletion(gpuRunner, scenario.GpuBudget);
+            Require(scenario.Rows == 0 || waitedForReadback, $"WebGPU did not yield at {scenario}, tick {tick}.");
+#else
             RunToCompletion(gpuRunner, scenario.GpuBudget);
+#endif
             Require(caseGpuRows == (long)scenario.Rows * tick, $"Missing device rows at {scenario}, tick {tick}.");
             CheckEvents(gpuRunner.LastCompleted!, expected, tick, $"GPU {scenario}");
             CheckState(gpu, oracle, $"GPU {scenario} tick={tick}");
@@ -172,6 +214,22 @@ static void Initialize(World world, BuildOrder[] orders)
     world.DestroyEntity(world.CreateEntity());
 }
 
+#if GA_BROWSER_CONFORMANCE
+static async Task<bool> RunToCompletion(DeterministicRunner<CarrierFrame> runner, int budget)
+{
+    var timer = Stopwatch.StartNew();
+    bool pending = false;
+    var status = runner.Advance(budget);
+    while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
+    {
+        pending = true;
+        await Task.Delay(1);
+        status = runner.Advance(budget);
+    }
+    Require(status == DeterministicTickStatus.Completed, $"Runner {status}: {runner.Fault}");
+    return pending;
+}
+#else
 static void RunToCompletion(DeterministicRunner<CarrierFrame> runner, int budget)
 {
     var status = DeterministicTickStatus.Pending;
@@ -179,6 +237,7 @@ static void RunToCompletion(DeterministicRunner<CarrierFrame> runner, int budget
         () => (status = runner.Advance(budget)) != DeterministicTickStatus.Pending, TimeSpan.FromSeconds(20));
     Require(finished && status == DeterministicTickStatus.Completed, $"Runner {status}: {runner.Fault}");
 }
+#endif
 
 static void CheckEvents(DeterministicTickResult actual, ExpectedTick expected, int tick, string lane)
 {
@@ -256,6 +315,7 @@ static void CheckState(World world, CarrierOracle oracle, string label)
     }
 }
 
+#if !GA_BROWSER_CONFORMANCE
 static IDisposable Open(string api, string library, out IReadOnlyList<IGaDevice> devices)
 {
     if (api == "vulkan")
@@ -280,6 +340,7 @@ static IDisposable Open(string api, string library, out IReadOnlyList<IGaDevice>
     devices = d3d12.Devices;
     return d3d12;
 }
+#endif
 
 static void Require(bool condition, string context, [CallerArgumentExpression(nameof(condition))] string? expression = null)
 {

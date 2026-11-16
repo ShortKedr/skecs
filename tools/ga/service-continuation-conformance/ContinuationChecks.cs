@@ -20,7 +20,8 @@ internal static class ContinuationChecks
     private readonly record struct ExpectedBody(int Owner, int OwnerGeneration, int Slot, int Generation, long Position, long InitialVelocity);
     private readonly record struct OracleContact(ContactPair Pair, long Difference);
 
-    internal static Frame[] Run(Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan, string lane, int chunk)
+    internal static async ValueTask<Frame[]> RunAsync(Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan,
+        string lane, int chunk, Action? observePending = null)
     {
         using var original = new World(new WorldOptions(chunk));
         var service = ContactService.Seed(original);
@@ -29,7 +30,7 @@ internal static class ContinuationChecks
             Require(initial.SequenceEqual(Save(decoded, initialService.Capture())), "Initial checkpoint changed after restore.");
 
         using var originalRunner = NewRunner(original, service, createPlan);
-        var prefix = Advance(original, service, originalRunner, [], ForkTick);
+        var prefix = await AdvanceAsync(original, service, originalRunner, [], ForkTick, observePending);
         var start = prefix[^1];
         Require(service.Previous.Count >= 2 && service.Free.SequenceEqual(new[] { 3, 4 }) &&
             service.PendingLifecycle == 4 && prefix[0].Impulses >= 2, "Fork missed significant service state.");
@@ -38,13 +39,13 @@ internal static class ContinuationChecks
         ExpectInvalid(() => Load(withoutExtension, chunk, out _));
         TestInvalidLink(start.Checkpoint, chunk);
 
-        var tail = Advance(original, service, originalRunner, service.Previous.ToArray(), FinalTick);
+        var tail = await AdvanceAsync(original, service, originalRunner, service.Previous.ToArray(), FinalTick, observePending);
         using var restored = Load(start.Checkpoint, chunk, out var recovered);
         Require(start.Checkpoint.SequenceEqual(Save(restored, recovered.Capture())), "Checkpoint changed after restore.");
         Require(recovered.Free.SequenceEqual(new[] { 3, 4 }) && recovered.Previous.Count >= 2 &&
             recovered.RandomState != 0 && recovered.PendingLifecycle == 4, "Restore omitted significant service state.");
         using var restoredRunner = NewRunner(restored, recovered, createPlan);
-        var replay = Advance(restored, recovered, restoredRunner, recovered.Previous.ToArray(), FinalTick);
+        var replay = await AdvanceAsync(restored, recovered, restoredRunner, recovered.Previous.ToArray(), FinalTick, observePending);
         Compare(tail, replay, "uninterrupted and restored execution");
         Require(recovered.Slots[3].Generation == 2 && recovered.Slots[4].Generation == 2 &&
             recovered.Slots[2].Generation == 2 && recovered.PendingLifecycle == 0 &&
@@ -52,12 +53,12 @@ internal static class ContinuationChecks
 
         using var broken = Load(noHistory, chunk, out var noPrevious);
         using var brokenRunner = NewRunner(broken, noPrevious, createPlan);
-        var incorrect = Advance(broken, noPrevious, brokenRunner, [], ForkTick + 1).Single();
+        var incorrect = (await AdvanceAsync(broken, noPrevious, brokenRunner, [], ForkTick + 1, observePending)).Single();
         Require(incorrect.Began.Except(tail[0].Began).Any(),
             "Losing the previous contact history did not change the next begin-contact stream.");
 
         var all = prefix.Concat(tail).ToArray();
-        VerifyFaultRecovery(original, service, originalRunner, createPlan, chunk, all[^1]);
+        await VerifyFaultRecoveryAsync(original, service, originalRunner, createPlan, chunk, all[^1], observePending);
         Console.WriteLine($"{lane} ticks={all.Length} restoredTicks={replay.Length} beginContacts={all.Sum(frame => frame.Began.Length)} " +
             $"orderedImpulses={all.Sum(frame => frame.Impulses)} initialRestore=passed continuation=passed " +
             "historyLossDetected=passed invalidLinkRejected=passed missingExtensionRejected=passed " +
@@ -66,10 +67,11 @@ internal static class ContinuationChecks
     }
 
     private static DeterministicRunner<IntegrationFrame> NewRunner(World world, ContactService service,
-        Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan) => new(world, createPlan(service), workerCount: 2);
+        Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan) =>
+        new(world, createPlan(service), workerCount: OperatingSystem.IsBrowser() ? 1 : 2);
 
-    private static Frame[] Advance(World world, ContactService service, DeterministicRunner<IntegrationFrame> runner,
-        ContactPair[] previous, long last)
+    private static async ValueTask<Frame[]> AdvanceAsync(World world, ContactService service,
+        DeterministicRunner<IntegrationFrame> runner, ContactPair[] previous, long last, Action? observePending)
     {
         var result = new List<Frame>();
         for (long tick = service.CompletedTick + 1; tick <= last; tick++)
@@ -106,7 +108,7 @@ internal static class ContinuationChecks
             }
 
             BeginIntegration(runner, tick);
-            var status = Drain(runner);
+            var status = await DrainAsync(runner, observePending);
             if (status != DeterministicTickStatus.Completed)
                 throw new InvalidOperationException("Service fixture runner faulted.", runner.Fault);
             var events = runner.LastCompleted!.Events;
@@ -183,21 +185,44 @@ internal static class ContinuationChecks
     private static void BeginIntegration(DeterministicRunner<IntegrationFrame> runner, long tick) =>
         runner.BeginTick(tick, new IntegrationFrame { Delta = Fixed.FromRaw(Delta) }, Fixed.FromRaw(Delta));
 
-    private static DeterministicTickStatus Drain(DeterministicRunner<IntegrationFrame> runner)
+    private static
+#if GA_BROWSER_CONFORMANCE
+        async
+#endif
+        ValueTask<DeterministicTickStatus> DrainAsync(DeterministicRunner<IntegrationFrame> runner, Action? observePending)
     {
         var clock = Stopwatch.StartNew();
+#if GA_BROWSER_CONFORMANCE
+        // Pending here must be a readback yield, independent of the logical job budget.
+        const int budget = int.MaxValue;
+#else
+        const int budget = 1;
         var wait = new SpinWait();
-        while (runner.Advance(1) == DeterministicTickStatus.Pending)
+#endif
+        var status = runner.Advance(budget);
+        if (status == DeterministicTickStatus.Pending)
+            observePending?.Invoke();
+        while (status == DeterministicTickStatus.Pending)
         {
             if (clock.Elapsed.TotalSeconds > 20)
                 throw new TimeoutException("Service fixture runner did not complete.");
+#if GA_BROWSER_CONFORMANCE
+            await Task.Delay(1);
+#else
             wait.SpinOnce(sleep1Threshold: -1);
+#endif
+            status = runner.Advance(budget);
         }
-        return runner.Status;
+#if GA_BROWSER_CONFORMANCE
+        return status;
+#else
+        return ValueTask.FromResult(status);
+#endif
     }
 
-    private static void VerifyFaultRecovery(World world, ContactService service, DeterministicRunner<IntegrationFrame> runner,
-        Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan, int chunk, Frame frame)
+    private static async ValueTask VerifyFaultRecoveryAsync(World world, ContactService service,
+        DeterministicRunner<IntegrationFrame> runner, Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan,
+        int chunk, Frame frame, Action? observePending)
     {
         var owner = service.Slots[0];
         world.Get<PhysicsLink>(world.BindEntity(owner.Owner, owner.OwnerGeneration)).Generation++;
@@ -205,7 +230,7 @@ internal static class ContinuationChecks
         var last = runner.LastCompleted;
         service.BeforeTick(world, next);
         BeginIntegration(runner, next);
-        Require(Drain(runner) == DeterministicTickStatus.Faulted && runner.Fault is InvalidDataException &&
+        Require(await DrainAsync(runner, observePending) == DeterministicTickStatus.Faulted && runner.Fault is InvalidDataException &&
             ReferenceEquals(runner.LastCompleted, last), "Service fault published a new completed result.");
         bool captureRejected = false;
         try { world.OpenCheckpoint(); }
@@ -215,7 +240,7 @@ internal static class ContinuationChecks
 
         using var recovered = Load(frame.Checkpoint, chunk, out var restored);
         using var resumedRunner = NewRunner(recovered, restored, createPlan);
-        var result = Advance(recovered, restored, resumedRunner, restored.Previous.ToArray(), next).Single();
+        var result = (await AdvanceAsync(recovered, restored, resumedRunner, restored.Previous.ToArray(), next, observePending)).Single();
         Require(result.Tick == next, "Recovery did not complete the retry.");
     }
 

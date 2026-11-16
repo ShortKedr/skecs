@@ -21,7 +21,11 @@ internal static class ThermalScenario
     private const uint StampSeed = 2166136261u;
     private static readonly ThermalContribution CounterSeed = new() { Stamp = StampSeed };
 
+#if GA_BROWSER_CONFORMANCE
+    public static async Task<Coverage> Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
+#else
     public static Coverage Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
+#endif
     {
         using var world = new World(new WorldOptions(scenario.Chunk));
         var rows = Seed(world, scenario);
@@ -49,7 +53,13 @@ internal static class ThermalScenario
             runner.BeginTick(tick, in input, Fixed.One);
             // The caller may reuse its input storage while the runner owns its copied frame.
             input = default;
+#if GA_BROWSER_CONFORMANCE
+            bool waitedForReadback = await Drain(runner, scenario.Budget);
+            if (startup is not null && scenario.Rows != 0 && !waitedForReadback)
+                throw new InvalidDataException($"WebGPU did not yield at {scenario}, tick {tick}.");
+#else
             Drain(runner, scenario.Budget);
+#endif
             if (startup is not null && deviceRows != (long)scenario.Rows * tick)
                 throw new InvalidDataException($"Wrong actual device row count at {scenario}, tick {tick}.");
             coverage += VerifyTick(world, rows, raw, scenario, tick, runner.LastCompleted!, counters);
@@ -221,6 +231,25 @@ internal static class ThermalScenario
         return item.Get<T>();
     }
 
+#if GA_BROWSER_CONFORMANCE
+    private static async Task<bool> Drain(DeterministicRunner<ThermalFrame> runner, int budget)
+    {
+        var timer = Stopwatch.StartNew();
+        bool pending = false;
+        var status = runner.Advance(budget);
+        while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
+        {
+            pending = true;
+            await Task.Delay(1);
+            status = runner.Advance(budget);
+        }
+        if (status == DeterministicTickStatus.Faulted)
+            throw new InvalidOperationException("ThermalInventory tick faulted.", runner.Fault);
+        if (status != DeterministicTickStatus.Completed)
+            throw new TimeoutException("ThermalInventory stayed pending for 20 seconds.");
+        return pending;
+    }
+#else
     private static void Drain(DeterministicRunner<ThermalFrame> runner, int budget)
     {
         long started = Stopwatch.GetTimestamp();
@@ -241,6 +270,7 @@ internal static class ThermalScenario
                 Thread.Sleep(1);
         }
     }
+#endif
 
     private readonly record struct RawFrame(int SlotShift, long Ambient, long TransferHeat, long HeatLimit,
         long ShieldLimit, long ShieldDrain, long CreditStep)

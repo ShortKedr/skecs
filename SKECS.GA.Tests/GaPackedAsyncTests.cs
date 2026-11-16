@@ -37,6 +37,24 @@ public sealed class GaPackedAsyncTests
     }
 
     [Fact]
+    public async Task ADiscardedReadbackCanDrainBeforeTheKernelIsReused()
+    {
+        await using var kernel = new AsyncKernel();
+        var first = kernel.BeginDispatch([1, 42], 1);
+        first.Discard();
+        var idle = kernel.WaitForIdleAsync();
+        Assert.False(idle.IsCompleted);
+        Assert.Throws<InvalidOperationException>(() => kernel.BeginDispatch([1, 15], 1));
+
+        kernel.Complete();
+        await idle;
+        var second = await kernel.BeginDispatch([1, 15], 1).DrainAsync();
+
+        Assert.Equal(new uint[] { 15 }, second.Output.ToArray());
+        await Assert.ThrowsAsync<OperationCanceledException>(() => first.DrainAsync().AsTask());
+    }
+
+    [Fact]
     public async Task AFailedReadbackRemainsObservableAfterDisposal()
     {
         var kernel = new AsyncKernel();

@@ -1,20 +1,36 @@
 using System.Diagnostics;
 using SKECS;
 using SKECS.GA;
+#if GA_BROWSER_CONFORMANCE
+using System.Runtime.InteropServices.JavaScript;
+#else
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
+#endif
 
+#if GA_BROWSER_CONFORMANCE
+var browserContract = CreateContract();
+var browser = await BrowserConformance.OpenAsync(args, browserContract, "lifecycle", ObserverRequest(browserContract));
+using var browserDevice = browser.Device;
+using var browserStartup = browser.Startup;
+bool checkVisibility = browser.Profile == "visibility";
+using var visibilityModule = checkVisibility
+    ? await JSHost.ImportAsync(BrowserVisibility.Module, new Uri(browser.Site, "host-visibility.mjs").AbsoluteUri)
+    : null;
+await ExerciseDevice("webgpu", browserDevice, browserStartup, browserContract, checkVisibility);
+#else
 if (args.Length != 1 || args[0] != "cpu")
 {
     if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
         !int.TryParse(args[3], out int index) || index < 0)
         throw new ArgumentException("Usage: HostLifecycleConformance cpu | <vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index>");
-    RunDevice(args[0], args[1], args[2], index);
+    await RunDevice(args[0], args[1], args[2], index);
 }
 else
-    Exercise(CpuWorkload, "CPU-only", 127);
+    await Exercise(CpuWorkload, "CPU-only", 127);
+#endif
 
 static DeterministicWorkload<HostInput> CpuWorkload() =>
     WithObserver(HostAdapter.Register(new DeterministicWorkload<HostInput>(), SystemStage.Update));
@@ -22,7 +38,7 @@ static DeterministicWorkload<HostInput> CpuWorkload() =>
 static DeterministicWorkload<HostInput> WithObserver(DeterministicWorkload<HostInput> workload) =>
     workload.AddJob(SystemStage.PostUpdate, new DeterministicQuery(), new Observer());
 
-static void RunDevice(string backend, string bundle, string native, int index)
+static GaContractIdentity CreateContract()
 {
     var contract = new GaContractIdentity(HostAdapterRowCodec.SystemId, "host-lifecycle/1",
         HostAdapterRowCodec.SourceDigest, HostAdapterRowCodec.IrDigest, HostAdapterRowCodec.ComponentSchemaDigest,
@@ -33,44 +49,60 @@ static void RunDevice(string backend, string bundle, string native, int index)
         TickResourceWords = HostAdapterRowCodec.TickResourceWords
     };
     Require(contract is { EventCapacity: 1, TickResourceWords: 1 }, "Unexpected host kernel schema.");
+    return contract;
+}
+
+static GaSystemRequest ObserverRequest(GaContractIdentity contract) =>
+    new(contract with { SystemId = "host-observer" }, [], DeclaredCpuStage: true);
+
+#if !GA_BROWSER_CONFORMANCE
+static async Task RunDevice(string backend, string bundle, string native, int index)
+{
+    var contract = CreateContract();
     var stem = Path.Combine(bundle, contract.SystemId);
     var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
         File.ReadAllText(stem + ".content-id").Trim(),
         File.ReadAllBytes(stem + (backend switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
         File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
     var devices = Open(backend, native, out var owner);
-    using (owner)
-    {
-        Require(index < devices.Count, $"Device index {index} exceeds available devices {devices.Count}.");
-        var device = devices[index];
-        var observer = new GaSystemRequest(contract with { SystemId = "host-observer" }, [], DeclaredCpuStage: true);
-        using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact]), observer],
-            [device], allowExperimental: true);
-        Require(startup.Succeeded && startup.SelectedPlan == GaSelectedPlan.Mixed &&
-            startup.Decisions[0].Route == GaRoute.Gpu && startup.Decisions[1].Route == GaRoute.Cpu,
-            string.Join(", ", startup.Decisions.Select(item => $"{item.Route} {item.Reason} {item.Detail}")));
-        int deviceRows = 0;
-        var batch = new AuditedBatches(new GaBatchProcessor<HostInput>(startup, contract.SystemId, contract.SourceDigest,
-            contract.IrDigest, contract.ComponentSchemaDigest, HostAdapterRowCodec.WordsPerRow,
-            HostAdapterRowCodec.Pack<HostInput>, HostAdapterRowCodec.Apply<HostInput>, contract.EventCapacity,
-            timing => deviceRows += timing.Rows, null, false, [], [], HostAdapterRowCodec.TickResource));
-        var cpu = Exercise(CpuWorkload, "CPU baseline", 127);
-        var gpu = Exercise(() => WithObserver(new DeterministicWorkload<HostInput>()
-            .AddBatchSystem(SystemStage.Update, HostAdapterRowCodec.CreateQuery(), batch)), $"{backend} {device.Info.Device}", 64, batch);
-        Require(cpu.TickIndex == gpu.TickIndex && cpu.Stage == gpu.Stage && cpu.SystemOrder == gpu.SystemOrder &&
-            cpu.KernelOrder == gpu.KernelOrder && cpu.SourceOrderOrdinal == gpu.SourceOrderOrdinal &&
-            cpu.SourceId == gpu.SourceId && cpu.SourceGeneration == gpu.SourceGeneration && cpu.KernelFault == gpu.KernelFault,
-            "Canonical CPU and GPU fault records differ.");
-        Require(deviceRows == 4 * HostSession.RowCount + 64 && batch.Submitted == 16 &&
-            batch.Discarded == 3 && batch.InFlight == 0, "Device rows, submissions, or drains differ.");
-        Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={device.Info.ApiVersion} driver={device.Info.Driver} " +
-            $"artifact={startup.Decisions[0].ArtifactId} source={contract.SourceDigest} ir={contract.IrDigest} " +
-            $"deviceRows={deviceRows} submissions={batch.Submitted} drains={batch.Discarded} route=mixed faultParity=passed");
-    }
+    using var nativeOwner = owner;
+    Require(index < devices.Count, $"Device index {index} exceeds available devices {devices.Count}.");
+    var device = devices[index];
+    using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact]), ObserverRequest(contract)],
+        [device], allowExperimental: true);
+    await ExerciseDevice(backend, device, startup, contract);
+}
+#endif
+
+static async Task ExerciseDevice(string backend, IGaDevice device, GaStartupResult startup, GaContractIdentity contract,
+    bool checkVisibility = false)
+{
+    Require(startup.Succeeded && startup.SelectedPlan == GaSelectedPlan.Mixed &&
+        startup.Decisions[0].Route == GaRoute.Gpu && startup.Decisions[1].Route == GaRoute.Cpu,
+        string.Join(", ", startup.Decisions.Select(item => $"{item.Route} {item.Reason} {item.Detail}")));
+    int deviceRows = 0;
+    var batch = new AuditedBatches(new GaBatchProcessor<HostInput>(startup, contract.SystemId, contract.SourceDigest,
+        contract.IrDigest, contract.ComponentSchemaDigest, HostAdapterRowCodec.WordsPerRow,
+        HostAdapterRowCodec.Pack<HostInput>, HostAdapterRowCodec.Apply<HostInput>, contract.EventCapacity,
+        timing => deviceRows += timing.Rows, null, false, [], [], HostAdapterRowCodec.TickResource));
+    var kernel = OperatingSystem.IsBrowser() ? (GaPackedKernel)startup.GetPreparedKernel(contract.SystemId) : null;
+    var cpu = await Exercise(CpuWorkload, "CPU baseline", 127);
+    var gpu = await Exercise(() => WithObserver(new DeterministicWorkload<HostInput>()
+        .AddBatchSystem(SystemStage.Update, HostAdapterRowCodec.CreateQuery(), batch)), $"{backend} {device.Info.Device}", 64,
+        batch, kernel, checkVisibility);
+    Require(cpu.TickIndex == gpu.TickIndex && cpu.Stage == gpu.Stage && cpu.SystemOrder == gpu.SystemOrder &&
+        cpu.KernelOrder == gpu.KernelOrder && cpu.SourceOrderOrdinal == gpu.SourceOrderOrdinal &&
+        cpu.SourceId == gpu.SourceId && cpu.SourceGeneration == gpu.SourceGeneration && cpu.KernelFault == gpu.KernelFault,
+        "Canonical CPU and GPU fault records differ.");
+    Require(deviceRows == 4 * HostSession.RowCount + 64 && batch.Submitted == 16 &&
+        batch.Discarded == 3 && batch.InFlight == 0, "Device rows, submissions, or drains differ.");
+    Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={device.Info.ApiVersion} driver={device.Info.Driver} " +
+        $"artifact={startup.Decisions[0].ArtifactId} source={contract.SourceDigest} ir={contract.IrDigest} " +
+        $"deviceRows={deviceRows} submissions={batch.Submitted} drains={batch.Discarded} route=mixed faultParity=passed");
 }
 
-static GaExecutionException Exercise(Func<DeterministicWorkload<HostInput>> workload, string lane, int chunk,
-    AuditedBatches? batches = null)
+static async Task<GaExecutionException> Exercise(Func<DeterministicWorkload<HostInput>> workload, string lane, int chunk,
+    AuditedBatches? batches = null, GaPackedKernel? asyncKernel = null, bool checkVisibility = false)
 {
     using var host = new HostSession(workload, chunk);
     host.Reset();
@@ -82,14 +114,36 @@ static GaExecutionException Exercise(Func<DeterministicWorkload<HostInput>> work
     Require(host.Update(input) == DeterministicTickStatus.Pending, "Tick 1 completed within a one-job budget.");
     VerifyLease(host);
     input.Divisor = 4;
+#if GA_BROWSER_CONFORMANCE
+    if (checkVisibility)
+    {
+        Require(!BrowserVisibility.IsHidden(), "The GPU tick must start in a visible tab.");
+        Console.WriteLine("WebGPU HostLifecycle waitingForHidden=ready");
+        await BrowserVisibility.WaitForVisibility(true);
+        host.Paused = BrowserVisibility.IsHidden();
+    }
+    else
+#endif
     host.Paused = true;
     int submitted = batches?.Submitted ?? 0;
     for (int poll = 0; poll < 3; poll++)
         Require(host.Update(input) == DeterministicTickStatus.Pending && host.Poll() == DeterministicTickStatus.Pending,
             "Paused host advanced its logical work.");
-    Require((batches?.Submitted ?? 0) == submitted && host.Captures == 1 &&
-        ReferenceEquals(initial, Task.Run(host.Render).GetAwaiter().GetResult()),
+    var pausedFrame = OperatingSystem.IsBrowser() ? host.Render() : Task.Run(host.Render).GetAwaiter().GetResult();
+    Require((batches?.Submitted ?? 0) == submitted && host.Captures == 1 && ReferenceEquals(initial, pausedFrame),
         "Pause changed the published frame or queued additional work.");
+#if GA_BROWSER_CONFORMANCE
+    if (checkVisibility)
+    {
+        Require(BrowserVisibility.IsHidden(), "The driver restored the tab before polling it while hidden.");
+        Console.WriteLine("WebGPU HostLifecycle hiddenPending=passed");
+        await BrowserVisibility.WaitForVisibility(false);
+        host.Paused = BrowserVisibility.IsHidden();
+        Require(!host.Paused, "The visible tab did not resume.");
+        Console.WriteLine("WebGPU HostLifecycle visibility=passed");
+    }
+    else
+#endif
     host.Paused = false;
     if (batches is not null)
     {
@@ -97,12 +151,12 @@ static GaExecutionException Exercise(Func<DeterministicWorkload<HostInput>> work
             ReferenceEquals(host.Render(), initial), "Poll passed the held GPU completion.");
         batches.Hold = false;
     }
-    Require(Drain(host) == DeterministicTickStatus.Completed, "Tick 1 failed.");
+    Require(await Drain(host) == DeterministicTickStatus.Completed, "Tick 1 failed.");
     var first = host.Render();
     VerifyFrame(first, 0, 2);
     Require(host.Poll() == DeterministicTickStatus.Completed && host.Captures == 2 &&
         ReferenceEquals(first, host.Render()), "Polling a completed tick republished it.");
-    Require(host.Update(input) == DeterministicTickStatus.Pending && Drain(host) == DeterministicTickStatus.Completed,
+    Require(host.Update(input) == DeterministicTickStatus.Pending && await Drain(host) == DeterministicTickStatus.Completed,
         "Tick 2 failed.");
     var second = host.Render();
     VerifyFrame(second, 0, 2, 4);
@@ -116,6 +170,8 @@ static GaExecutionException Exercise(Func<DeterministicWorkload<HostInput>> work
         "Reset scenario did not start a pending tick.");
     host.Paused = true;
     host.Reset();
+    if (asyncKernel is not null)
+        await asyncKernel.WaitForIdleAsync();
     if (batches is not null)
     {
         Require(batches.InFlight == 0 && batches.Discarded == 1, "Reset failed to drain the device batch.");
@@ -125,11 +181,11 @@ static GaExecutionException Exercise(Func<DeterministicWorkload<HostInput>> work
     VerifyFrame(host.Render(), 1);
     VerifyFrame(second, 0, 2, 4);
     Require(host.Update(new HostInput { Divisor = 2 }) == DeterministicTickStatus.Pending &&
-        Drain(host) == DeterministicTickStatus.Completed, "Reset could not restart the workload.");
+        await Drain(host) == DeterministicTickStatus.Completed, "Reset could not restart the workload.");
     var beforeFault = host.Render();
     VerifyFrame(beforeFault, 1, 2);
 
-    Require(host.Update(default) == DeterministicTickStatus.Pending && Drain(host) == DeterministicTickStatus.Faulted,
+    Require(host.Update(default) == DeterministicTickStatus.Pending && await Drain(host) == DeterministicTickStatus.Faulted,
         "An arithmetic fault did not follow the first successful slice.");
     // The row's integer remainder precedes its Fixed division in the fault evaluation order.
     Require(host.Fault is GaExecutionException { TickIndex: 2, Stage: SystemStage.Update, SystemOrder: 0, KernelOrder: 0,
@@ -146,12 +202,14 @@ static GaExecutionException Exercise(Func<DeterministicWorkload<HostInput>> work
     host.Reset();
     VerifyFrame(host.Render(), 2);
     Require(host.Update(new HostInput { Divisor = 2 }) == DeterministicTickStatus.Pending &&
-        Drain(host) == DeterministicTickStatus.Completed, "Host did not restart after discarding the faulted world.");
+        await Drain(host) == DeterministicTickStatus.Completed, "Host did not restart after discarding the faulted world.");
     var last = host.Render();
     VerifyFrame(last, 2, 2);
     if (batches is not null) batches.Hold = true;
     Require(host.Update(input) == DeterministicTickStatus.Pending, "Dispose scenario did not start a pending tick.");
     host.Dispose();
+    if (asyncKernel is not null)
+        await asyncKernel.WaitForIdleAsync();
     if (batches is not null)
         Require(batches.InFlight == 0 && batches.Discarded == 3, "Dispose failed to drain the device batch.");
     Require(host.Captures == 7 && ReferenceEquals(last, host.Render()), "Dispose published a partial frame.");
@@ -162,7 +220,7 @@ static GaExecutionException Exercise(Func<DeterministicWorkload<HostInput>> work
     return fault;
 }
 
-static DeterministicTickStatus Drain(HostSession host)
+static async Task<DeterministicTickStatus> Drain(HostSession host)
 {
     var published = host.Render();
     var timer = Stopwatch.StartNew();
@@ -175,7 +233,10 @@ static DeterministicTickStatus Drain(HostSession host)
         Require(ReferenceEquals(published, host.Render()), "The host published a partial tick.");
         if (timer.Elapsed > TimeSpan.FromSeconds(20))
             throw new TimeoutException("The host stayed pending for 20 seconds.");
-        wait.SpinOnce();
+        if (OperatingSystem.IsBrowser())
+            await Task.Delay(1);
+        else
+            wait.SpinOnce();
     }
 }
 
@@ -225,6 +286,7 @@ static void VerifyLease(HostSession host)
     throw new InvalidOperationException("The world permitted an external read while owned by the runner.");
 }
 
+#if !GA_BROWSER_CONFORMANCE
 static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposable owner)
 {
     if (backend == "vulkan")
@@ -249,6 +311,7 @@ static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposabl
     owner = d3d12;
     return d3d12.Devices;
 }
+#endif
 
 static void Require(bool condition, string message)
 {

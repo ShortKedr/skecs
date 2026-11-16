@@ -1,9 +1,16 @@
 using System.Text.Json;
 using SKECS.GA;
+#if GA_BROWSER_CONFORMANCE
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using SKECS.GA.Backend.WebGpu;
+#else
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
+#endif
 
 var contract = new GaContractIdentity(SpatialAdapterRowCodec.SystemId, "spatial-parent/1",
     SpatialAdapterRowCodec.SourceDigest, SpatialAdapterRowCodec.IrDigest, SpatialAdapterRowCodec.ComponentSchemaDigest,
@@ -20,6 +27,27 @@ var contract = new GaContractIdentity(SpatialAdapterRowCodec.SystemId, "spatial-
 Require(contract is { SnapshotSchema: "bbff", BufferRowWords: 12, EventCapacity: 1, EventTypeCount: 1, EventPayloadWords: 19 },
     "Unexpected SpatialParent snapshot, buffer, or event contract.");
 
+#if GA_BROWSER_CONFORMANCE
+if (!OperatingSystem.IsBrowser())
+    throw new PlatformNotSupportedException();
+var host = WebAssemblyHostBuilder.CreateDefault(args).Build();
+var navigation = host.Services.GetRequiredService<NavigationManager>();
+var site = new Uri(navigation.BaseUri);
+string query = new Uri(navigation.Uri).Query;
+string profile = query.Length == 0 ? "matrix" : query[1..];
+using var http = new HttpClient { BaseAddress = site };
+string stem = "bundle/" + contract.SystemId;
+var manifestBytes = await http.GetByteArrayAsync(stem + ".manifest.json");
+var contentId = await http.GetStringAsync(stem + ".content-id");
+var shaderBytes = await http.GetByteArrayAsync(stem + ".wgsl");
+var layoutBytes = await http.GetByteArrayAsync(stem + ".layout");
+var sourceMapBytes = await http.GetByteArrayAsync(stem + ".source-map.json");
+var artifact = GaArtifactCandidate.Load(manifestBytes, contentId.Trim(), shaderBytes, layoutBytes, sourceMapBytes);
+var opened = await GaWebGpuBackend.TryOpenAsync(new Uri(site, "ga-webgpu.mjs").AbsoluteUri);
+using var backend = opened.Backend ?? throw new InvalidOperationException(opened.Error);
+var device = backend;
+using var startup = await GaStartup.SelectAsync(GaPolicy.RequireGpu, [new(contract, [artifact])], [device], allowExperimental: true);
+#else
 if (args.Length is 1 or 2 && args[0] == "cpu")
 {
     Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
@@ -35,28 +63,40 @@ var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json
     File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
-using (owner)
-{
-    Require(index < devices.Count, $"Device index {index} exceeds available devices {devices.Count}.");
-    var device = devices[index];
-    using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])], [device], allowExperimental: true);
-    var route = startup.Decisions.Single();
-    Require(startup.Succeeded && route.Route == GaRoute.Gpu, $"GPU startup failed: {route.Reason} {route.Detail}");
-    var manifest = artifact.Bundle!.Manifest;
-    Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={device.Info.ApiVersion} driver={device.Info.Driver} " +
-        $"source={contract.SourceDigest} ir={contract.IrDigest} irVersion={contract.IrVersion} subsetVersion={contract.SubsetVersion} " +
-        $"numericVersion={contract.NumericVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
-        $"contentId={route.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
-    Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
-    Exercise(args.ElementAtOrDefault(4) ?? "matrix", startup);
-}
+using var native = owner;
+Require(index < devices.Count, $"Device index {index} exceeds available devices {devices.Count}.");
+var device = devices[index];
+using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])], [device], allowExperimental: true);
+string profile = args.ElementAtOrDefault(4) ?? "matrix";
+#endif
+var route = startup.Decisions.Single();
+Require(startup.Succeeded && route.Route == GaRoute.Gpu, $"GPU startup failed: {route.Reason} {route.Detail}");
+var manifest = artifact.Bundle!.Manifest;
+Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={device.Info.ApiVersion} driver={device.Info.Driver} " +
+    $"source={contract.SourceDigest} ir={contract.IrDigest} irVersion={contract.IrVersion} subsetVersion={contract.SubsetVersion} " +
+    $"numericVersion={contract.NumericVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
+    $"contentId={route.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
+Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
+#if GA_BROWSER_CONFORMANCE
+await Exercise(profile, startup);
+#else
+Exercise(profile, startup);
+#endif
 
+#if GA_BROWSER_CONFORMANCE
+async Task Exercise(string profile, GaStartupResult? startup)
+#else
 void Exercise(string profile, GaStartupResult? startup)
+#endif
 {
     var scenarios = SelectCases(profile);
     var totals = default(Totals);
     foreach (var scenario in scenarios)
+#if GA_BROWSER_CONFORMANCE
+        totals += await SpatialScenario.Run(scenario, startup, contract);
+#else
         totals += SpatialScenario.Run(scenario, startup, contract);
+#endif
     Require(totals.Witnesses == Witness.All, $"The corpus missed {Witness.All & ~totals.Witnesses}.");
     Require(totals.Queries > 0 && (startup is null ? totals.Batches == 0 : totals.Batches > 0),
         "The corpus did not execute its selected route.");
@@ -65,6 +105,9 @@ void Exercise(string profile, GaStartupResult? startup)
         $"exactUnique={totals.Exact} staleTargets={totals.Stale} deviceRows={(startup is null ? 0 : totals.Queries)} " +
         $"deviceBatches={totals.Batches} witnesses={totals.Witnesses} " +
         "exactState=passed exactTypedEvents=passed bruteForceCoverage=passed sealAddClear=passed");
+#if GA_BROWSER_CONFORMANCE
+    Console.WriteLine("WebGPU SpatialParent pendingReadback=passed");
+#endif
 }
 
 static Scenario[] SelectCases(string profile)
@@ -89,6 +132,7 @@ static Scenario[] SelectCases(string profile)
     return scenarios.ToArray();
 }
 
+#if !GA_BROWSER_CONFORMANCE
 static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposable owner)
 {
     if (backend == "vulkan")
@@ -113,6 +157,7 @@ static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposabl
     owner = dx;
     return dx.Devices;
 }
+#endif
 
 static void Require(bool condition, string message)
 {

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RuntimeFrameworkVersion>8.0.34</RuntimeFrameworkVersion>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <WasmBuildNative>false</WasmBuildNative>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DefineConstants>$(DefineConstants);GA_BROWSER_CONFORMANCE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="$(RuntimeFrameworkVersion)" />
+    <ProjectReference Include="../../../SKECS.GA.Backend.WebGpu/SKECS.GA.Backend.WebGpu.csproj" />
+    <ProjectReference Include="../../../SKECS.Serialization/SKECS.Serialization.csproj" Condition="'$(Fixture)' == 'service-continuation'" />
+    <Compile Include="../$(Fixture)-conformance/*.cs" />
+    <Compile Include="$(Bundle)/ga-adapter.g.cs" />
+    <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
+    <Content Include="../../../SKECS.GA.Backend.WebGpu/ga-webgpu.mjs" Link="wwwroot/ga-webgpu.mjs" />
+    <Content Include="../host-lifecycle-conformance/host-visibility.mjs" Link="wwwroot/host-visibility.mjs"
+             Condition="'$(Fixture)' == 'host-lifecycle'" />
+    <Content Include="$(Bundle)/*.wgsl;$(Bundle)/*.manifest.json;$(Bundle)/*.content-id;$(Bundle)/*.layout;$(Bundle)/*.source-map.json"
+             Link="wwwroot/bundle/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="CheckGameplayFixture" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Fixture)' == '' Or !Exists('../$(Fixture)-conformance/Program.cs')" Text="Supply a GA conformance fixture with -p:Fixture." />
+    <Error Condition="'$(Bundle)' == '' Or !Exists('$(Bundle)/ga-row-codec.g.cs')" Text="Supply an absolute WGSL bundle directory with -p:Bundle." />
+  </Target>
+</Project>

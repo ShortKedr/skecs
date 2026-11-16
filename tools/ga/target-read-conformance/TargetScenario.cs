@@ -75,7 +75,11 @@ internal sealed class TargetScenario
     private long UntaggedPosition => -0x5566778899L - (_scenario.Seed & 255);
     private static TargetBody Body(long position) => new() { Position = Fixed.FromRaw(position) };
 
+#if GA_BROWSER_CONFORMANCE
+    public static async Task<Coverage> Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
+#else
     public static Coverage Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
+#endif
     {
         using var world = new World(new WorldOptions(scenario.Chunk));
         var test = new TargetScenario(scenario, world);
@@ -105,7 +109,13 @@ internal sealed class TargetScenario
                 throw new InvalidDataException("Snapshot membership differs from the live fixture.");
             snapshot.Bind(tick, packet);
             runner.BeginTick(tick, 0, Fixed.One);
+#if GA_BROWSER_CONFORMANCE
+            bool waitedForReadback = await Drain(runner, scenario.Budget);
+            if (startup is not null && scenario.Rows != 0 && !waitedForReadback)
+                throw new InvalidDataException($"WebGPU did not yield at {scenario}, tick {tick}.");
+#else
             Drain(runner, scenario.Budget);
+#endif
             if (startup is not null && deviceRows != (long)scenario.Rows * tick)
                 throw new InvalidDataException($"GPU rows differ at {scenario}, tick {tick}.");
             test.VerifyTick(world, runner.LastCompleted!, tick);
@@ -246,6 +256,25 @@ internal sealed class TargetScenario
             throw new InvalidDataException($"Entity allocation differed: expected {id}/{generation}, got {actual.Id}/{actual.Version}.");
     }
 
+#if GA_BROWSER_CONFORMANCE
+    private static async Task<bool> Drain(DeterministicRunner<byte> runner, int budget)
+    {
+        var timer = Stopwatch.StartNew();
+        bool pending = false;
+        var status = runner.Advance(budget);
+        while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
+        {
+            pending = true;
+            await Task.Delay(1);
+            status = runner.Advance(budget);
+        }
+        if (status == DeterministicTickStatus.Faulted)
+            throw new InvalidOperationException("TargetRead tick faulted.", runner.Fault);
+        if (status != DeterministicTickStatus.Completed)
+            throw new TimeoutException("TargetRead stayed pending for 20 seconds.");
+        return pending;
+    }
+#else
     private static void Drain(DeterministicRunner<byte> runner, int budget)
     {
         long started = Stopwatch.GetTimestamp();
@@ -266,6 +295,7 @@ internal sealed class TargetScenario
                 Thread.Sleep(1);
         }
     }
+#endif
 
     private struct TrackingTag;
 }

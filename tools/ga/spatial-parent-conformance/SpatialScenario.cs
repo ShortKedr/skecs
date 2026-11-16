@@ -71,7 +71,11 @@ internal sealed class SpatialScenario
             _turrets[row] = world.CreateEntity(new TurretProbe());
     }
 
+#if GA_BROWSER_CONFORMANCE
+    public static async Task<Totals> Run(Scenario scenario, GaStartupResult? startup, GaContractIdentity contract)
+#else
     public static Totals Run(Scenario scenario, GaStartupResult? startup, GaContractIdentity contract)
+#endif
     {
         using var world = new World(new WorldOptions(scenario.Chunk));
         var test = new SpatialScenario(scenario, world);
@@ -89,7 +93,11 @@ internal sealed class SpatialScenario
                     SpatialAdapterRowCodec.Apply<byte>, contract.EventCapacity, batch => { batches++; deviceRows += batch.Rows; },
                     snapshot, false, [], [], default, buffer, SpatialAdapterRowCodec.EventTypes));
 
+#if GA_BROWSER_CONFORMANCE
+        using var runner = new DeterministicRunner<byte>(world, workload, workerCount: 1);
+#else
         using var runner = new DeterministicRunner<byte>(world, workload);
+#endif
         var total = default(Totals);
         for (int tick = 1; tick <= 8; tick++)
         {
@@ -97,7 +105,13 @@ internal sealed class SpatialScenario
             buffer.Bind(tick, SpatialAdapterRowCodec.Buffer.Capture(CollectionsMarshal.AsSpan(packed)));
             CollectionsMarshal.AsSpan(packed).Clear(); // The captured resource owns its row data.
             runner.BeginTick(tick, 0, Fixed.One);
+#if GA_BROWSER_CONFORMANCE
+            bool waitedForReadback = await Drain(runner, scenario.Budget);
+            if (startup is not null && scenario.Rows != 0 && !waitedForReadback)
+                throw new InvalidDataException($"WebGPU did not yield at {scenario}, tick {tick}.");
+#else
             Drain(runner, scenario.Budget);
+#endif
             if (startup is not null && deviceRows != (long)scenario.Rows * tick)
                 throw new InvalidDataException($"Incomplete device execution at {scenario}, tick {tick}.");
             total += test.Compare(runner.LastCompleted!, tick, expected, witnesses);
@@ -367,6 +381,25 @@ internal sealed class SpatialScenario
             throw new InvalidDataException("The world did not reuse the intended identity.");
     }
 
+#if GA_BROWSER_CONFORMANCE
+    private static async Task<bool> Drain(DeterministicRunner<byte> runner, int budget)
+    {
+        var timer = Stopwatch.StartNew();
+        bool pending = false;
+        var status = runner.Advance(budget);
+        while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
+        {
+            pending = true;
+            await Task.Delay(1);
+            status = runner.Advance(budget);
+        }
+        if (status == DeterministicTickStatus.Faulted)
+            throw new InvalidOperationException("SpatialParent tick faulted.", runner.Fault);
+        if (status != DeterministicTickStatus.Completed)
+            throw new TimeoutException("SpatialParent stayed pending for 20 seconds.");
+        return pending;
+    }
+#else
     private static void Drain(DeterministicRunner<byte> runner, int budget)
     {
         long started = Stopwatch.GetTimestamp();
@@ -383,6 +416,7 @@ internal sealed class SpatialScenario
             else Thread.Sleep(1);
         }
     }
+#endif
 
     private readonly record struct Target(Entity Entity, bool Alive, int Token, int Priority, RawBounds Bounds);
     private readonly record struct Parent(Entity Entity, bool Alive, long X, long Y);

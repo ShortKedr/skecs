@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeFrameworkVersion>8.0.34</RuntimeFrameworkVersion>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <WasmBuildNative>false</WasmBuildNative>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DefineConstants>$(DefineConstants);GA_BROWSER_CONFORMANCE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="$(RuntimeFrameworkVersion)" />
+    <ProjectReference Include="../../../SKECS.GA.Backend.WebGpu/SKECS.GA.Backend.WebGpu.csproj" />
+    <Compile Include="../target-read-conformance/TargetKernel.cs" />
+    <Compile Include="../target-read-conformance/TargetScenario.cs" />
+    <Compile Include="../target-read-conformance/Program.cs" />
+    <Compile Include="$(Bundle)/ga-adapter.g.cs" />
+    <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
+    <Content Include="../../../SKECS.GA.Backend.WebGpu/ga-webgpu.mjs" Link="wwwroot/ga-webgpu.mjs" />
+    <Content Include="$(Bundle)/target-read.wgsl;$(Bundle)/target-read.manifest.json;$(Bundle)/target-read.content-id;$(Bundle)/target-read.layout;$(Bundle)/target-read.source-map.json"
+             Link="wwwroot/bundle/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

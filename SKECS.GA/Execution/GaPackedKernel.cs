@@ -139,6 +139,16 @@ public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
 
     protected virtual bool SupportsBlockingDispatch => true;
 
+    /// <summary>Waits for the current device submission, including one discarded by the runner.</summary>
+    public ValueTask WaitForIdleAsync()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _active is null ? ValueTask.CompletedTask : new ValueTask(_active);
+        }
+    }
+
     public GaPackedSubmission BeginDispatch(
         ReadOnlySpan<uint> input, int rowWidthWords, CancellationToken cancellationToken = default) =>
         BeginDispatchWithOutput(input, rowWidthWords, additionalOutputWords: 0, cancellationToken);

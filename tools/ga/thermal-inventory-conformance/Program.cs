@@ -1,9 +1,11 @@
 using System.Text.Json;
 using SKECS.GA;
+#if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
+#endif
 
 var contract = new GaContractIdentity(ThermalAdapterRowCodec.SystemId, "thermal-inventory/1",
     ThermalAdapterRowCodec.SourceDigest, ThermalAdapterRowCodec.IrDigest, ThermalAdapterRowCodec.ComponentSchemaDigest,
@@ -19,6 +21,14 @@ var contract = new GaContractIdentity(ThermalAdapterRowCodec.SystemId, "thermal-
 Require(contract is { EventCapacity: 3, EventTypeCount: 3, ReductionTypeCount: 1, EventPayloadWords: 9, TickResourceWords: 13 },
     "Unexpected ThermalInventory output or tick resource contract.");
 
+#if GA_BROWSER_CONFORMANCE
+var browser = await BrowserConformance.OpenAsync(args, contract, "matrix");
+using var backend = browser.Device;
+using var startup = browser.Startup;
+var artifact = browser.Artifact;
+string profile = browser.Profile;
+var device = backend;
+#else
 if (args.Length is 1 or 2 && args[0] == "cpu")
 {
     Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
@@ -34,28 +44,40 @@ var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json
     File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
-using (owner)
-{
-    Require(index < devices.Count, $"Device index {index} exceeds available devices {devices.Count}.");
-    var device = devices[index];
-    using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])], [device], allowExperimental: true);
-    var route = startup.Decisions.Single();
-    Require(startup.Succeeded && route.Route == GaRoute.Gpu, $"GPU startup failed: {route.Reason} {route.Detail}");
-    var manifest = artifact.Bundle!.Manifest;
-    Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={device.Info.ApiVersion} driver={device.Info.Driver} " +
-        $"source={contract.SourceDigest} ir={contract.IrDigest} irVersion={contract.IrVersion} subsetVersion={contract.SubsetVersion} " +
-        $"numericVersion={contract.NumericVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
-        $"contentId={route.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
-    Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
-    Exercise(args.ElementAtOrDefault(4) ?? "matrix", startup);
-}
+using var native = owner;
+Require(index < devices.Count, $"Device index {index} exceeds available devices {devices.Count}.");
+var device = devices[index];
+using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])], [device], allowExperimental: true);
+string profile = args.ElementAtOrDefault(4) ?? "matrix";
+#endif
+var route = startup.Decisions.Single();
+Require(startup.Succeeded && route.Route == GaRoute.Gpu, $"GPU startup failed: {route.Reason} {route.Detail}");
+var manifest = artifact.Bundle!.Manifest;
+Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={device.Info.ApiVersion} driver={device.Info.Driver} " +
+    $"source={contract.SourceDigest} ir={contract.IrDigest} irVersion={contract.IrVersion} subsetVersion={contract.SubsetVersion} " +
+    $"numericVersion={contract.NumericVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
+    $"contentId={route.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
+Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
+#if GA_BROWSER_CONFORMANCE
+await Exercise(profile, startup);
+#else
+Exercise(profile, startup);
+#endif
 
+#if GA_BROWSER_CONFORMANCE
+async Task Exercise(string profile, GaStartupResult? startup)
+#else
 void Exercise(string profile, GaStartupResult? startup)
+#endif
 {
     var (scenarios, ticks) = SelectCases(profile);
     var coverage = default(Coverage);
     foreach (var scenario in scenarios)
+#if GA_BROWSER_CONFORMANCE
+        coverage += await ThermalScenario.Run(scenario with { Workers = 1 }, ticks, startup, contract);
+#else
         coverage += ThermalScenario.Run(scenario, ticks, startup, contract);
+#endif
     Require(coverage.Rows > 0 && coverage.Transfers > 0 && coverage.Overheated > 0 && coverage.HeatRefusals > 0 &&
         coverage.Docked > 0 && coverage.Docked < coverage.Rows && coverage.EnabledKits > 0 &&
         coverage.EnabledKits < coverage.Kits && coverage.Kits < coverage.Rows && coverage.Slots == 0xffff,
@@ -68,6 +90,9 @@ void Exercise(string profile, GaStartupResult? startup)
         $"docked={coverage.Docked} kits={coverage.Kits} enabledKits={coverage.EnabledKits} slots=0x{coverage.Slots:x4} " +
         $"publicEvents={coverage.Rows + coverage.Transfers} deviceRows={coverage.DeviceRows} deviceBatches={coverage.DeviceBatches} " +
         "exactState=passed exactTypedEvents=passed typedReduction=passed");
+#if GA_BROWSER_CONFORMANCE
+    Console.WriteLine("WebGPU ThermalInventory pendingReadback=passed");
+#endif
 }
 
 static (Scenario[] Cases, int Ticks) SelectCases(string profile)
@@ -96,6 +121,7 @@ static (Scenario[] Cases, int Ticks) SelectCases(string profile)
     return (scenarios.ToArray(), 16);
 }
 
+#if !GA_BROWSER_CONFORMANCE
 static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposable owner)
 {
     if (backend == "vulkan")
@@ -120,6 +146,7 @@ static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposabl
     owner = dx;
     return dx.Devices;
 }
+#endif
 
 static void Require(bool condition, string message)
 {

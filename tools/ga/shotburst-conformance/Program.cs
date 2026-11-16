@@ -2,16 +2,20 @@ using System.Diagnostics;
 using System.Text.Json;
 using SKECS;
 using SKECS.GA;
+#if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
+#endif
 using SKECS.Numerics;
 
+#if !GA_BROWSER_CONFORMANCE
 if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0 ||
     args[4] is not ("smoke" or "matrix" or "short" or "long"))
     throw new ArgumentException("Usage: ShotBurstConformance <vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index> <smoke|matrix|short|long>");
+#endif
 
 var contract = new GaContractIdentity(ShotBurstAdapterRowCodec.SystemId, "shot-burst-capacity/1",
     ShotBurstAdapterRowCodec.SourceDigest, ShotBurstAdapterRowCodec.IrDigest,
@@ -28,23 +32,42 @@ var contract = new GaContractIdentity(ShotBurstAdapterRowCodec.SystemId, "shot-b
 Check(contract is { EventCapacity: 2, UsesCommands: false, UsesDomainOrder: true,
     TickResourceWords: 6, EventTypeCount: 1, EventPayloadWords: 7 }, "Unexpected producer contract.");
 
+#if GA_BROWSER_CONFORMANCE
+var browser = await BrowserConformance.OpenAsync(args, contract, "smoke");
+using var backend = browser.Device;
+using var startup = browser.Startup;
+var artifact = browser.Artifact;
+string profile = browser.Profile;
+var device = backend.Info;
+string lane = $"WebGPU {device.Device}";
+#else
 var stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
     File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
-using (owner)
+using var backend = owner;
+Check(deviceIndex < devices.Count, $"Device {deviceIndex} is outside the {devices.Count} enumerated devices.");
+using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])],
+    [devices[deviceIndex]], allowExperimental: true);
+var device = devices[deviceIndex].Info;
+string profile = args[4];
+string lane = $"{args[0]} {device.Device}";
+#endif
+Check(profile is "smoke" or "matrix" or "short" or "long", "Profile must be smoke, matrix, short, or long.");
+Check(startup.Succeeded && startup.Decisions.Single().Route == GaRoute.Gpu,
+    string.Join(", ", startup.Decisions.Select(decision => $"{decision.Reason} {decision.Detail}")));
+await RunSuite(profile, lane, device, startup, contract, artifact);
+
+static async ValueTask RunSuite(string profile, string lane, GaDeviceInfo device, GaStartupResult startup,
+    GaContractIdentity contract, GaArtifactCandidate artifact)
 {
-    Check(deviceIndex < devices.Count, $"Device {deviceIndex} is outside the {devices.Count} enumerated devices.");
-    using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])],
-        [devices[deviceIndex]], allowExperimental: true);
-    Check(startup.Succeeded && startup.Decisions.Single().Route == GaRoute.Gpu,
-        string.Join(", ", startup.Decisions.Select(decision => $"{decision.Reason} {decision.Detail}")));
     var manifest = artifact.Bundle!.Manifest;
-    var device = devices[deviceIndex].Info;
-    var profile = args[4];
     var (cases, ticks) = SelectCases(profile);
+#if GA_BROWSER_CONFORMANCE
+    cases = Array.ConvertAll(cases, scenario => scenario with { Workers = 1 });
+#endif
     Console.WriteLine($"profile={profile} device={device.Device} api={device.Api} apiVersion={device.ApiVersion} driver={device.Driver} " +
         $"cases={cases.Length} ticksPerCase={ticks} workers={string.Join(',', cases.Select(item => item.Workers).Distinct().Order())} " +
         $"workgroup={manifest.Requirements.WorkgroupX} source={contract.SourceDigest} ir={contract.IrDigest} " +
@@ -57,14 +80,14 @@ using (owner)
     long deviceRows = 0;
     foreach (var scenario in cases)
     {
-        var (counters, batches, rows) = RunCase(startup, contract, scenario, ticks);
+        var (counters, batches, rows) = await RunCase(startup, contract, scenario, ticks);
         total = total.With(counters);
         deviceBatches += batches;
         deviceRows += rows;
     }
     Check(total.Requests == total.Accepted + total.Rejected && total.Accepted > 0 && total.Rejected > 0 &&
         total.HeatRejected > 0 && total.ZeroReseeds > 0, "The matrix missed a required gameplay branch.");
-    Console.WriteLine($"{args[0]} {device.Device}: profile={profile} cases={cases.Length} ticks={cases.Length * ticks} " +
+    Console.WriteLine($"{lane}: profile={profile} cases={cases.Length} ticks={cases.Length * ticks} " +
         $"sizeBoundaries={string.Join(',', cases.Select(item => item.Rows).Distinct().Order())} " +
         $"seeds={string.Join(',', cases.Select(item => item.Seed).Distinct().Order())} " +
         $"requests={total.Requests} decisions={total.Accepted + total.Rejected} events={2 * total.Requests} " +
@@ -108,7 +131,7 @@ static (Scenario[] Cases, int Ticks) SelectCases(string profile)
     return (cases.ToArray(), 6);
 }
 
-static (Totals Counters, long DeviceBatches, long DeviceRows) RunCase(GaStartupResult startup, GaContractIdentity contract,
+static async ValueTask<(Totals Counters, long DeviceBatches, long DeviceRows)> RunCase(GaStartupResult startup, GaContractIdentity contract,
     Scenario scenario, int ticks)
 {
     long deviceBatches = 0;
@@ -188,8 +211,8 @@ static (Totals Counters, long DeviceBatches, long DeviceRows) RunCase(GaStartupR
         var events = oracle.Advance(frame);
         cpu.BeginTick(tick, frame, Fixed.One);
         gpu.BeginTick(tick, frame, Fixed.One);
-        Drain(cpu, scenario.CpuBudget);
-        Drain(gpu, scenario.GpuBudget);
+        await Drain(cpu, scenario.CpuBudget, deviceWork: false);
+        await Drain(gpu, scenario.GpuBudget, deviceWork: true);
         Check(deviceRows == 2L * scenario.Rows * tick, $"{gpuLane}: missing device work at tick {tick}.");
         VerifyCompletedLane(cpuWorld, cpu, cpuCapacity, cpuHandles, oracle, events, tick, cpuLane);
         VerifyCompletedLane(gpuWorld, gpu, gpuCapacity, gpuHandles, oracle, events, tick, gpuLane);
@@ -280,24 +303,38 @@ static unsafe List<Spawn> CaptureProjectiles(World world)
     return spawned;
 }
 
-static void Drain(DeterministicRunner<ShotFrame> runner, int budget)
+#if GA_BROWSER_CONFORMANCE
+static async ValueTask Drain(DeterministicRunner<ShotFrame> runner, int budget, bool deviceWork)
+#else
+static ValueTask Drain(DeterministicRunner<ShotFrame> runner, int budget, bool deviceWork)
+#endif
 {
     long started = Stopwatch.GetTimestamp();
+#if !GA_BROWSER_CONFORMANCE
     var spin = new SpinWait();
+#endif
     var status = runner.Advance(budget);
     while (status == DeterministicTickStatus.Pending)
     {
         var elapsed = Stopwatch.GetElapsedTime(started);
         if (elapsed.TotalSeconds >= 20)
             throw new TimeoutException("The runner stayed pending for 20 seconds.");
+#if GA_BROWSER_CONFORMANCE
+        if (deviceWork)
+            await Task.Delay(1);
+#else
         if (elapsed.TotalMilliseconds < 2)
             spin.SpinOnce(sleep1Threshold: -1);
         else
             Thread.Sleep(1);
+#endif
         status = runner.Advance(budget);
     }
     if (status != DeterministicTickStatus.Completed)
         throw new InvalidOperationException($"Expected Completed, got {status}.", runner.Fault);
+#if !GA_BROWSER_CONFORMANCE
+    return ValueTask.CompletedTask;
+#endif
 }
 
 static void Check(bool condition, string message)
@@ -306,6 +343,7 @@ static void Check(bool condition, string message)
         throw new InvalidOperationException(message);
 }
 
+#if !GA_BROWSER_CONFORMANCE
 static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDisposable owner)
 {
     if (backend == "vulkan")
@@ -330,6 +368,7 @@ static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDispos
     owner = dx;
     return dx.Devices;
 }
+#endif
 
 internal readonly record struct Scenario(int Rows, uint Seed, int CpuChunk, int GpuChunk, int CpuBudget, int GpuBudget, int Workers);
 internal readonly record struct Handle(int Id, int Generation);

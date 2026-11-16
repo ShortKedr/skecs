@@ -1,23 +1,28 @@
+using System.Diagnostics;
 using System.Text.Json;
 using SKECS;
 using SKECS.GA;
+#if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
+#endif
 using SKECS.Numerics;
 
+#if !GA_BROWSER_CONFORMANCE
 string profile = args.Length is 2 or 5 ? args[^1] : "smoke";
 if (profile is not ("smoke" or "matrix" or "short" or "long"))
     throw new ArgumentException("Profile must be smoke, matrix, short, or long.");
 if (args.Length is 1 or 2 && args[0] == "cpu")
 {
-    RunSuite("cpu", profile, null, null);
+    await RunSuite("cpu", profile, null, null);
     return;
 }
 if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
     throw new ArgumentException("Usage: MultiHitConformance (cpu | <vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index>) [profile]");
+#endif
 
 var contract = new GaContractIdentity(MultiHitAdapterRowCodec.SystemId, "multi-hit-damage/1",
     MultiHitAdapterRowCodec.SourceDigest, MultiHitAdapterRowCodec.IrDigest,
@@ -34,32 +39,45 @@ var contract = new GaContractIdentity(MultiHitAdapterRowCodec.SystemId, "multi-h
 Check(contract is { EventCapacity: 1, UsesCommands: false, UsesDomainOrder: true, TickResourceWords: 1,
     EventTypeCount: 1, EventPayloadWords: 9 }, "Unexpected hit collection contract.");
 
+#if GA_BROWSER_CONFORMANCE
+var browser = await BrowserConformance.OpenAsync(args, contract, "smoke");
+using var backend = browser.Device;
+using var startup = browser.Startup;
+var artifact = browser.Artifact;
+string profile = browser.Profile;
+var device = backend.Info;
+string lane = $"WebGPU {device.Device}";
+#else
 var stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
     File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
-using (owner)
-{
-    Check(deviceIndex < devices.Count, $"Device index {deviceIndex} is outside the {devices.Count} enumerated devices.");
-    using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])],
-        [devices[deviceIndex]], allowExperimental: true);
-    Check(startup.Succeeded && startup.Decisions.Single().Route == GaRoute.Gpu,
-        string.Join(", ", startup.Decisions.Select(decision => $"{decision.Reason} {decision.Detail}")));
-    var device = devices[deviceIndex].Info;
-    var manifest = artifact.Bundle!.Manifest;
-    Console.WriteLine($"profile={profile} device={device.Device} api={device.Api} apiVersion={device.ApiVersion} driver={device.Driver} " +
-        $"workgroup={manifest.Requirements.WorkgroupX} source={contract.SourceDigest} ir={contract.IrDigest} " +
-        $"numericVersion={contract.NumericVersion} subsetVersion={contract.SubsetVersion} irVersion={contract.IrVersion} " +
-        $"artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} contentId={startup.Decisions.Single().ArtifactId}");
-    Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
-    RunSuite($"{args[0]} {device.Device}", profile, startup, contract);
-}
+using var backend = owner;
+Check(deviceIndex < devices.Count, $"Device index {deviceIndex} is outside the {devices.Count} enumerated devices.");
+using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])],
+    [devices[deviceIndex]], allowExperimental: true);
+var device = devices[deviceIndex].Info;
+string lane = $"{args[0]} {device.Device}";
+#endif
+Check(profile is "smoke" or "matrix" or "short" or "long", "Profile must be smoke, matrix, short, or long.");
+Check(startup.Succeeded && startup.Decisions.Single().Route == GaRoute.Gpu,
+    string.Join(", ", startup.Decisions.Select(decision => $"{decision.Reason} {decision.Detail}")));
+var manifest = artifact.Bundle!.Manifest;
+Console.WriteLine($"profile={profile} device={device.Device} api={device.Api} apiVersion={device.ApiVersion} driver={device.Driver} " +
+    $"workgroup={manifest.Requirements.WorkgroupX} source={contract.SourceDigest} ir={contract.IrDigest} " +
+    $"numericVersion={contract.NumericVersion} subsetVersion={contract.SubsetVersion} irVersion={contract.IrVersion} " +
+    $"artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} contentId={startup.Decisions.Single().ArtifactId}");
+Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
+await RunSuite(lane, profile, startup, contract);
 
-static void RunSuite(string lane, string profile, GaStartupResult? startup, GaContractIdentity? contract)
+static async ValueTask RunSuite(string lane, string profile, GaStartupResult? startup, GaContractIdentity? contract)
 {
     var (cases, ticks) = SelectCases(profile);
+#if GA_BROWSER_CONFORMANCE
+    cases = Array.ConvertAll(cases, scenario => scenario with { CpuWorkers = 1 });
+#endif
     var total = new Coverage();
     var finalPeriod = new Coverage();
     long revivals = 0;
@@ -67,13 +85,13 @@ static void RunSuite(string lane, string profile, GaStartupResult? startup, GaCo
     long deviceRows = 0;
     foreach (var scenario in cases)
     {
-        var expected = RunCase(scenario, ticks, null, null, "CPU");
+        var expected = await RunCase(scenario, ticks, null, null, "CPU");
         total += expected.Counters;
         finalPeriod += expected.FinalPeriod;
         revivals += expected.Revivals;
         if (startup is not null && contract is not null)
         {
-            var observed = RunCase(scenario, ticks, startup, contract, "GPU");
+            var observed = await RunCase(scenario, ticks, startup, contract, "GPU");
             Check(observed.Counters == expected.Counters && observed.FinalPeriod == expected.FinalPeriod &&
                 observed.Revivals == expected.Revivals, "Coverage differs between CPU and GPU.");
             deviceBatches += observed.DeviceBatches;
@@ -134,7 +152,8 @@ static (Scenario[] Cases, int Ticks) SelectCases(string profile)
     return (cases.ToArray(), 6);
 }
 
-static CaseResult RunCase(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity? contract, string executor)
+static async ValueTask<CaseResult> RunCase(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity? contract,
+    string executor)
 {
     bool onGpu = startup is not null;
     long deviceBatches = 0;
@@ -243,10 +262,9 @@ static CaseResult RunCase(Scenario scenario, int ticks, GaStartupResult? startup
             periodStartCounters = oracle.Coverage;
         var expected = oracle.Advance(tick);
         runner.BeginTick(tick, new DamageFrame { Tick = tick }, Fixed.One);
-        var status = DeterministicTickStatus.Pending;
         int budget = onGpu ? scenario.GpuBudget : scenario.CpuBudget;
-        Check(SpinWait.SpinUntil(() => (status = runner.Advance(budget)) != DeterministicTickStatus.Pending,
-            TimeSpan.FromSeconds(20)) && status == DeterministicTickStatus.Completed,
+        var status = await Drain(runner, budget, onGpu);
+        Check(status == DeterministicTickStatus.Completed,
             $"{description} tick={tick}: {status}, fault {runner.Fault}.");
         Check(deviceRows == (onGpu ? (long)scenario.Rows * tick : 0),
             $"{description} tick={tick}: unexpected number of completed device rows ({deviceRows}).");
@@ -336,6 +354,28 @@ static object EventPayload(DeterministicEvent item)
     return type.FullName ?? type.Name;
 }
 
+#if GA_BROWSER_CONFORMANCE
+static async ValueTask<DeterministicTickStatus> Drain(DeterministicRunner<DamageFrame> runner, int budget, bool deviceWork)
+{
+    long started = Stopwatch.GetTimestamp();
+    var status = runner.Advance(budget);
+    while (status == DeterministicTickStatus.Pending && Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(20))
+    {
+        if (deviceWork)
+            await Task.Delay(1);
+        status = runner.Advance(budget);
+    }
+    return status;
+}
+#else
+static ValueTask<DeterministicTickStatus> Drain(DeterministicRunner<DamageFrame> runner, int budget, bool deviceWork)
+{
+    var status = DeterministicTickStatus.Pending;
+    SpinWait.SpinUntil(() => (status = runner.Advance(budget)) != DeterministicTickStatus.Pending,
+        TimeSpan.FromSeconds(20));
+    return ValueTask.FromResult(status);
+}
+
 static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDisposable owner)
 {
     if (backend == "vulkan")
@@ -360,6 +400,7 @@ static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDispos
     owner = dx;
     return dx.Devices;
 }
+#endif
 
 static void Check(bool condition, string message)
 {

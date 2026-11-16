@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeFrameworkVersion>8.0.34</RuntimeFrameworkVersion>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <WasmBuildNative>false</WasmBuildNative>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DefineConstants>$(DefineConstants);GA_BROWSER_CONFORMANCE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="$(RuntimeFrameworkVersion)" />
+    <ProjectReference Include="../../../SKECS.GA.Backend.WebGpu/SKECS.GA.Backend.WebGpu.csproj" />
+    <Compile Include="../spatial-parent-conformance/FlatCandidates.cs" />
+    <Compile Include="../spatial-parent-conformance/SpatialKernel.cs" />
+    <Compile Include="../spatial-parent-conformance/SpatialScenario.cs" />
+    <Compile Include="../spatial-parent-conformance/Program.cs" />
+    <Compile Include="$(Bundle)/ga-adapter.g.cs" />
+    <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
+    <Content Include="../../../SKECS.GA.Backend.WebGpu/ga-webgpu.mjs" Link="wwwroot/ga-webgpu.mjs" />
+    <Content Include="$(Bundle)/spatial-parent.wgsl;$(Bundle)/spatial-parent.manifest.json;$(Bundle)/spatial-parent.content-id;$(Bundle)/spatial-parent.layout;$(Bundle)/spatial-parent.source-map.json"
+             Link="wwwroot/bundle/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
