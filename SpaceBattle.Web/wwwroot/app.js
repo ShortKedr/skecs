@@ -229,6 +229,8 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     busy = false,
     runtimeStarted = false;
   let gaPending = null;
+  const completedDiagnostics = new Map();
+  let diagnosticSnapshot = null, deferredColliders = null, deferredObserver = null;
   let observedPosition = null, observationMain = null, observationTarget = null,
     observationReason = null, observationBounds = null, observationClock = 0, observationSwitches = 0;
   let runtime,
@@ -236,6 +238,8 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     runtimeMode = null,
     heapBuffer = null,
     framePointer = -1,
+    colliderFramePointer = 0,
+    viewGeneration = 0,
     header = null,
     fps = 0,
     lastFrameMs = 0,
@@ -335,8 +339,8 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     if (docsLink) docsLink.href = lang === "ru" ? "../ru/" : "../";
     updateUI();
   }
-  function accept(pointer) {
-    const colliderPointer = colliderDebug ? bridge.ColliderSnapshot() : 0;
+  function accept(pointer, rebind = false) {
+    const colliderPointer = rebind ? colliderFramePointer : colliderDebug ? bridge.ColliderSnapshot() : 0;
     const buffer = runtime.localHeapViewF64().buffer;
     if (
       !Number.isInteger(pointer) ||
@@ -346,12 +350,18 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     ) {
       throw new Error("Invalid WASM frame pointer");
     }
-    if (buffer !== heapBuffer || pointer !== framePointer) {
+    const frameViewChanged = buffer !== heapBuffer || pointer !== framePointer;
+    if (frameViewChanged) {
       heapBuffer = buffer;
       framePointer = pointer;
       header = new Float64Array(buffer, pointer, headerValues);
       rowViews.length = 0;
     }
+    if (frameViewChanged || colliderPointer !== colliderFramePointer) {
+      viewGeneration++;
+      colliderFramePointer = colliderPointer;
+    }
+    diagnosticSnapshot = null;
     const totalRows = header[30],
       byteLength = header[31];
     if (
@@ -413,6 +423,8 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     snapshot.runtimeMode = runtimeMode;
     snapshot.framework = framework;
     Object.assign(snapshot.binary, { version: header[0], headerValues, rowValues: 16, totalRows, byteLength });
+    if (framework === "skecs-ga") snapshot.binary.viewGeneration = viewGeneration;
+    else delete snapshot.binary.viewGeneration;
     snapshot.counts.ships = header[6];
     snapshot.counts.projectiles = header[7];
     snapshot.counts.debris = header[8];
@@ -456,15 +468,26 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       rows.length = count;
       for (let i = 0; i < count; i++) rows[i] = rowViews[offset++];
     }
-    if (following) resolveObservation();
     colliderRows = colliderDebug ? readColliderBuffer(buffer, colliderPointer) : null;
+    if (!rebind) {
+      completedDiagnostics.clear();
+      if (following) resolveObservation();
+    }
   }
-  function showColliders(enabled) {
-    if (!ready || busy) return;
-    colliderDebug = Boolean(enabled);
-    accept(bridge.DebugColliders(colliderDebug));
+  function setColliderDisplay(enabled) {
+    colliderDebug = enabled;
     $("colliders").classList.toggle("active", colliderDebug);
     $("colliders").setAttribute("aria-pressed", String(colliderDebug));
+  }
+  function showColliders(enabled) {
+    if (!ready) return;
+    if (gaPending) {
+      deferredColliders = Boolean(enabled);
+      return;
+    }
+    if (busy) return;
+    setColliderDisplay(Boolean(enabled));
+    accept(bridge.DebugColliders(colliderDebug));
     draw();
   }
   function acceptAdvance(pointer, started, ticks) {
@@ -489,9 +512,19 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     if (label.textContent !== detail) label.textContent = detail;
   }
   function commitGaTick() {
-    gaPending = null;
     const started = performance.now();
-    acceptAdvance(bridge.CommitGaTick(), started, 1);
+    let pointer = bridge.CommitGaTick();
+    gaPending = null;
+    if (deferredObserver !== null) {
+      bridge.ObserveShip(deferredObserver);
+      deferredObserver = null;
+    }
+    if (deferredColliders !== null) {
+      setColliderDisplay(deferredColliders);
+      pointer = bridge.DebugColliders(colliderDebug);
+      deferredColliders = null;
+    }
+    acceptAdvance(pointer, started, 1);
     updateGaStatus();
   }
   async function prepareGaTick(manual) {
@@ -546,20 +579,26 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   }
   function resetBattle({ requested, profile, seed }) {
     try {
-      stopFollowing();
+      stopFollowing(false);
+      deferredObserver = null;
+      if (deferredColliders !== null) {
+        setColliderDisplay(deferredColliders);
+        deferredColliders = null;
+      }
       if (bridge !== bridgeExports[frameworks[requested].exportName]) {
         bridge.Dispose();
         bridge = bridgeExports[frameworks[requested].exportName];
         revisions = null;
         heapBuffer = null;
         framePointer = -1;
+        colliderFramePointer = 0;
         header = null;
         colliderRows = null;
       }
       framework = requested;
       $("framework-name").textContent = frameworks[framework].label;
-      const pointer = bridge.Reset(profile, seed);
-      if (colliderDebug) bridge.DebugColliders(true);
+      let pointer = bridge.Reset(profile, seed);
+      if (colliderDebug) pointer = bridge.DebugColliders(true);
       revisions ||= { revision: bridge.Revision(), fleetRevision: bridge.FleetRevision(), deploymentRevision: bridge.DeploymentRevision(),
         physicsRevision: bridge.PhysicsRevision(), damageRevision: bridge.DamageRevision(), tacticalRevision: bridge.TacticalRevision() };
       accept(pointer);
@@ -656,8 +695,10 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       hull: row[9], shield: row[10], heat: row[11] };
   }
   function observe(serial) {
-    if (!ready || serial === null || serial < 0 || !bridge.ShipObservation(serial, 0)) return null;
+    if (!ready || serial === null || serial < 0) return null;
     const row = snapshot.ships.find(r => r[0] === serial);
+    if (gaPending) return row ? observationRow(row) : null;
+    if (!bridge.ShipObservation(serial, 0)) return null;
     const ship = row ? observationRow(row) : { serial, x: bridge.ShipObservation(serial, 3), y: bridge.ShipObservation(serial, 4),
       radius: bridge.ShipObservation(serial, 5), team: bridge.ShipObservation(serial, 6), kind: bridge.ShipObservation(serial, 7),
       hull: bridge.ShipObservation(serial, 8), shield: bridge.ShipObservation(serial, 9), heat: bridge.ShipObservation(serial, 10) };
@@ -665,20 +706,32 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     ship.dockCarrierSerial = bridge.ShipObservation(serial, 2);
     return ship;
   }
-  function stopFollowing() {
+  function observeShip(serial) {
+    if (gaPending) deferredObserver = serial;
+    else bridge.ObserveShip(serial);
+  }
+  function stopFollowing(clearNative = true) {
     following = false;
     observationMain = observationTarget = observationBounds = null;
     observationClock = 0;
-    if (ready && snapshot) bridge.ObserveShip(-1);
+    if (clearNative && ready && snapshot) observeShip(-1);
     $("follow").classList.remove("active");
     $("follow").setAttribute("aria-pressed", "false");
   }
   function setFollowing(value) {
-    if (!value || !observe(selected)) { stopFollowing(); updateUI(); draw(); return; }
+    ensureHeapViews();
+    const ship = value ? observe(selected) : null;
+    if (!ship) { stopFollowing(); updateUI(); draw(); return; }
     following = true;
     observationReason = "selected";
-    bridge.ObserveShip(selected);
-    resolveObservation();
+    observeShip(selected);
+    if (gaPending) {
+      observationMain = ship;
+      observationTarget = null;
+      observedPosition = { x: ship.x, y: ship.y };
+    } else {
+      resolveObservation();
+    }
     updateUI();
     track(true);
     draw();
@@ -694,7 +747,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       selected = resolved.ship.serial;
       observationReason = resolved.reason;
       observationSwitches++;
-      bridge.ObserveShip(selected);
+      observeShip(selected);
     }
     const watched = current ?? observe(selected);
     observedPosition = { x: watched.x, y: watched.y };
@@ -890,6 +943,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   function updateUI() {
     updateGaStatus();
     if (!ready || !snapshot) return;
+    ensureHeapViews();
     $("status").textContent = t(paused ? "paused" : "running");
     $("live-dot").style.background = paused ? "#89979e" : "#55d6e8";
     const seconds = Math.floor(snapshot.tick / 60);
@@ -1185,6 +1239,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   });
   function pointerEnd(event) {
     if (drag && !drag.moved && snapshot) {
+      ensureHeapViews();
       let best = null,
         distance = 22;
       for (const r of snapshot.ships) {
@@ -1260,7 +1315,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     updateUI();
   };
   $("follow").onclick = () => setFollowing(!following);
-  $("colliders").onclick = () => showColliders(!colliderDebug);
+  $("colliders").onclick = () => showColliders(!(deferredColliders ?? colliderDebug));
   $("fullscreen").onclick = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -1297,7 +1352,34 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     rateStart = performance.now();
   });
   function ensureHeapViews() {
-    if (runtime && header && runtime.localHeapViewF64().buffer !== heapBuffer) accept(framePointer);
+    if (runtime && header && runtime.localHeapViewF64().buffer !== heapBuffer) accept(framePointer, true);
+  }
+  function publishedSnapshot() {
+    ensureHeapViews();
+    if (!snapshot || framework !== "skecs-ga") return snapshot;
+    if (diagnosticSnapshot) return diagnosticSnapshot;
+    // Rendering borrows Wasm slots. A diagnostic frame can outlive the
+    // next publication or the backing heap buffer.
+    const { ships, projectiles, debris, particles, turrets, counts, counters, performance, binary, aliveTeams, ...frame } = snapshot;
+    const copyRows = rows => Object.freeze(rows.map(row => Object.freeze(Array.from(row))));
+    diagnosticSnapshot = Object.freeze({
+      ...frame,
+      ships: copyRows(ships),
+      projectiles: copyRows(projectiles),
+      debris: copyRows(debris),
+      particles: copyRows(particles),
+      turrets: copyRows(turrets),
+      counts: Object.freeze({ ...counts }),
+      counters: Object.freeze({ ...counters }),
+      performance: Object.freeze({
+        ...performance,
+        stages: Object.freeze(performance.stages.slice()),
+        gcCollections: Object.freeze(performance.gcCollections.slice()),
+      }),
+      binary: Object.freeze({ ...binary }),
+      aliveTeams: Object.freeze(aliveTeams.slice()),
+    });
+    return diagnosticSnapshot;
   }
   async function diagnosticSample({ mode, ticks = 1, renders = 1 } = {}) {
     if (!diagnosticMode || !ready || busy || fatalError) throw new Error("Paused diagnostic page required");
@@ -1351,7 +1433,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
         const count = Math.min(framework === "skecs-ga" ? 1 : 600, ticks);
         if (framework === "skecs-ga") {
           if (gaPending?.prepared) commitGaTick();
-          else if (!await prepareGaTick(true)) return snapshot;
+          else if (!await prepareGaTick(true)) return publishedSnapshot();
         } else {
           advance(count);
         }
@@ -1364,46 +1446,55 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       rateStart = performance.now();
       if (!draw()) throw new Error(fatalError.message);
       updateUI();
-      return snapshot;
+      return publishedSnapshot();
     } finally {
       busy = false;
     }
   };
+  function readCompleted(name, read) {
+    if (!ready || !snapshot) return null;
+    if (framework !== "skecs-ga") return read();
+    // Compute expensive diagnostics only on demand at a completed boundary.
+    if (!gaPending && !completedDiagnostics.has(name)) completedDiagnostics.set(name, read());
+    return completedDiagnostics.get(name) ?? null;
+  }
   function tacticCounters() {
-    if (!ready) return null;
-    return {
+    return readCompleted("tacticCounters", () => ({
       targetSwitches: bridge.TacticCounter(0),
       targetRetentions: bridge.TacticCounter(1),
       groupOrders: bridge.TacticCounter(2),
       coverOrders: bridge.TacticCounter(3),
-    };
+    }));
   }
   function tactics() {
-    if (!ready) return null;
-    return {
-      ...tacticCounters(),
-      ships: snapshot.ships.map((r) => ({
-        serial: r[0],
-        team: r[1],
-        mode: ["attack", "retreat", "docking", "patrol", "screen"][
-          bridge.ShipTactic(r[0], 0)
-        ],
-        target: bridge.ShipTactic(r[0], 1),
-        squadLeader: bridge.ShipTactic(r[0], 2),
-        coverAlly: bridge.ShipTactic(r[0], 3),
-        lockUntilTick: bridge.ShipTactic(r[0], 4),
-      })),
-    };
+    const result = readCompleted("tactics", () => {
+      ensureHeapViews();
+      const ships = snapshot.ships.map(row => [row[0], row[1]]);
+      return {
+        ...tacticCounters(),
+        ships: ships.map(([serial, team]) => ({
+          serial, team,
+          mode: ["attack", "retreat", "docking", "patrol", "screen"][bridge.ShipTactic(serial, 0)],
+          target: bridge.ShipTactic(serial, 1),
+          squadLeader: bridge.ShipTactic(serial, 2),
+          coverAlly: bridge.ShipTactic(serial, 3),
+          lockUntilTick: bridge.ShipTactic(serial, 4),
+        })),
+      };
+    });
+    return framework === "skecs-ga" && result ? structuredClone(result) : result;
   }
   function reinforcements() {
-    if (!ready) return null;
-    const fields = ["wave", "corner", "composition", "pending", "ArrivalTick", "NextSpawnTick", "EndTick", "X", "Y", "Active"];
-    return [0, 1].map((team) => Object.fromEntries(
-      fields.map((name, field) => [name, bridge.Reinforcement(team, field)]),
-    ));
+    const result = readCompleted("reinforcements", () => {
+      const fields = ["wave", "corner", "composition", "pending", "ArrivalTick", "NextSpawnTick", "EndTick", "X", "Y", "Active"];
+      return [0, 1].map(team => Object.fromEntries(fields.map((name, field) => [name, bridge.Reinforcement(team, field)])));
+    });
+    return framework === "skecs-ga" && result ? structuredClone(result) : result;
   }
   window.render_game_to_text = () => {
-    const checksum = ready ? bridge.Checksum() : undefined;
+    const checksum = ready ? readCompleted("checksum", () => bridge.Checksum()) : undefined;
+    const publishedReinforcements = reinforcements();
+    const publishedTactics = tacticCounters();
     ensureHeapViews();
     return JSON.stringify({
       ready,
@@ -1419,7 +1510,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       renderCounts: snapshot ? Object.fromEntries(["ships", "projectiles", "debris", "particles", "turrets"].map((key) => [key, snapshot[key].length])) : {},
       counters: snapshot?.counters || {},
       pendingReinforcements: snapshot?.pendingReinforcements ?? 0,
-      reinforcements: reinforcements(),
+      reinforcements: publishedReinforcements,
       checksum,
       runtimeMode,
       diagnostics: { mode: diagnosticMode, error: fatalError, frames, canvasResizes, contextLost,
@@ -1436,7 +1527,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       damageRevision: snapshot?.damageRevision,
       tacticalRevision: snapshot?.tacticalRevision,
       fleetComposition: snapshot?.fleetComposition,
-      tactics: tacticCounters(),
+      tactics: publishedTactics,
       statistics: statistics(),
       fps,
       lastFrameMs,
@@ -1474,7 +1565,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   };
   window.spaceBattle = {
     get snapshot() {
-      return snapshot;
+      return publishedSnapshot();
     },
     get ready() {
       return ready;
@@ -1482,7 +1573,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     get runtimeMode() {
       return runtimeMode;
     },
-    validate: () => bridge.Validate(),
+    validate: () => readCompleted("validation", () => bridge.Validate()),
     tactics,
     reinforcements,
     aliveTeamCounts: () => snapshot?.aliveTeams.slice() ?? [0, 0],
@@ -1491,12 +1582,16 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     assetDiagnostics: () => assetState ? { ...assetState.diagnostics } : null,
     diagnosticSample,
     showColliders,
-    colliders: () => ({ enabled: colliderDebug, ...colliderSummary(colliderRows), rows: colliderDetails(colliderRows) }),
+    colliders() {
+      ensureHeapViews();
+      return { enabled: colliderDebug, ...colliderSummary(colliderRows), rows: colliderDetails(colliderRows) };
+    },
     refresh: () => {
+      if (gaPending) return publishedSnapshot();
       accept(bridge.Snapshot());
       updateUI();
       draw();
-      return snapshot;
+      return publishedSnapshot();
     },
     reset,
     pause: setPaused,
