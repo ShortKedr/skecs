@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "workloadId": "churn-control-benchmarks-acceptance-v1",
+  "targetId": "local-windows-x64-dotnet8",
+  "chunkCapacity": 128,
+  "eventCapacity": 500000,
+  "repetitions": 5,
+  "genericTargetRetainedBytes": 134217728,
+  "gates": {
+    "frameRegressionPercent": 5,
+    "p99RegressionPercent": 10,
+    "denseRegressionPercent": 5,
+    "startupRegressionPercent": 10,
+    "managedRegressionPercent": 5,
+    "minimumImprovementPercent": 5,
+    "kneePercent": 2,
+    "maxTrimP99Microseconds": 100,
+    "maxRetainedBytes": null
+  },
+  "scenarios": [
+    {
+      "id": "dense-foreach",
+      "workload": "for-each",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "dense-chunks",
+      "workload": "chunks",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "dense-get",
+      "workload": "get",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "dense-set",
+      "workload": "set",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "churn-separate",
+      "workload": "separated",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "churn-sizes",
+      "workload": "sizes",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "churn-transitions",
+      "workload": "transitions",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "quiet-control",
+      "workload": "quiet",
+      "seed": 1729,
+      "entities": 1024,
+      "warmupFrames": 36,
+      "frames": 144,
+      "holdout": false,
+      "weight": 1
+    },
+    {
+      "id": "holdout-sizes",
+      "workload": "sizes",
+      "seed": 1733,
+      "entities": 896,
+      "warmupFrames": 36,
+      "frames": 216,
+      "holdout": true,
+      "weight": 1
+    },
+    {
+      "id": "holdout-simultaneous",
+      "workload": "simultaneous",
+      "seed": 1733,
+      "entities": 512,
+      "warmupFrames": 36,
+      "frames": 216,
+      "holdout": true,
+      "weight": 1
+    }
+  ]
+}

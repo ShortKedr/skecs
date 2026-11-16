@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SKECS.RuntimeProfiles.Tools.Tests" />
+    <ProjectReference Include="../SKECS.RuntimeProfiles/SKECS.RuntimeProfiles.csproj" />
+    <ProjectReference Include="../SKECS.Profiler/SKECS.Profiler.csproj" />
+    <Compile Include="../tools/ChurnControlBenchmarks/Workload.cs" Link="Workload.cs" />
+  </ItemGroup>
+</Project>

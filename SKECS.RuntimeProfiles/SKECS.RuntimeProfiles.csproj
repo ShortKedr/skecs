@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <PackageId>ShortKedr.SKECS.RuntimeProfiles</PackageId>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Versioned startup settings for SKECS worlds.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SKECS/SKECS.csproj" />
+    <PackageReference Include="System.Text.Json" Version="9.0.9" Condition="'$(TargetFramework)' != 'net8.0'" />
+  </ItemGroup>
+</Project>

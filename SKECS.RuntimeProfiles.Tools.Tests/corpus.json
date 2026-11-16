@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "workloadId": "churn-control-benchmarks-v1",
+  "targetId": "local-smoke",
+  "chunkCapacity": 64,
+  "eventCapacity": 400000,
+  "repetitions": 3,
+  "genericTargetRetainedBytes": 1048576,
+  "gates": {
+    "frameRegressionPercent": 15,
+    "p99RegressionPercent": 20,
+    "denseRegressionPercent": 10,
+    "startupRegressionPercent": 25,
+    "managedRegressionPercent": 5,
+    "minimumImprovementPercent": 5,
+    "kneePercent": 2,
+    "maxTrimP99Microseconds": 500,
+    "maxRetainedBytes": null
+  },
+  "scenarios": [
+    { "id": "dense-foreach", "workload": "for-each", "seed": 1, "entities": 512, "warmupFrames": 24, "frames": 60, "holdout": false, "weight": 1 },
+    { "id": "dense-chunks", "workload": "chunks", "seed": 1, "entities": 512, "warmupFrames": 24, "frames": 60, "holdout": false, "weight": 1 },
+    { "id": "dense-get", "workload": "get", "seed": 1, "entities": 512, "warmupFrames": 24, "frames": 60, "holdout": false, "weight": 1 },
+    { "id": "dense-set", "workload": "set", "seed": 1, "entities": 512, "warmupFrames": 24, "frames": 60, "holdout": false, "weight": 1 },
+    { "id": "churn-training", "workload": "sizes", "seed": 19, "entities": 512, "warmupFrames": 24, "frames": 60, "holdout": false, "weight": 1 },
+    { "id": "churn-holdout", "workload": "sizes", "seed": 31, "entities": 448, "warmupFrames": 24, "frames": 120, "holdout": true, "weight": 1 }
+  ]
+}
