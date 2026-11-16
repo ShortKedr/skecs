@@ -105,7 +105,11 @@ public sealed partial class World : IDisposable
     private void PrepareNewEntityRecord(int id)
     {
         // Allocation can fail. Reserve capacity before any slot or ID becomes visible.
-        foreach (var accessor in _accessors) accessor.EnsureCapacity(id);
+        foreach (var accessor in _accessors)
+        {
+            var added = accessor.EnsureCapacity(id);
+            if (added != 0 && _churnPool is { } pool) pool.AccessorBufferBytes += added;
+        }
         if (id != _entityRecords.Capacity) return;
 #if NET8_0_OR_GREATER
         _entityRecords.EnsureCapacity(checked(id + 1));
@@ -289,6 +293,7 @@ public sealed partial class World : IDisposable
             storage.Update(id, _entityRecords[id]);
         }
         _accessors.Add(storage);
+        if (_churnPool is { } pool) pool.AccessorBufferBytes += storage.ManagedBufferBytes;
         return new ComponentAccessor<T>(storage);
     }
 
@@ -393,13 +398,8 @@ public sealed partial class World : IDisposable
             return;
         }
         var record = _entityRecords[entity.Id];
-        if (record.Archetype!.HasComponent(typeId))
-        {
-            record.Archetype.WriteComponent(record.ChunkIndex, record.RowIndex, typeId, component);
-            return;
-        }
-
-        MoveWithAddedComponentCore(entity, typeId, component);
+        if (!record.Archetype!.TryWriteComponent(record.ChunkIndex, record.RowIndex, typeId, component))
+            MoveWithAddedComponentCore(entity, typeId, component);
     }
 
     public bool Has<T>(Entity entity)

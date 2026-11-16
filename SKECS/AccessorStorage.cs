@@ -21,14 +21,14 @@ internal sealed unsafe class AccessorStorage
         _packed = packed;
     }
 
-    internal void EnsureCapacity(int id)
+    internal long EnsureCapacity(int id)
     {
-        if (id >= _entries.Length)
-        {
-            var capacity = Math.Max(id + 1, Math.Max(16, _entries.Length * 2));
-            Array.Resize(ref _entries, capacity);
-            _world.DiagnosticsBuffer?.ResizeTable(DiagnosticTable.Accessor, TypeId, capacity, ManagedBufferBytes, _componentType);
-        }
+        if (id < _entries.Length) return 0;
+        var previousLength = _entries.Length;
+        var capacity = Math.Max(id + 1, Math.Max(16, previousLength * 2));
+        Array.Resize(ref _entries, capacity);
+        _world.DiagnosticsBuffer?.ResizeTable(DiagnosticTable.Accessor, TypeId, capacity, ManagedBufferBytes, _componentType);
+        return (long)(capacity - previousLength) * sizeof(Entry);
     }
 
     public void Update(int id, World.EntityRecord record)

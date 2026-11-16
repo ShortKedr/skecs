@@ -268,6 +268,17 @@ internal sealed unsafe class Archetype : IDisposable
         ((T*)GetComponentPointer(chunkIndex, componentTypeId))[rowIndex] = component;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TryWriteComponent<T>(int chunkIndex, int rowIndex, int componentTypeId, in T component)
+        where T : unmanaged
+    {
+        if ((uint)componentTypeId >= (uint)_offsetByType.Length) return false;
+        var offset = _offsetByType[componentTypeId];
+        if (offset < 0) return false;
+        ((T*)(_chunkSlots[chunkIndex].Memory + offset))[rowIndex] = component;
+        return true;
+    }
+
     public void Dispose()
     {
         for (var i = 0; i < _chunks.Count; i++)

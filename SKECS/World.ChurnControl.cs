@@ -70,7 +70,8 @@ public sealed partial class World
         var bytes = (long)_entityRecords.Capacity * sizeof(EntityRecord);
 #pragma warning restore CS8500
         bytes += (long)_freeEntityIds.Capacity * sizeof(int);
-        foreach (var accessor in _accessors) bytes += accessor.ManagedBufferBytes;
+        if (_churnPool is { } pool) bytes += pool.AccessorBufferBytes;
+        else foreach (var accessor in _accessors) bytes += accessor.ManagedBufferBytes;
         return bytes + AdaptiveIndexBytes();
     }
 }

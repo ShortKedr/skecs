@@ -45,6 +45,7 @@ internal sealed class ChurnChunkPool : IDisposable
     internal long AllocationCount { get; private set; }
     internal long ReuseCount { get; private set; }
     internal long ReleaseCount { get; private set; }
+    internal long AccessorBufferBytes { get; set; }
 
     internal void AttachDiagnostics(DiagnosticBuffer diagnostics)
     {
