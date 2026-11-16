@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SKECS/SKECS.csproj" />
+    <ProjectReference Include="../SKECS.Serialization/SKECS.Serialization.csproj" />
+    <InternalsVisibleTo Include="SKECS.Determinism.Tests" />
+  </ItemGroup>
+</Project>

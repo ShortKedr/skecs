@@ -1,0 +1,15 @@
+{
+  "formatVersion": 1,
+  "capacity": 3,
+  "operations": [
+    {"kind":"direct","key":10,"a":1,"b":2},
+    {"kind":"direct","key":20,"a":3,"b":4},
+    {"kind":"direct","key":30,"a":5,"b":6},
+    {"kind":"destroy","key":10},
+    {"kind":"set-marker","key":20,"a":250,"b":-17},
+    {"kind":"create","key":40},
+    {"kind":"probe","key":10},
+    {"kind":"remove-motion","key":20},
+    {"kind":"probe","key":20}
+  ]
+}

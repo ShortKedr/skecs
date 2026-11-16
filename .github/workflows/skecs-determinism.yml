@@ -1,0 +1,134 @@
+name: SKECS replay matrix
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REPLAY_SDK: 10.0.204
+  REPLAY_RUNTIME: 10.0.8
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  DOTNET_ROLL_FORWARD: LatestPatch
+  DOTNET_CLI_HOME: ${{ github.workspace }}/artifacts/determinism/dotnet-home
+  NUGET_PACKAGES: ${{ github.workspace }}/artifacts/determinism/nuget-packages
+
+jobs:
+  producer:
+    name: Replay (${{ matrix.os }}, ${{ matrix.configuration }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, ubuntu-24.04-arm, macos-15]
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CONFIGURATION: ${{ matrix.configuration }}
+      SKECS_REPLAY_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            8.0.428
+            ${{ env.REPLAY_SDK }}
+      - name: Pin SDK and retain fixture inputs
+        run: |
+          $work = Join-Path $env:GITHUB_WORKSPACE 'artifacts/determinism'
+          $evidence = Join-Path $work 'evidence'
+          New-Item -ItemType Directory -Force $evidence | Out-Null
+          Copy-Item tools/determinism/fixtures (Join-Path $evidence 'inputs') -Recurse
+          Copy-Item tools/determinism/golden.json $evidence
+          @{ sdk = @{ version = $env:REPLAY_SDK; rollForward = 'disable'; allowPrerelease = $false } } |
+            ConvertTo-Json -Depth 3 | Set-Content (Join-Path $work 'global.json') -Encoding utf8
+          Set-Location $work
+          $sdk = dotnet --version
+          if ($LASTEXITCODE -ne 0 -or $sdk -ne $env:REPLAY_SDK) { throw "Unexpected SDK: $sdk" }
+          "SKECS_REPLAY_SDK=$sdk" >> $env:GITHUB_ENV
+          $runtimes = dotnet --list-runtimes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @("SDK $sdk", [System.Runtime.InteropServices.RuntimeInformation]::OSDescription) + $runtimes |
+            Set-Content (Join-Path $evidence 'dotnet-info.txt') -Encoding utf8
+      - name: Test the library and replay harness
+        run: |
+          $work = Join-Path $env:GITHUB_WORKSPACE 'artifacts/determinism'
+          $build = Join-Path $work 'build'
+          $tests = Join-Path $work 'evidence/tests'
+          Set-Location $work
+          dotnet test (Join-Path $env:GITHUB_WORKSPACE 'SKECS.Tests/SKECS.Tests.csproj') `
+            -c $env:CONFIGURATION --artifacts-path $build `
+            --logger 'trx;LogFileName=skecs.trx' --results-directory $tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test (Join-Path $env:GITHUB_WORKSPACE 'SKECS.Determinism.Tests/SKECS.Determinism.Tests.csproj') `
+            -c $env:CONFIGURATION -f net10.0 --artifacts-path $build `
+            --logger 'trx;LogFileName=determinism.trx' --results-directory $tests
+      - name: Validate two independent replay processes
+        run: |
+          $work = Join-Path $env:GITHUB_WORKSPACE 'artifacts/determinism'
+          $build = Join-Path $work 'build'
+          $evidence = Join-Path $work 'evidence'
+          Set-Location $work
+          dotnet build (Join-Path $env:GITHUB_WORKSPACE 'SKECS.Determinism/SKECS.Determinism.csproj') `
+            -c $env:CONFIGURATION -f net10.0 --artifacts-path $build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $dll = @(Get-ChildItem (Join-Path $build 'bin/SKECS.Determinism') -Filter 'SKECS.Determinism.dll' -File -Recurse |
+            Where-Object { Test-Path -LiteralPath (Join-Path $_.DirectoryName 'SKECS.Determinism.runtimeconfig.json') })
+          if ($dll.Count -ne 1) { throw "Expected one replay executable; found $($dll.Count)" }
+          $first = Join-Path $evidence 'first'
+          $second = Join-Path $evidence 'second'
+          $inputs = Join-Path $evidence 'inputs'
+          dotnet --fx-version $env:REPLAY_RUNTIME $dll[0].FullName run $inputs $first
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet --fx-version $env:REPLAY_RUNTIME $dll[0].FullName run $inputs $second
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet --fx-version $env:REPLAY_RUNTIME $dll[0].FullName compare $first $second
+      - name: Retain replay evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: determinism-${{ matrix.os }}-${{ matrix.configuration }}
+          path: artifacts/determinism/evidence/
+          if-no-files-found: error
+          retention-days: 7
+
+  compare:
+    name: SKECS determinism
+    needs: producer
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Test artifact rejection and mismatch diagnostics
+        run: |
+          python -B tools/determinism/generate_fixtures.py --check
+          python -B -m unittest discover -s tools/determinism -p 'test_compare.py'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: determinism-*
+          path: artifacts/determinism/downloaded
+          merge-multiple: false
+      - name: Require the full matrix and compare its replay evidence
+        env:
+          PRODUCER_RESULT: ${{ needs.producer.result }}
+        run: >-
+          python -B tools/determinism/compare.py artifacts/determinism/downloaded
+          --commit "$GITHUB_SHA" --sdk "$REPLAY_SDK" --runtime "$REPLAY_RUNTIME"
+          --producer-result "$PRODUCER_RESULT"
