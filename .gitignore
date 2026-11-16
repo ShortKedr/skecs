@@ -29,6 +29,22 @@ __pycache__/
 *.pyc
 /tools/web/node_modules/
 
+# Local documentation site: dependencies, generated sources and build output.
+/docs-site/node_modules/
+/docs-site/.vitepress/cache/
+/docs-site/.vitepress/dist/
+/docs-site/public/
+/docs-site/api/
+/docs-site/ru/api/
+/docs-site/guide/using.md
+/docs-site/guide/installation.md
+/docs-site/guide/performance.md
+/docs-site/ru/guide/using.md
+/docs-site/ru/guide/installation.md
+/docs-site/ru/guide/performance.md
+/docs-site/guide/sample.md
+/docs-site/ru/guide/sample.md
+
 # Generated benchmark inputs and raw exports are local artifacts, never documentation.
 /docs/benchmarks/**/*.json
 /docs/benchmarks/**/bdn-raw/

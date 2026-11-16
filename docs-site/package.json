@@ -1,0 +1,15 @@
+{
+  "name": "skecs-documentation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/docs.mjs dev",
+    "build": "node scripts/docs.mjs build",
+    "preview": "node scripts/docs.mjs preview",
+    "gen:api": "node scripts/docs.mjs api",
+    "check": "node --test scripts/versions.test.mjs && node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  }
+}

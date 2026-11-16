@@ -14,6 +14,7 @@ const site = path.resolve(
 );
 const base = argument("--base", "/");
 const remote = argument("--url", null);
+const requireDocs = process.argv.includes("--require-docs");
 const evidence = path.resolve(
   argument("--output", "artifacts/tooling/tmp/web-checks"),
 );
@@ -42,7 +43,12 @@ try {
           response.writeHead(404).end();
           return;
         }
-        const relative = pathname.slice(base.length) || "index.html";
+        let relative = pathname.slice(base.length) || "index.html";
+        if (relative.startsWith("docs/")) {
+          // GitHub Pages serves directory indexes and extensionless HTML routes.
+          if (relative.endsWith("/")) relative += "index.html";
+          else if (!(await fs.stat(path.resolve(site, relative)).catch(() => null))) relative += ".html";
+        }
         const file = path.resolve(site, relative);
         if (!file.startsWith(site + path.sep)) {
           response.writeHead(403).end();
@@ -472,6 +478,25 @@ try {
     await page.locator("#report").getAttribute("href"),
     /REPORT\.ru\.md$/,
   );
+  if (requireDocs) {
+    const docsUrl = new URL("docs/", url).href;
+    assert.equal(await page.locator("#skecs-docs").getAttribute("href"), "docs/ru/");
+    const docsPage = await context.newPage();
+    monitor(docsPage);
+    await docsPage.goto(new URL("ru/", docsUrl).href);
+    await docsPage.locator(".docs-home").waitFor();
+    assert.equal(await docsPage.locator("html").getAttribute("lang"), "ru-RU");
+    assert.match(docsPage.url().slice(docsUrl.length), /^\d+\.\d+\.\d+\/ru\/$/);
+    await docsPage.locator(".docs-version-trigger").click();
+    await docsPage.locator('[role="menuitemradio"][aria-checked="true"]').waitFor();
+    await docsPage.keyboard.press("Escape");
+    await docsPage.locator(".docs-entry-primary").click();
+    await docsPage.locator(".vp-doc h1").waitFor();
+    assert.match(docsPage.url().slice(docsUrl.length), /^\d+\.\d+\.\d+\/ru\/guide\/installation$/);
+    // Reload the clean URL to exercise the published HTML path as well as SPA navigation.
+    assert.ok((await docsPage.reload()).ok());
+    await docsPage.close();
+  }
   await page.keyboard.press("f");
   await page.waitForFunction(() => Boolean(document.fullscreenElement));
   await page.keyboard.press("f");

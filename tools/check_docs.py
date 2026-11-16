@@ -50,6 +50,7 @@ DOCUMENTS = [
 SINGLE_DOCUMENTS = [
     'AGENTS.md',
     'SKECS/PACKAGE_README.md',
+    'skecs-migration/README.md',
     'tools/release-consumers/README.md',
 ]
 

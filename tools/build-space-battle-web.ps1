@@ -3,7 +3,8 @@ param(
     [string]$BasePath = "/skecs/",
     [switch]$Interpreter,
     [string]$ArtifactsDirectory = "artifacts/tooling/tmp/web-build",
-    [string]$NodeExecutable = "node"
+    [string]$NodeExecutable = "node",
+    [switch]$IncludeDocsLink
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -46,6 +47,11 @@ try {
     $html = [IO.File]::ReadAllText($index)
     if ($html -notmatch '<base href="[^"]*"\s*/?>') { throw "Missing base URL in index.html." }
     $html = [Text.RegularExpressions.Regex]::Replace($html, '<base href="[^"]*"\s*/?>', '<base href="' + $BasePath + '">')
+    if ($IncludeDocsLink) {
+        $docsLink = '<a id="skecs-docs" href="docs/" data-tip="docs" aria-label="SKECS documentation"><i data-lucide="book-open"></i></a>'
+        if (-not $html.Contains('<!-- SKECS docs link -->')) { throw "Missing SKECS docs link placeholder." }
+        $html = $html.Replace('<!-- SKECS docs link -->', $docsLink)
+    }
     [IO.File]::WriteAllText($index, $html, [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $site ".nojekyll"), "", [Text.UTF8Encoding]::new($false))
     & $NodeExecutable (Join-Path $root "tools/web/prepare-web-atlases.mjs") --output (Join-Path $site "assets")

@@ -1,4 +1,4 @@
-name: Space Battle Pages
+name: Space Battle and SKECS Docs Pages
 
 on:
   push:
@@ -14,6 +14,9 @@ on:
       - "tools/build-space-battle-web.ps1"
       - "tools/web/**"
       - "tools/space-battle/**"
+      - "docs-site/**"
+      - "docs/branding/logo/**"
+      - "tools/check_docs.py"
       - ".github/workflows/space-battle-pages.yml"
   pull_request:
     paths:
@@ -27,6 +30,9 @@ on:
       - "tools/build-space-battle-web.ps1"
       - "tools/web/**"
       - "tools/space-battle/**"
+      - "docs-site/**"
+      - "docs/branding/logo/**"
+      - "tools/check_docs.py"
       - ".github/workflows/space-battle-pages.yml"
   workflow_dispatch:
 
@@ -46,6 +52,9 @@ jobs:
       pages: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: SpaceBattle.Web/global.json
@@ -53,6 +62,17 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build and check versioned documentation for Pages
+        working-directory: docs-site
+        env:
+          SKECS_DOCS_BASE: /${{ github.event.repository.name }}/docs/
+        run: |
+          npm ci
+          npm run build
+          npm run check
       - name: Install WebAssembly AOT toolchain for the pinned SDK
         working-directory: SpaceBattle.Web
         run: dotnet workload install wasm-tools
@@ -68,7 +88,15 @@ jobs:
         run: node --test tools/web/test-web-atlases.mjs tools/web/test-web-atlas-loader.mjs tools/web/test-finalize-web-site.mjs tools/web/test-ios-diagnostics.mjs tools/space-battle/scenes/test-*.mjs
       - name: Publish native C# simulations to WebAssembly
         shell: pwsh
-        run: ./tools/build-space-battle-web.ps1 -BasePath "/${{ github.event.repository.name }}/"
+        run: ./tools/build-space-battle-web.ps1 -BasePath "/${{ github.event.repository.name }}/" -IncludeDocsLink
+      - name: Add documentation beside the demo
+        run: |
+          site=artifacts/tooling/tmp/web-publish/wwwroot
+          test ! -e "$site/docs"
+          cp -R docs-site/.vitepress/dist "$site/docs"
+          test -f "$site/index.html"
+          test -f "$site/docs/index.html"
+          test -f "$site/docs/ru/index.html"
       - name: Check bilingual documentation links
         run: python3 tools/check_docs.py
       - name: Check portable scalar WebAssembly instructions
@@ -86,7 +114,7 @@ jobs:
         shell: pwsh
         run: ./tools/web/test-build-mono-study.ps1
       - name: Validate browser simulation, controls and responsive rendering
-        run: node tools/web/check-web.mjs --site artifacts/tooling/tmp/web-publish/wwwroot --base "/${{ github.event.repository.name }}/" --require-mode aot-binary
+        run: node tools/web/check-web.mjs --site artifacts/tooling/tmp/web-publish/wwwroot --base "/${{ github.event.repository.name }}/" --require-mode aot-binary --require-docs
       - name: Compare every native framework tick against SKECS
         run: node SpaceBattle.Web/check-frameworks.mjs --site artifacts/tooling/tmp/web-publish/wwwroot --base "/${{ github.event.repository.name }}/" --ticks 1200 --require-mode aot-binary --output artifacts/tooling/tmp/web-framework-checks
       - name: Desktop WebKit bounded iOS regression smoke (not device verification)
@@ -123,6 +151,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy Space Battle
+      - name: Deploy Space Battle and SKECS docs
         id: deployment
         uses: actions/deploy-pages@v4

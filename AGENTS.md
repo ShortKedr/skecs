@@ -20,6 +20,38 @@ is in force.
 Private repository: [ShortKedr/skecs-private](https://github.com/ShortKedr/skecs-private)
 (restricted access).
 
+## Release documentation and migrations
+
+Product documentation is written only for a specific released package version,
+never for an unversioned working branch or an unreleased API. Every manual,
+example and API reference must identify that exact version. Build API reference
+and validate examples against the matching release artifact or immutable release
+source, not the current checkout. Keep release documentation available at stable
+versioned URLs with a version selector, as in Unity package documentation. Only
+include versions for which release documentation is actually available; do not
+invent versions or silently substitute another version's page. Search, navigation
+and language switching must stay within the selected release.
+
+Maintain one canonical source for each document. Keep older release documentation
+in immutable release sources or generated site artifacts, not duplicate historical
+Markdown trees in Git. Release documentation is a supported product surface, not
+a dated work log. Documentation corrections may update the relevant release's
+canonical source without changing which package/API it describes.
+
+When upgrading between releases requires migration, the target release's
+documentation must include an EN/RU migration article. State source and target
+versions, breaking changes, automated steps, manual steps and validation. Link
+it from installation, release notes and the versioned documentation navigation.
+
+When a migration can be performed programmatically, implement and test the
+automation in the separate `skecs-migration/` module. This is a project-wide
+requirement, not only a documentation task. Consumer migration tools must use
+C#/.NET and the existing .NET toolchain, without requiring Python or another
+language runtime. Provide a non-mutating preview and
+an explicit apply mode, preserve unrelated consumer code, and document remaining
+manual work and how to validate the migrated project. Do not replace feasible
+automation with instructions to edit files manually.
+
 ## Independent SpaceBattle implementations
 
 SpaceBattle runs a separate concrete simulation in

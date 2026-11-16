@@ -70,7 +70,7 @@ code. Dispose every `World` to release its native buffers.
 
 Use the release-consumer harness to check Editor and Windows players with Mono and IL2CPP separately. WebGL and mobile exports require their own validation.
 
-## Godot C#
+## Godot .NET (C#)
 
 Use Godot **4.5 .NET** on desktop. Put the `.nupkg` in a local source and add
 the package to your C# project:

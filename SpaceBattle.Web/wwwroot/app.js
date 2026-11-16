@@ -44,6 +44,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       play: "Play",
       reset: "Reset battle",
       report: "Simulation report",
+      docs: "SKECS documentation",
       fullscreen: "Fullscreen",
       follow: "Follow ship",
       colliders: "Collider outlines (F2)",
@@ -127,6 +128,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       play: "Продолжить",
       reset: "Начать заново",
       report: "Отчёт о симуляции",
+      docs: "Документация SKECS",
       fullscreen: "Полный экран",
       follow: "Следить за кораблём",
       colliders: "Контуры коллайдеров (F2)",
@@ -318,6 +320,8 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     $("report").href =
       "https://github.com/ShortKedr/skecs/blob/main/docs/space-battle/" +
       (lang === "ru" ? "REPORT.ru.md" : "REPORT.md");
+    const docsLink = $("skecs-docs");
+    if (docsLink) docsLink.href = lang === "ru" ? "docs/ru/" : "docs/";
     updateUI();
   }
   function accept(pointer) {

@@ -8,7 +8,7 @@ These guides describe the current implementation and published measurements.
 
 ## Using SKECS
 
-- [Package installation](skecs/INSTALL.md): local NuGet package, Unity DLLs, and Godot C# setup.
+- [Package installation](skecs/INSTALL.md): local NuGet package, Unity DLLs, and Godot .NET (C#) setup.
 - [Library guide](skecs/README.md): queries, systems, ownership, and lifetime rules.
 - [Runtime optimizations](SKECS_OPTIMIZATION.md): direct creation, accessors, retained storage, and diagnostics.
 - [Sample](../SKECS.Sample/Program.cs) and [tests](../SKECS.Tests): executable examples and current contracts.

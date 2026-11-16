@@ -70,6 +70,8 @@ jobs:
           dotnet build SKECS/SKECS.csproj -c Release --no-restore
       - name: Run SKECS tests
         run: dotnet test SKECS.Tests/SKECS.Tests.csproj -c Release --logger "trx;LogFileName=skecs-tests.trx" --results-directory artifacts/release/tests
+      - name: Test consumer migration CLI
+        run: dotnet test skecs-migration/Skecs.Migration.Tests/Skecs.Migration.Tests.csproj -c Release
       - name: Pack the exact source commit
         run: dotnet pack SKECS/SKECS.csproj -c Release --no-build -o artifacts/release -p:RepositoryCommit="$GITHUB_SHA"
       - name: Verify package metadata and content

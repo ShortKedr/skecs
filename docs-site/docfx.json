@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+  "metadata": [{
+    "src": [],
+    "output": ".vitepress/cache/api",
+    "outputFormat": "markdown",
+    "properties": { "TargetFramework": "net8.0" },
+    "namespaceLayout": "flattened",
+    "memberLayout": "samePage",
+    "includePrivateMembers": false
+  }]
+}

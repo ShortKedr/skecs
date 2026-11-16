@@ -1,0 +1,21 @@
+{
+  "defaultVersion": "0.1.0",
+  "releases": [
+    {
+      "version": "0.1.0",
+      "product": "SECS",
+      "packageId": "ShortKedr.SECS",
+      "sourceCommit": "951a9bb04b970bedd34cd20b3c00e3424137a949",
+      "releaseUrl": "https://github.com/ShortKedr/skecs/releases/tag/secs-v0.1.0",
+      "packageUrl": "https://github.com/ShortKedr/skecs/releases/download/secs-v0.1.0/ShortKedr.SECS.0.1.0.nupkg",
+      "packageSha256": "0ead3a5baaabcb03718d0519c76a264efdaa2c4d7572777d51850a5aedc0783c",
+      "project": "SECS/SECS.csproj",
+      "sample": "SECS.Sample/Program.cs",
+      "guides": [
+        { "source": "docs/secs/README", "route": "using" },
+        { "source": "docs/secs/INSTALL", "route": "installation" },
+        { "source": "docs/SECS_OPTIMIZATION", "route": "performance" }
+      ]
+    }
+  ]
+}
