@@ -29,7 +29,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BenchmarkSupport.Tests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SpaceBattle.Simulations", "SpaceBattle.Simulations\SpaceBattle.Simulations.csproj", "{2B608EA4-4681-482B-A563-F5D98530510B}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SKECS.Benchmarks", "SKECS.Benchmarks", "{2557A3F5-A8EF-84FE-0AB4-B6538D0DCE60}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ECS benchmark sources", "ECS benchmark sources", "{2557A3F5-A8EF-84FE-0AB4-B6538D0DCE60}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Vendor", "Vendor", "{EC00087F-C1F1-8D90-D03D-CFDB4AB51D27}"
 EndProject
