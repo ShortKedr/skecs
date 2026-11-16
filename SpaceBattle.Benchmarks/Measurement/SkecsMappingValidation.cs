@@ -24,7 +24,7 @@ internal static partial class Validation
             current = battle.Create(); battle.Set(current, new MappingValue { Value = i });
             battle.Set(current, new MappingOther { Value = 17 }); battle.Set(current, new MappingThird { Value = 23 }); expected.Add(current, i);
             Require(current.Id == old.Id && current.Generation != old.Generation, "native identity reuse advances generation");
-            Require(!battle.Alive(old) && battle.NativeWorld.IsAlive(new SKECS.Entity(current.Id, current.Generation)), "EntityKey directly represents native identity");
+            Require(!battle.Alive(old) && battle.NativeWorld.IsAlive(battle.NativeWorld.BindEntity(current.Id, current.Generation)), "EntityKey directly represents native identity");
         }
         CheckSkecsNativeQueries(battle, expected);
         Require(battle.Diagnostics().AccessorBytes == 0, "native queries retain chunk storage without optional accessor buffers");

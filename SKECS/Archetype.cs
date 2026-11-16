@@ -11,7 +11,8 @@ internal sealed unsafe class Archetype : IDisposable
     private readonly int[] _columnByType;
     private readonly int[] _offsetByType;
     private readonly int[] _offsets;
-    private readonly int _stride;
+    private const int ChunkAlignment = 16;
+    private readonly int _allocationSize;
     private readonly Dictionary<int, Transition> _addEdges = new();
     private readonly Dictionary<int, Transition> _removeEdges = new();
     private readonly List<Chunk> _chunks = new();
@@ -40,10 +41,10 @@ internal sealed unsafe class Archetype : IDisposable
             offset = Align(offset, componentTypes[i].Alignment);
             _offsets[i] = offset;
             _offsetByType[componentTypes[i].Id] = offset;
-            offset += componentTypes[i].Size * world.ChunkCapacity;
+            offset = checked(offset + componentTypes[i].Size * world.ChunkCapacity);
         }
 
-        _stride = Math.Max(1, Align(offset, 16));
+        _allocationSize = offset == 0 ? 1 : checked(Align(offset, ChunkAlignment) + (ChunkAlignment - 1));
     }
 
     public ComponentSetKey Key { get; }
@@ -82,8 +83,19 @@ internal sealed unsafe class Archetype : IDisposable
     {
         if (_availableChunks.Count == 0)
         {
-            _chunks.Add(new Chunk(_stride, _world.ChunkCapacity, _offsets, ComponentTypes, _offsetByType));
-            _availableChunks.Push(_chunks.Count - 1);
+            _availableChunks.Push(_chunks.Count);
+            Chunk? newChunk = null;
+            try
+            {
+                newChunk = new Chunk(_allocationSize, _world.ChunkCapacity, _offsets, ComponentTypes, _offsetByType);
+                _chunks.Add(newChunk);
+            }
+            catch
+            {
+                _availableChunks.Pop();
+                newChunk?.Dispose();
+                throw;
+            }
         }
 
         var chunkIndex = _availableChunks.Peek();
@@ -150,7 +162,7 @@ internal sealed unsafe class Archetype : IDisposable
         }
     }
 
-    public long NativeBytes => (long)_stride * _chunks.Count;
+    public long NativeBytes => (long)_allocationSize * _chunks.Count;
 
     internal sealed class Transition
     {
@@ -225,7 +237,7 @@ internal sealed unsafe class Archetype : IDisposable
     private static int Align(int value, int alignment)
     {
         var mask = alignment - 1;
-        return (value + mask) & ~mask;
+        return checked(value + mask) & ~mask;
     }
 
     internal readonly struct RemovalResult
@@ -249,21 +261,33 @@ internal sealed unsafe class Archetype : IDisposable
 
     internal sealed unsafe class Chunk : IDisposable
     {
+        private readonly IntPtr _allocation;
         private GCHandle _entitiesHandle;
         private GCHandle _versionsHandle;
         private readonly int[] _offsetByType;
 
-        public Chunk(int stride, int capacity, int[] offsets, ComponentType[] components, int[] offsetByType)
+        public Chunk(int allocationSize, int capacity, int[] offsets, ComponentType[] components, int[] offsetByType)
         {
-            Memory = (byte*)Marshal.AllocHGlobal(stride);
             Capacity = capacity;
             Offsets = offsets;
             Components = components;
             _offsetByType = offsetByType;
             Entities = new int[capacity];
             Versions = new int[capacity];
-            _entitiesHandle = GCHandle.Alloc(Entities, GCHandleType.Pinned);
-            _versionsHandle = GCHandle.Alloc(Versions, GCHandleType.Pinned);
+            try
+            {
+                _entitiesHandle = GCHandle.Alloc(Entities, GCHandleType.Pinned);
+                _versionsHandle = GCHandle.Alloc(Versions, GCHandleType.Pinned);
+                _allocation = Marshal.AllocHGlobal(allocationSize);
+                var address = (byte*)_allocation;
+                var misalignment = (int)((nuint)address & (ChunkAlignment - 1));
+                Memory = components.Length == 0 || misalignment == 0 ? address : address + ChunkAlignment - misalignment;
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
         }
 
         public byte* Memory { get; }
@@ -341,7 +365,7 @@ internal sealed unsafe class Archetype : IDisposable
                 _versionsHandle.Free();
             }
 
-            Marshal.FreeHGlobal((IntPtr)Memory);
+            Marshal.FreeHGlobal(_allocation);
         }
     }
 }

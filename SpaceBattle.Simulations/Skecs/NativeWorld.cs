@@ -9,12 +9,13 @@ public sealed partial class Battle
     private void InitializeNative() { }
     private void DisposeNative() => world.Dispose();
     public EntityKey Create() { var e = world.CreateEntity(); entityCount++; return new(e.Id, e.Version); }
-    public bool Alive(EntityKey e) => !disposed && !e.IsNone && world.IsAlive(new(e.Id, e.Generation));
-    public void Destroy(EntityKey e) { if (Alive(e)) { world.DestroyEntity(new(e.Id, e.Generation)); entityCount--; } }
-    public ref T Get<T>(EntityKey e) where T : unmanaged => ref world.Get<T>(new(e.Id, e.Generation));
-    public bool Has<T>(EntityKey e) where T : unmanaged => Alive(e) && world.Has<T>(new(e.Id, e.Generation));
-    public void Set<T>(EntityKey e, in T value) where T : unmanaged => world.Set(new(e.Id, e.Generation), value);
-    public void Remove<T>(EntityKey e) where T : unmanaged { if (Alive(e)) world.Remove<T>(new(e.Id, e.Generation)); }
+    private global::SKECS.Entity Bind(EntityKey e) => world.BindEntity(e.Id, e.Generation);
+    public bool Alive(EntityKey e) => !disposed && !e.IsNone && world.IsAlive(Bind(e));
+    public void Destroy(EntityKey e) { if (Alive(e)) { world.DestroyEntity(Bind(e)); entityCount--; } }
+    public ref T Get<T>(EntityKey e) where T : unmanaged => ref world.Get<T>(Bind(e));
+    public bool Has<T>(EntityKey e) where T : unmanaged => Alive(e) && world.Has<T>(Bind(e));
+    public void Set<T>(EntityKey e, in T value) where T : unmanaged => world.Set(Bind(e), value);
+    public void Remove<T>(EntityKey e) where T : unmanaged { if (Alive(e)) world.Remove<T>(Bind(e)); }
     public void Commit() { }
     public StoreDiagnostics Diagnostics() { var d = world.GetStorageStatistics(); return new(d.EntityCount, d.ArchetypeCount, d.ChunkCount, d.NativeBytes, d.AccessorBufferBytes); }
     private global::SKECS.Query<Identity, Transform>? queryShipCollector;

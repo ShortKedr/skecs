@@ -62,7 +62,10 @@ internal sealed unsafe class ComponentTypeRegistry
     private static int GetAlignment<T>()
         where T : unmanaged
     {
-        return Math.Min(16, Math.Max(1, sizeof(T)));
+        // An array element's size is a multiple of its alignment. The lowest set
+        // bit is the largest possible power-of-two alignment for this size.
+        var size = sizeof(T);
+        return Math.Min(16, size & -size);
     }
 }
 

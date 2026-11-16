@@ -22,12 +22,9 @@ internal readonly struct QueryCacheKey
 
 internal sealed class QueryCacheEntry
 {
-    public QueryCacheEntry(QueryCacheKey key)
-    {
-        Key = key;
-    }
+    public QueryCacheEntry(World world) => World = world;
 
-    public QueryCacheKey Key { get; }
+    public World World { get; }
 
     public List<Archetype> Matches { get; } = new();
 }

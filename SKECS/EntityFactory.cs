@@ -18,6 +18,7 @@ public readonly struct EntityFactory<T1, T2> where T1 : unmanaged where T2 : unm
 
     public void CreateBatch(Span<Entity> output, in T1 component1, in T2 component2)
     {
+        _world.ThrowIfDisposed();
         for (var i = 0; i < output.Length; i++) output[i] = Create(component1, component2);
     }
 }

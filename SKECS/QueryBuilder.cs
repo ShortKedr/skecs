@@ -40,7 +40,18 @@ public readonly struct QueryDescription
         _entry = entry;
     }
 
-    public int MatchCount => _entry.Matches.Count;
+    public int MatchCount
+    {
+        get
+        {
+            _entry.World.ThrowIfDisposed();
+            return _entry.Matches.Count;
+        }
+    }
 
-    public QueryChunkEnumerable Chunks() => new(_entry);
+    public QueryChunkEnumerable Chunks()
+    {
+        _entry.World.ThrowIfDisposed();
+        return new QueryChunkEnumerable(_entry);
+    }
 }

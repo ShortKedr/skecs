@@ -1,7 +1,8 @@
 namespace SKECS;
 
 /// <summary>A world-bound address cache, maintained on structural changes. Costs storage per entity ID.</summary>
-/// <remarks>Pass handles from the owning world only. Returned refs must not survive structural changes.</remarks>
+/// <remarks>Returned refs expire on structural changes or disposal. After disposal,
+/// Has and TryGet return false and Get throws an InvalidOperationException.</remarks>
 public readonly struct ComponentAccessor<T> where T : unmanaged
 {
     private readonly AccessorStorage _storage;

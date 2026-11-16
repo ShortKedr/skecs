@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-
 namespace SKECS;
 
 public readonly unsafe struct Query<T1>
@@ -17,6 +15,21 @@ public readonly unsafe struct Query<T1>
     public void ForEach<TProcessor>(ref TProcessor processor)
         where TProcessor : struct, IQueryProcessor<T1>
     {
+        var world = _entry.World;
+        world.BeginQuery();
+        try
+        {
+            Execute(ref processor, world.Id);
+        }
+        finally
+        {
+            world.EndQuery();
+        }
+    }
+
+    private void Execute<TProcessor>(ref TProcessor processor, long worldId)
+        where TProcessor : struct, IQueryProcessor<T1>
+    {
         var matches = _entry.Matches;
         for (var i = 0; i < matches.Count; i++)
         {
@@ -29,13 +42,17 @@ public readonly unsafe struct Query<T1>
                 var versions = chunk.Versions;
                 for (var row = 0; row < chunk.Count; row++)
                 {
-                    processor.Execute(new Entity(entities[row], versions[row]), ref pointer[row]);
+                    processor.Execute(new Entity(entities[row], versions[row], worldId), ref pointer[row]);
                 }
             }
         }
     }
 
-    public QueryChunkEnumerable<T1> Chunks() => new(_entry, _component1Id);
+    public QueryChunkEnumerable<T1> Chunks()
+    {
+        _entry.World.ThrowIfDisposed();
+        return new QueryChunkEnumerable<T1>(_entry, _component1Id);
+    }
 }
 
 public readonly unsafe struct Query<T1, T2>
@@ -56,6 +73,21 @@ public readonly unsafe struct Query<T1, T2>
     public void ForEach<TProcessor>(ref TProcessor processor)
         where TProcessor : struct, IQueryProcessor<T1, T2>
     {
+        var world = _entry.World;
+        world.BeginQuery();
+        try
+        {
+            Execute(ref processor, world.Id);
+        }
+        finally
+        {
+            world.EndQuery();
+        }
+    }
+
+    private void Execute<TProcessor>(ref TProcessor processor, long worldId)
+        where TProcessor : struct, IQueryProcessor<T1, T2>
+    {
         var matches = _entry.Matches;
         for (var i = 0; i < matches.Count; i++)
         {
@@ -69,13 +101,17 @@ public readonly unsafe struct Query<T1, T2>
                 var versions = chunk.Versions;
                 for (var row = 0; row < chunk.Count; row++)
                 {
-                    processor.Execute(new Entity(entities[row], versions[row]), ref pointer1[row], ref pointer2[row]);
+                    processor.Execute(new Entity(entities[row], versions[row], worldId), ref pointer1[row], ref pointer2[row]);
                 }
             }
         }
     }
 
-    public QueryChunkEnumerable<T1, T2> Chunks() => new(_entry, _component1Id, _component2Id);
+    public QueryChunkEnumerable<T1, T2> Chunks()
+    {
+        _entry.World.ThrowIfDisposed();
+        return new QueryChunkEnumerable<T1, T2>(_entry, _component1Id, _component2Id);
+    }
 }
 
 public readonly unsafe struct Query<T1, T2, T3>
@@ -99,6 +135,21 @@ public readonly unsafe struct Query<T1, T2, T3>
     public void ForEach<TProcessor>(ref TProcessor processor)
         where TProcessor : struct, IQueryProcessor<T1, T2, T3>
     {
+        var world = _entry.World;
+        world.BeginQuery();
+        try
+        {
+            Execute(ref processor, world.Id);
+        }
+        finally
+        {
+            world.EndQuery();
+        }
+    }
+
+    private void Execute<TProcessor>(ref TProcessor processor, long worldId)
+        where TProcessor : struct, IQueryProcessor<T1, T2, T3>
+    {
         var matches = _entry.Matches;
         for (var i = 0; i < matches.Count; i++)
         {
@@ -113,13 +164,17 @@ public readonly unsafe struct Query<T1, T2, T3>
                 var versions = chunk.Versions;
                 for (var row = 0; row < chunk.Count; row++)
                 {
-                    processor.Execute(new Entity(entities[row], versions[row]), ref pointer1[row], ref pointer2[row], ref pointer3[row]);
+                    processor.Execute(new Entity(entities[row], versions[row], worldId), ref pointer1[row], ref pointer2[row], ref pointer3[row]);
                 }
             }
         }
     }
 
-    public QueryChunkEnumerable<T1, T2, T3> Chunks() => new(_entry, _component1Id, _component2Id, _component3Id);
+    public QueryChunkEnumerable<T1, T2, T3> Chunks()
+    {
+        _entry.World.ThrowIfDisposed();
+        return new QueryChunkEnumerable<T1, T2, T3>(_entry, _component1Id, _component2Id, _component3Id);
+    }
 }
 
 public readonly unsafe struct QueryChunkEnumerable
@@ -136,29 +191,41 @@ public readonly unsafe struct QueryChunkEnumerable
 
 public unsafe struct QueryChunkEnumerator
 {
-    private readonly List<Archetype> _matches;
+    private readonly QueryCacheEntry _entry;
     private int _archetypeIndex;
     private int _chunkIndex;
 
     internal QueryChunkEnumerator(QueryCacheEntry entry)
     {
-        _matches = entry.Matches;
+        entry.World.ThrowIfDisposed();
+        _entry = entry;
         _archetypeIndex = 0;
         _chunkIndex = -1;
-        Current = default;
+        _current = default;
     }
 
-    public RawChunkView Current { get; private set; }
+    private RawChunkView _current;
+
+    public RawChunkView Current
+    {
+        get
+        {
+            _entry.World.ThrowIfDisposed();
+            return _current;
+        }
+    }
 
     public bool MoveNext()
     {
-        while (_archetypeIndex < _matches.Count)
+        _entry.World.ThrowIfDisposed();
+        var matches = _entry.Matches;
+        while (_archetypeIndex < matches.Count)
         {
-            var chunks = _matches[_archetypeIndex].Chunks;
+            var chunks = matches[_archetypeIndex].Chunks;
             _chunkIndex++;
             if (_chunkIndex < chunks.Count)
             {
-                Current = chunks[_chunkIndex].AsRawView();
+                _current = chunks[_chunkIndex].AsRawView();
                 return true;
             }
 
@@ -188,31 +255,43 @@ public readonly unsafe struct QueryChunkEnumerable<T1>
 public unsafe struct QueryChunkEnumerator<T1>
     where T1 : unmanaged
 {
-    private readonly List<Archetype> _matches;
+    private readonly QueryCacheEntry _entry;
     private readonly int _component1Id;
     private int _archetypeIndex;
     private int _chunkIndex;
 
     internal QueryChunkEnumerator(QueryCacheEntry entry, int component1Id)
     {
-        _matches = entry.Matches;
+        entry.World.ThrowIfDisposed();
+        _entry = entry;
         _component1Id = component1Id;
         _archetypeIndex = 0;
         _chunkIndex = -1;
-        Current = default;
+        _current = default;
     }
 
-    public QueryChunkView<T1> Current { get; private set; }
+    private QueryChunkView<T1> _current;
+
+    public QueryChunkView<T1> Current
+    {
+        get
+        {
+            _entry.World.ThrowIfDisposed();
+            return _current;
+        }
+    }
 
     public bool MoveNext()
     {
-        while (_archetypeIndex < _matches.Count)
+        _entry.World.ThrowIfDisposed();
+        var matches = _entry.Matches;
+        while (_archetypeIndex < matches.Count)
         {
-            var chunks = _matches[_archetypeIndex].Chunks;
+            var chunks = matches[_archetypeIndex].Chunks;
             _chunkIndex++;
             if (_chunkIndex < chunks.Count)
             {
-                Current = chunks[_chunkIndex].AsView<T1>(_component1Id);
+                _current = chunks[_chunkIndex].AsView<T1>(_component1Id);
                 return true;
             }
 
@@ -246,7 +325,7 @@ public unsafe struct QueryChunkEnumerator<T1, T2>
     where T1 : unmanaged
     where T2 : unmanaged
 {
-    private readonly List<Archetype> _matches;
+    private readonly QueryCacheEntry _entry;
     private readonly int _component1Id;
     private readonly int _component2Id;
     private int _archetypeIndex;
@@ -254,25 +333,37 @@ public unsafe struct QueryChunkEnumerator<T1, T2>
 
     internal QueryChunkEnumerator(QueryCacheEntry entry, int component1Id, int component2Id)
     {
-        _matches = entry.Matches;
+        entry.World.ThrowIfDisposed();
+        _entry = entry;
         _component1Id = component1Id;
         _component2Id = component2Id;
         _archetypeIndex = 0;
         _chunkIndex = -1;
-        Current = default;
+        _current = default;
     }
 
-    public QueryChunkView<T1, T2> Current { get; private set; }
+    private QueryChunkView<T1, T2> _current;
+
+    public QueryChunkView<T1, T2> Current
+    {
+        get
+        {
+            _entry.World.ThrowIfDisposed();
+            return _current;
+        }
+    }
 
     public bool MoveNext()
     {
-        while (_archetypeIndex < _matches.Count)
+        _entry.World.ThrowIfDisposed();
+        var matches = _entry.Matches;
+        while (_archetypeIndex < matches.Count)
         {
-            var chunks = _matches[_archetypeIndex].Chunks;
+            var chunks = matches[_archetypeIndex].Chunks;
             _chunkIndex++;
             if (_chunkIndex < chunks.Count)
             {
-                Current = chunks[_chunkIndex].AsView<T1, T2>(_component1Id, _component2Id);
+                _current = chunks[_chunkIndex].AsView<T1, T2>(_component1Id, _component2Id);
                 return true;
             }
 
@@ -310,7 +401,7 @@ public unsafe struct QueryChunkEnumerator<T1, T2, T3>
     where T2 : unmanaged
     where T3 : unmanaged
 {
-    private readonly List<Archetype> _matches;
+    private readonly QueryCacheEntry _entry;
     private readonly int _component1Id;
     private readonly int _component2Id;
     private readonly int _component3Id;
@@ -319,26 +410,38 @@ public unsafe struct QueryChunkEnumerator<T1, T2, T3>
 
     internal QueryChunkEnumerator(QueryCacheEntry entry, int component1Id, int component2Id, int component3Id)
     {
-        _matches = entry.Matches;
+        entry.World.ThrowIfDisposed();
+        _entry = entry;
         _component1Id = component1Id;
         _component2Id = component2Id;
         _component3Id = component3Id;
         _archetypeIndex = 0;
         _chunkIndex = -1;
-        Current = default;
+        _current = default;
     }
 
-    public QueryChunkView<T1, T2, T3> Current { get; private set; }
+    private QueryChunkView<T1, T2, T3> _current;
+
+    public QueryChunkView<T1, T2, T3> Current
+    {
+        get
+        {
+            _entry.World.ThrowIfDisposed();
+            return _current;
+        }
+    }
 
     public bool MoveNext()
     {
-        while (_archetypeIndex < _matches.Count)
+        _entry.World.ThrowIfDisposed();
+        var matches = _entry.Matches;
+        while (_archetypeIndex < matches.Count)
         {
-            var chunks = _matches[_archetypeIndex].Chunks;
+            var chunks = matches[_archetypeIndex].Chunks;
             _chunkIndex++;
             if (_chunkIndex < chunks.Count)
             {
-                Current = chunks[_chunkIndex].AsView<T1, T2, T3>(_component1Id, _component2Id, _component3Id);
+                _current = chunks[_chunkIndex].AsView<T1, T2, T3>(_component1Id, _component2Id, _component3Id);
                 return true;
             }
 
@@ -350,6 +453,9 @@ public unsafe struct QueryChunkEnumerator<T1, T2, T3>
     }
 }
 
+/// <summary>A borrowed view of chunk rows, valid until a structural change or world disposal.</summary>
+/// <remarks>Treat the entity ID and generation arrays as read-only. Any pointers obtained from
+/// this view expire with it. Use World.BindEntity with the owning world to reconstruct a handle.</remarks>
 public readonly unsafe struct QueryChunkView<T1>
     where T1 : unmanaged
 {
@@ -367,6 +473,9 @@ public readonly unsafe struct QueryChunkView<T1>
     public T1* Component1 { get; }
 }
 
+/// <summary>A borrowed view of chunk rows, valid until a structural change or world disposal.</summary>
+/// <remarks>Treat the entity ID and generation arrays as read-only. Any pointers obtained from
+/// this view expire with it. Use World.BindEntity with the owning world to reconstruct a handle.</remarks>
 public readonly unsafe struct QueryChunkView<T1, T2>
     where T1 : unmanaged
     where T2 : unmanaged
@@ -387,6 +496,9 @@ public readonly unsafe struct QueryChunkView<T1, T2>
     public T2* Component2 { get; }
 }
 
+/// <summary>A borrowed view of chunk rows, valid until a structural change or world disposal.</summary>
+/// <remarks>Treat the entity ID and generation arrays as read-only. Any pointers obtained from
+/// this view expire with it. Use World.BindEntity with the owning world to reconstruct a handle.</remarks>
 public readonly unsafe struct QueryChunkView<T1, T2, T3>
     where T1 : unmanaged
     where T2 : unmanaged
@@ -410,6 +522,9 @@ public readonly unsafe struct QueryChunkView<T1, T2, T3>
     public T3* Component3 { get; }
 }
 
+/// <summary>A borrowed view of chunk rows, valid until a structural change or world disposal.</summary>
+/// <remarks>Treat the entity ID and generation arrays as read-only. Any pointers obtained from
+/// this view expire with it. Use World.BindEntity with the owning world to reconstruct a handle.</remarks>
 public readonly unsafe struct RawChunkView
 {
     internal RawChunkView(int count, int* entities, int* versions)

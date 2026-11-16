@@ -1,13 +1,18 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace SKECS;
 
+/// <summary>Owns entities and their component storage.</summary>
+/// <remarks>Use and dispose a world on one thread at a time. Structural changes and disposal
+/// invalidate borrowed component references and chunk views. After disposal, world operations throw
+/// ObjectDisposedException. The options remain readable and Dispose is idempotent.</remarks>
 public sealed class World : IDisposable
 {
+    private static long _nextWorldId;
     private readonly WorldOptions _options;
     private readonly ComponentTypeRegistry _componentTypes = new();
     private readonly Dictionary<ComponentSetKey, Archetype> _archetypes = new();
@@ -19,10 +24,12 @@ public sealed class World : IDisposable
     private readonly Archetype _rootArchetype;
     private readonly Dictionary<(int, int, int), Archetype> _creationArchetypes = new();
     private readonly List<AccessorStorage> _accessors = new();
+    private int _queryDepth;
     private bool _disposed;
 
     public World(WorldOptions options = default)
     {
+        Id = Interlocked.Increment(ref _nextWorldId);
         _options = options.Equals(default(WorldOptions)) ? new WorldOptions() : options;
         _rootArchetype = new Archetype(this, ComponentSetKey.Empty, Array.Empty<ComponentType>());
         _archetypes.Add(ComponentSetKey.Empty, _rootArchetype);
@@ -37,36 +44,54 @@ public sealed class World : IDisposable
 
     public bool DiagnosticsEnabled => _options.DiagnosticsEnabled;
 
+    internal long Id { get; }
+
+    /// <summary>Interprets a stored ID and generation in this world. Use IsAlive to check the result.</summary>
+    /// <remarks>Supply identifiers obtained from this world. The returned handle is not a liveness
+    /// check. Do not serialize handles as raw bytes because their world identity is process-local.</remarks>
+    public Entity BindEntity(int id, int version)
+    {
+        ThrowIfDisposed();
+        return new Entity(id, version, Id);
+    }
+
     public Entity CreateEntity()
         => CreateEntityIn(_rootArchetype);
 
     internal Entity CreateEntityIn(Archetype archetype)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(World));
-        var id = _freeEntityIds.Count > 0 ? _freeEntityIds.Pop() : _entityRecords.Count;
-        var version = id < _entityRecords.Count ? _entityRecords[id].Version : 1;
-
-        if (id == _entityRecords.Count)
-        {
-            _entityRecords.Add(default);
-        }
-
+        ThrowIfDisposed();
+        var reused = _freeEntityIds.Count > 0;
+        var id = reused ? _freeEntityIds.Peek() : _entityRecords.Count;
+        if (!reused) _entityRecords.Add(default);
         var record = _entityRecords[id];
-        record.Version = version;
-        record.Alive = true;
+        var entity = new Entity(id, reused ? record.Version : 1, Id);
+        EntitySlot slot;
+        try
+        {
+            slot = archetype.AddEntity(entity);
+        }
+        catch
+        {
+            if (!reused) _entityRecords.RemoveAt(id);
+            throw;
+        }
+        if (reused) _freeEntityIds.Pop();
 
-        var slot = archetype.AddEntity(new Entity(id, version));
+        record.Version = entity.Version;
+        record.Alive = true;
         record.Archetype = archetype;
         record.ChunkIndex = slot.ChunkIndex;
         record.RowIndex = slot.RowIndex;
         _entityRecords[id] = record;
         RefreshAccessors(id, record);
 
-        return new Entity(id, version);
+        return entity;
     }
 
     public Entity CreateEntity<T1>(in T1 component1) where T1 : unmanaged
     {
+        ThrowIfDisposed();
         var type1 = _componentTypes.GetOrCreate<T1>().Id;
         var archetype = GetCreationArchetype(type1, -1, -1);
         var entity = CreateEntityIn(archetype);
@@ -82,6 +107,7 @@ public sealed class World : IDisposable
     public Entity CreateEntity<T1, T2, T3>(in T1 component1, in T2 component2, in T3 component3)
         where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged
     {
+        ThrowIfDisposed();
         var type1 = _componentTypes.GetOrCreate<T1>().Id;
         var type2 = _componentTypes.GetOrCreate<T2>().Id;
         var type3 = _componentTypes.GetOrCreate<T3>().Id;
@@ -96,6 +122,7 @@ public sealed class World : IDisposable
 
     public EntityFactory<T1, T2> PrepareEntity<T1, T2>() where T1 : unmanaged where T2 : unmanaged
     {
+        ThrowIfDisposed();
         var type1 = _componentTypes.GetOrCreate<T1>().Id;
         var type2 = _componentTypes.GetOrCreate<T2>().Id;
         return new EntityFactory<T1, T2>(this, GetCreationArchetype(type1, type2, -1), type1, type2);
@@ -107,7 +134,6 @@ public sealed class World : IDisposable
 
     private unsafe Archetype GetCreationArchetype(int type1, int type2, int type3)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(World));
         if (type1 == type2 || type1 == type3 || (type2 >= 0 && type2 == type3))
             throw new ArgumentException("A creation template cannot contain duplicate component types.");
         var key = (type1, type2, type3);
@@ -133,11 +159,11 @@ public sealed class World : IDisposable
 
     public ComponentAccessor<T> GetAccessor<T>() where T : unmanaged
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(World));
+        ThrowIfDisposed();
         var typeId = _componentTypes.GetOrCreate<T>().Id;
         foreach (var accessor in _accessors)
             if (accessor.TypeId == typeId) return new ComponentAccessor<T>(accessor);
-        var storage = new AccessorStorage(typeId);
+        var storage = new AccessorStorage(typeId, Id);
         for (var id = 0; id < _entityRecords.Count; id++) storage.Update(id, _entityRecords[id]);
         _accessors.Add(storage);
         return new ComponentAccessor<T>(storage);
@@ -145,7 +171,7 @@ public sealed class World : IDisposable
 
     public StorageStatistics GetStorageStatistics()
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(World));
+        ThrowIfDisposed();
         var chunks = 0;
         var entities = 0;
         long nativeBytes = 0;
@@ -162,7 +188,14 @@ public sealed class World : IDisposable
 
     public bool IsAlive(Entity entity)
     {
-        if ((uint)entity.Id >= (uint)_entityRecords.Count)
+        ThrowIfDisposed();
+        return IsAliveCore(entity);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsAliveCore(Entity entity)
+    {
+        if (entity.WorldId != Id || (uint)entity.Id >= (uint)_entityRecords.Count)
         {
             return false;
         }
@@ -183,10 +216,11 @@ public sealed class World : IDisposable
         record.ChunkIndex = -1;
         record.RowIndex = -1;
         record.Alive = false;
-        record.Version++;
+        var canReuse = record.Version < int.MaxValue;
+        if (canReuse) record.Version++;
         _entityRecords[entity.Id] = record;
         RefreshAccessors(entity.Id, record);
-        _freeEntityIds.Push(entity.Id);
+        if (canReuse) _freeEntityIds.Push(entity.Id);
     }
 
     public void Add<T>(Entity entity, in T component)
@@ -198,8 +232,8 @@ public sealed class World : IDisposable
     public void Set<T>(Entity entity, in T component)
         where T : unmanaged
     {
-        var typeId = _componentTypes.GetId<T>();
         var record = GetRecord(entity);
+        var typeId = _componentTypes.GetId<T>();
         if (record.Archetype!.HasComponent(typeId))
         {
             record.Archetype.WriteComponent(record.ChunkIndex, record.RowIndex, typeId, component);
@@ -243,6 +277,7 @@ public sealed class World : IDisposable
         return true;
     }
 
+    /// <summary>Returns a component reference borrowed until the next structural change or disposal.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T Get<T>(Entity entity)
         where T : unmanaged
@@ -284,7 +319,7 @@ public sealed class World : IDisposable
         unsafe
         {
             var include = stackalloc int[1];
-            include[0] = _componentTypes.GetOrCreate<T1>().Id;
+            include[0] = GetComponentType<T1>().Id;
             return new Query<T1>(this, GetOrCreateQueryCache(new QueryCacheKey(ComponentSetKey.Create(include, 1), ComponentSetKey.Empty)));
         }
     }
@@ -296,7 +331,7 @@ public sealed class World : IDisposable
         unsafe
         {
             var include = stackalloc int[2];
-            include[0] = _componentTypes.GetOrCreate<T1>().Id;
+            include[0] = GetComponentType<T1>().Id;
             include[1] = _componentTypes.GetOrCreate<T2>().Id;
             return new Query<T1, T2>(this, GetOrCreateQueryCache(new QueryCacheKey(ComponentSetKey.Create(include, 2), ComponentSetKey.Empty)));
         }
@@ -310,21 +345,30 @@ public sealed class World : IDisposable
         unsafe
         {
             var include = stackalloc int[3];
-            include[0] = _componentTypes.GetOrCreate<T1>().Id;
+            include[0] = GetComponentType<T1>().Id;
             include[1] = _componentTypes.GetOrCreate<T2>().Id;
             include[2] = _componentTypes.GetOrCreate<T3>().Id;
             return new Query<T1, T2, T3>(this, GetOrCreateQueryCache(new QueryCacheKey(ComponentSetKey.Create(include, 3), ComponentSetKey.Empty)));
         }
     }
 
-    public QueryBuilder QueryBuilder() => new(this);
+    public QueryBuilder QueryBuilder()
+    {
+        ThrowIfDisposed();
+        return new QueryBuilder(this);
+    }
 
-    public void AddSystem(SystemStage stage, Action<World> system) => _systems[stage].Add(system);
+    public void AddSystem(SystemStage stage, Action<World> system)
+    {
+        ThrowIfDisposed();
+        _systems[stage].Add(system);
+    }
 
     public void Run(SystemStage stage)
     {
+        ThrowIfDisposed();
         var systems = _systems[stage];
-        for (var i = 0; i < systems.Count; i++)
+        for (var i = 0; i < systems.Count && !_disposed; i++)
         {
             systems[i](this);
         }
@@ -333,22 +377,26 @@ public sealed class World : IDisposable
     public void RunAll()
     {
         Run(SystemStage.PreUpdate);
-        Run(SystemStage.Update);
-        Run(SystemStage.PostUpdate);
+        if (!_disposed) Run(SystemStage.Update);
+        if (!_disposed) Run(SystemStage.PostUpdate);
     }
 
     internal ComponentType GetComponentType<T>()
         where T : unmanaged
-        => _componentTypes.GetOrCreate<T>();
+    {
+        ThrowIfDisposed();
+        return _componentTypes.GetOrCreate<T>();
+    }
 
     internal QueryCacheEntry GetOrCreateQueryCache(QueryCacheKey key)
     {
+        ThrowIfDisposed();
         if (_queryCache.TryGetValue(key, out var existing))
         {
             return existing;
         }
 
-        var entry = new QueryCacheEntry(key);
+        var entry = new QueryCacheEntry(this);
         for (var i = 0; i < _archetypeList.Count; i++)
         {
             if (key.Matches(_archetypeList[i].Key))
@@ -452,14 +500,29 @@ public sealed class World : IDisposable
         for (var i = 0; i < _accessors.Count; i++) _accessors[i].Update(id, record);
     }
 
-    [Conditional("DEBUG")]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ValidateEntity(Entity entity)
     {
-        if (_options.DiagnosticsEnabled && !IsAlive(entity))
+        ThrowIfDisposed();
+        if (!IsAliveCore(entity))
         {
             throw new InvalidOperationException($"Entity {entity} is not alive in this world.");
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ThrowIfDisposed()
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(World));
+    }
+
+    internal void BeginQuery()
+    {
+        ThrowIfDisposed();
+        _queryDepth++;
+    }
+
+    internal void EndQuery() => _queryDepth--;
 
     public void Dispose()
     {
@@ -468,13 +531,15 @@ public sealed class World : IDisposable
             return;
         }
 
+        if (_queryDepth != 0)
+            throw new InvalidOperationException("A world cannot be disposed during Query.ForEach.");
+
+        _disposed = true;
+        foreach (var accessor in _accessors) accessor.Invalidate();
         for (var i = 0; i < _archetypeList.Count; i++)
         {
             _archetypeList[i].Dispose();
         }
-
-        _disposed = true;
-        foreach (var accessor in _accessors) accessor.Invalidate();
     }
 
     internal readonly struct EntitySlot
