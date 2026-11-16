@@ -9,9 +9,21 @@ public sealed partial class World
     /// <summary>Creates a world and records diagnostic events in the supplied buffer.</summary>
     public World(WorldOptions options, DiagnosticBuffer diagnostics) : this(options)
     {
-        _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
-        diagnostics.Attach(ChunkCapacity);
-        RecordDiagnosticArchetype(_rootArchetype, 0);
+        try
+        {
+            if (diagnostics == null) throw new ArgumentNullException(nameof(diagnostics));
+            diagnostics.Attach(ChunkCapacity, UsesChurnControl);
+            _diagnostics = diagnostics;
+            RecordDiagnosticArchetype(_rootArchetype, 0);
+            _churnPool?.AttachDiagnostics(diagnostics);
+            if (_entityRecords.Capacity > 0) RecordDiagnosticEntityTable();
+            if (_freeEntityIds.Capacity > 0) RecordDiagnosticFreeTable(_freeEntityIds.Capacity);
+        }
+        catch
+        {
+            DisposeCore();
+            throw;
+        }
     }
 
     internal DiagnosticBuffer? DiagnosticsBuffer => _diagnostics;

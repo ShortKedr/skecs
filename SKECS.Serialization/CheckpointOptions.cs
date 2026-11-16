@@ -36,6 +36,8 @@ public sealed class CheckpointReadOptions
 {
     public CheckpointLimits Limits { get; set; } = new();
     public WorldOptions WorldOptions { get; set; }
+    /// <summary>Requires the checkpoint schema to match the entire registry before loading state or planning migrations.</summary>
+    public bool RequireExactSchema { get; set; }
     public bool AllowUnknown { get; set; }
     public Action<string>? OnOmitted { get; set; }
     public IReadOnlyDictionary<uint, uint> Extensions { get; set; } = new Dictionary<uint, uint>();

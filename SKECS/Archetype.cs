@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace SKECS;
 
@@ -11,16 +10,27 @@ internal sealed unsafe class Archetype : IDisposable
     private readonly int[] _columnByType;
     private readonly int[] _offsetByType;
     private readonly int[] _offsets;
-    private const int ChunkAlignment = 16;
     private readonly int _allocationSize;
     private readonly Dictionary<int, Transition> _addEdges = new();
     private readonly Dictionary<int, Transition> _removeEdges = new();
     private readonly List<Chunk> _chunks = new();
-    private readonly Stack<int> _availableChunks = new();
+    private readonly List<Chunk> _chunkSlots;
+    private readonly List<int> _availableChunks = new();
+    private readonly LinkedList<ChurnChunkPool.Backing>? _localReserve;
+    private int _vacantSlot = -1;
 
     public Archetype(World world, ComponentSetKey key, ComponentType[] componentTypes)
     {
         _world = world;
+        if (world.UsesChurnControl)
+        {
+            _chunkSlots = new List<Chunk>();
+            _localReserve = new LinkedList<ChurnChunkPool.Backing>();
+        }
+        else
+        {
+            _chunkSlots = _chunks;
+        }
         Key = key;
         ComponentTypes = componentTypes;
         var maxTypeId = -1;
@@ -44,7 +54,7 @@ internal sealed unsafe class Archetype : IDisposable
             offset = checked(offset + componentTypes[i].Size * world.ChunkCapacity);
         }
 
-        _allocationSize = offset == 0 ? 1 : checked(Align(offset, ChunkAlignment) + (ChunkAlignment - 1));
+        _allocationSize = offset == 0 ? 1 : checked(Align(offset, ChunkMemory.Alignment) + (ChunkMemory.Alignment - 1));
     }
 
     public ComponentSetKey Key { get; }
@@ -58,7 +68,7 @@ internal sealed unsafe class Archetype : IDisposable
     internal int ChunkAllocationSize => _allocationSize;
 
     internal long NextCheckpointChunkBytes => _availableChunks.Count != 0
-        ? 0 : _allocationSize + 8L * _world.ChunkCapacity + 128;
+        ? 0 : _allocationSize + 8L * _world.ChunkCapacity + (_localReserve == null ? 128 : 512);
 
     public List<Chunk> Chunks => _chunks;
 
@@ -90,39 +100,125 @@ internal sealed unsafe class Archetype : IDisposable
 
     public World.EntitySlot AddEntity(Entity entity)
     {
-        if (_availableChunks.Count == 0)
-        {
-            _availableChunks.Push(_chunks.Count);
-            Chunk? newChunk = null;
-            try
-            {
-                newChunk = new Chunk(_allocationSize, _world.ChunkCapacity, _offsets, ComponentTypes, _offsetByType);
-                _chunks.Add(newChunk);
-            }
-            catch
-            {
-                _availableChunks.Pop();
-                newChunk?.Dispose();
-                throw;
-            }
+        var slot = ReserveEntity(out _);
+        PublishEntity(slot, entity);
+        return slot;
+    }
 
-            _world.DiagnosticsBuffer?.AllocateChunk(DiagnosticId, _chunks.Count - 1, _allocationSize,
-                (long)_world.ChunkCapacity * 2 * sizeof(int));
+    internal World.EntitySlot ReserveEntity(out bool acquiredBacking)
+    {
+        acquiredBacking = _availableChunks.Count == 0;
+        if (acquiredBacking)
+        {
+            // Reserve capacity for this slot's future full-to-partial transition before attaching memory.
+            EnsureRoom(_availableChunks, _chunkSlots.Count + (_vacantSlot < 0 ? 1 : 0));
+            if (_localReserve != null) AttachBacking(_world.ChurnPool!, _localReserve);
+            else AllocateLegacyChunk();
         }
 
-        var chunkIndex = _availableChunks.Peek();
-        var chunk = _chunks[chunkIndex];
-        var rowIndex = chunk.Count++;
-        if (chunk.Count == _world.ChunkCapacity) _availableChunks.Pop();
-        chunk.Entities[rowIndex] = entity.Id;
-        chunk.Versions[rowIndex] = entity.Version;
-        return new World.EntitySlot(chunkIndex, rowIndex);
+        var chunkIndex = _availableChunks[_availableChunks.Count - 1];
+        return new World.EntitySlot(chunkIndex, _chunkSlots[chunkIndex].Count);
+    }
+
+    private void AllocateLegacyChunk()
+    {
+        var index = _chunks.Count;
+        EnsureRoom(_chunks, index + 1);
+        var chunk = new Chunk(index, _offsetByType);
+        chunk.Allocate(_allocationSize, _world.ChunkCapacity);
+        _chunks.Add(chunk);
+        AddAvailable(chunk);
+        _world.DiagnosticsBuffer?.AllocateChunk(DiagnosticId, index, _allocationSize,
+            (long)_world.ChunkCapacity * 2 * sizeof(int));
+    }
+
+    private void AttachBacking(ChurnChunkPool pool, LinkedList<ChurnChunkPool.Backing> localReserve)
+    {
+        EnsureRoom(_chunks, _chunks.Count + 1);
+        var vacant = _vacantSlot;
+        Chunk chunk;
+        if (vacant < 0)
+        {
+            EnsureRoom(_chunkSlots, _chunkSlots.Count + 1);
+            chunk = new Chunk(_chunkSlots.Count, _offsetByType);
+        }
+        else
+        {
+            chunk = _chunkSlots[vacant];
+        }
+
+        var backing = pool.Rent(_allocationSize, localReserve, out var reused);
+        if (vacant < 0) _chunkSlots.Add(chunk);
+        else _vacantSlot = chunk.NextVacantSlot;
+        chunk.Attach(backing, _chunks.Count);
+        _chunks.Add(chunk);
+        AddAvailable(chunk);
+        if (_world.DiagnosticsBuffer is { } diagnostics)
+        {
+            if (reused) diagnostics.ReuseChunk(DiagnosticId, chunk.SlotIndex, backing.Id);
+            else diagnostics.AllocateChunk(DiagnosticId, chunk.SlotIndex, backing.NativeBytes,
+                (long)_world.ChunkCapacity * 2 * sizeof(int), backing.Id);
+        }
+    }
+
+    private static void EnsureRoom<T>(List<T> list, int required)
+    {
+        if (list.Capacity < required) list.Capacity = Math.Max(required, Math.Max(4, list.Capacity * 2));
+    }
+
+    internal void PublishEntity(World.EntitySlot slot, Entity entity)
+    {
+        var chunk = _chunkSlots[slot.ChunkIndex];
+        chunk.Entities[slot.RowIndex] = entity.Id;
+        chunk.Versions[slot.RowIndex] = entity.Version;
+        if (++chunk.Count == _world.ChunkCapacity) RemoveAvailable(chunk);
+    }
+
+    internal bool ReturnIfEmpty(int chunkIndex)
+    {
+        if (_localReserve == null) return false;
+        var chunk = _chunkSlots[chunkIndex];
+        if (chunk.Count != 0) return false;
+        RemoveAvailable(chunk);
+
+        // Only the enumeration index of the last active chunk changes. Its entity records use SlotIndex.
+        var last = _chunks.Count - 1;
+        var moved = _chunks[last];
+        _chunks[chunk.ActiveIndex] = moved;
+        moved.ActiveIndex = chunk.ActiveIndex;
+        _chunks.RemoveAt(last);
+
+        var backing = chunk.Detach();
+        chunk.NextVacantSlot = _vacantSlot;
+        _vacantSlot = chunkIndex;
+        _world.ChurnPool!.Return(backing, _localReserve);
+        _world.DiagnosticsBuffer?.PoolChunk(DiagnosticId, chunkIndex, backing.Id);
+        return true;
+    }
+
+    private void AddAvailable(Chunk chunk)
+    {
+        chunk.AvailableIndex = _availableChunks.Count;
+        _availableChunks.Add(chunk.SlotIndex);
+    }
+
+    private void RemoveAvailable(Chunk chunk)
+    {
+        var last = _availableChunks.Count - 1;
+        var availableIndex = chunk.AvailableIndex;
+        if (availableIndex != last)
+        {
+            var moved = _availableChunks[last];
+            _availableChunks[availableIndex] = moved;
+            _chunkSlots[moved].AvailableIndex = availableIndex;
+        }
+        _availableChunks.RemoveAt(last);
     }
 
     public RemovalResult RemoveAt(int chunkIndex, int rowIndex)
     {
-        var chunk = _chunks[chunkIndex];
-        if (chunk.Count == _world.ChunkCapacity) _availableChunks.Push(chunkIndex);
+        var chunk = _chunkSlots[chunkIndex];
+        if (chunk.Count == _world.ChunkCapacity) AddAvailable(chunk);
         var lastRow = chunk.Count - 1;
 
         if (rowIndex != lastRow)
@@ -170,8 +266,10 @@ internal sealed unsafe class Archetype : IDisposable
     {
         for (var i = 0; i < _chunks.Count; i++)
         {
-            _chunks[i].Dispose();
-            _world.DiagnosticsBuffer?.ReleaseChunk(DiagnosticId, i);
+            var chunk = _chunks[i];
+            if (_localReserve != null) _world.ChurnPool!.Release(chunk.Detach());
+            else chunk.Dispose();
+            _world.DiagnosticsBuffer?.ReleaseChunk(DiagnosticId, chunk.SlotIndex);
         }
     }
 
@@ -204,8 +302,8 @@ internal sealed unsafe class Archetype : IDisposable
 
         public void Copy(int sourceChunkIndex, int sourceRowIndex, World.EntitySlot destinationSlot)
         {
-            var source = _source._chunks[sourceChunkIndex].Memory;
-            var target = Destination._chunks[destinationSlot.ChunkIndex].Memory;
+            var source = _source._chunkSlots[sourceChunkIndex].Memory;
+            var target = Destination._chunkSlots[destinationSlot.ChunkIndex].Memory;
             foreach (var column in _columns)
             {
                 CopyComponent(source + column.SourceOffset + sourceRowIndex * column.Size,
@@ -248,7 +346,7 @@ internal sealed unsafe class Archetype : IDisposable
     {
         if ((uint)componentTypeId >= (uint)_offsetByType.Length || _offsetByType[componentTypeId] < 0)
             throw new InvalidOperationException($"Component {componentTypeId} is not in archetype.");
-        return _chunks[chunkIndex].Memory + _offsetByType[componentTypeId];
+        return _chunkSlots[chunkIndex].Memory + _offsetByType[componentTypeId];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -279,48 +377,62 @@ internal sealed unsafe class Archetype : IDisposable
 
     internal sealed unsafe class Chunk : IDisposable
     {
-        private readonly IntPtr _allocation;
-        private GCHandle _entitiesHandle;
-        private GCHandle _versionsHandle;
         private readonly int[] _offsetByType;
+        private ChunkMemory _ownedMemory;
+        private int* _pinnedEntities;
+        private int* _pinnedVersions;
+        private ChurnChunkPool.Backing? _backing;
 
-        public Chunk(int allocationSize, int capacity, int[] offsets, ComponentType[] components, int[] offsetByType)
+        public Chunk(int slotIndex, int[] offsetByType)
         {
-            Capacity = capacity;
-            Offsets = offsets;
-            Components = components;
+            SlotIndex = slotIndex;
             _offsetByType = offsetByType;
-            Entities = new int[capacity];
-            Versions = new int[capacity];
-            try
-            {
-                _entitiesHandle = GCHandle.Alloc(Entities, GCHandleType.Pinned);
-                _versionsHandle = GCHandle.Alloc(Versions, GCHandleType.Pinned);
-                _allocation = Marshal.AllocHGlobal(allocationSize);
-                var address = (byte*)_allocation;
-                var misalignment = (int)((nuint)address & (ChunkAlignment - 1));
-                Memory = components.Length == 0 || misalignment == 0 ? address : address + ChunkAlignment - misalignment;
-            }
-            catch
-            {
-                Dispose();
-                throw;
-            }
         }
 
-        public byte* Memory { get; }
+        internal void Allocate(int bytes, int capacity)
+        {
+            _ownedMemory.Allocate(bytes, capacity);
+            BindMemory(in _ownedMemory);
+        }
+
+        internal void Attach(ChurnChunkPool.Backing backing, int activeIndex)
+        {
+            _backing = backing;
+            ActiveIndex = activeIndex;
+            BindMemory(in backing.Memory);
+        }
+
+        private void BindMemory(in ChunkMemory memory)
+        {
+            Memory = memory.Address;
+            Entities = memory.Entities;
+            Versions = memory.Versions;
+            _pinnedEntities = memory.PinnedEntities;
+            _pinnedVersions = memory.PinnedVersions;
+        }
+
+        internal ChurnChunkPool.Backing Detach()
+        {
+            var backing = _backing!;
+            _backing = null;
+            Memory = null;
+            Entities = null!;
+            Versions = null!;
+            _pinnedEntities = null;
+            _pinnedVersions = null;
+            return backing;
+        }
+
+        public byte* Memory { get; private set; }
 
         public int Count { get; set; }
 
-        public int Capacity { get; }
-
-        public int[] Entities { get; }
-
-        public int[] Versions { get; }
-
-        public int[] Offsets { get; }
-
-        public ComponentType[] Components { get; }
+        internal int SlotIndex { get; }
+        internal int ActiveIndex { get; set; }
+        internal int AvailableIndex { get; set; }
+        internal int NextVacantSlot { get; set; }
+        public int[] Entities { get; private set; } = null!;
+        public int[] Versions { get; private set; } = null!;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void* GetComponentPointer(int componentTypeId)
@@ -332,7 +444,7 @@ internal sealed unsafe class Archetype : IDisposable
 
         public RawChunkView AsRawView()
         {
-            return new RawChunkView(Count, (int*)_entitiesHandle.AddrOfPinnedObject(), (int*)_versionsHandle.AddrOfPinnedObject());
+            return new RawChunkView(Count, _pinnedEntities, _pinnedVersions);
         }
 
         public QueryChunkView<T1> AsView<T1>(int component1Id)
@@ -340,8 +452,8 @@ internal sealed unsafe class Archetype : IDisposable
         {
             return new QueryChunkView<T1>(
                 Count,
-                (int*)_entitiesHandle.AddrOfPinnedObject(),
-                (int*)_versionsHandle.AddrOfPinnedObject(),
+                _pinnedEntities,
+                _pinnedVersions,
                 (T1*)GetComponentPointer(component1Id));
         }
 
@@ -351,8 +463,8 @@ internal sealed unsafe class Archetype : IDisposable
         {
             return new QueryChunkView<T1, T2>(
                 Count,
-                (int*)_entitiesHandle.AddrOfPinnedObject(),
-                (int*)_versionsHandle.AddrOfPinnedObject(),
+                _pinnedEntities,
+                _pinnedVersions,
                 (T1*)GetComponentPointer(component1Id),
                 (T2*)GetComponentPointer(component2Id));
         }
@@ -364,26 +476,13 @@ internal sealed unsafe class Archetype : IDisposable
         {
             return new QueryChunkView<T1, T2, T3>(
                 Count,
-                (int*)_entitiesHandle.AddrOfPinnedObject(),
-                (int*)_versionsHandle.AddrOfPinnedObject(),
+                _pinnedEntities,
+                _pinnedVersions,
                 (T1*)GetComponentPointer(component1Id),
                 (T2*)GetComponentPointer(component2Id),
                 (T3*)GetComponentPointer(component3Id));
         }
 
-        public void Dispose()
-        {
-            if (_entitiesHandle.IsAllocated)
-            {
-                _entitiesHandle.Free();
-            }
-
-            if (_versionsHandle.IsAllocated)
-            {
-                _versionsHandle.Free();
-            }
-
-            Marshal.FreeHGlobal(_allocation);
-        }
+        public void Dispose() => _ownedMemory.Release();
     }
 }

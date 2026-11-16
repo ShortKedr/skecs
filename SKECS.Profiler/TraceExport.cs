@@ -12,7 +12,7 @@ internal static class TraceExport
     {
         using var writer = XmlWriter.Create(destination);
         writer.WriteStartElement("skecs-profiler-trace");
-        writer.WriteAttributeString("schemaVersion", "1");
+        writer.WriteAttributeString("schemaVersion", session.Buffer.ChurnControlEnabled ? "2" : "1");
         writer.WriteAttributeString("scenario", scenario);
         writer.WriteAttributeString("workloadId", workloadId);
         writer.WriteAttributeString("runtime", RuntimeInformation.FrameworkDescription);
@@ -57,10 +57,27 @@ internal static class TraceExport
                 WriteSlot(writer, entry);
                 WriteNumber(writer, "nativeBytes", entry.NativeBytes);
                 WriteNumber(writer, "pinnedBytes", entry.PinnedBytes);
+                if (entry.BackingId != 0) WriteNumber(writer, "backing", entry.BackingId);
                 break;
             case DiagnosticEventKind.ChunkReleased:
                 writer.WriteAttributeString("kind", "chunkReleased");
                 WriteSlot(writer, entry);
+                break;
+            case DiagnosticEventKind.ChunkPooled:
+            case DiagnosticEventKind.ChunkReused:
+                writer.WriteAttributeString("kind", entry.Kind == DiagnosticEventKind.ChunkPooled ? "chunkPooled" : "chunkReused");
+                WriteSlot(writer, entry);
+                WriteNumber(writer, "backing", entry.BackingId);
+                break;
+            case DiagnosticEventKind.PooledChunkAllocated:
+                writer.WriteAttributeString("kind", "pooledChunkAllocated");
+                WriteNumber(writer, "backing", entry.BackingId);
+                WriteNumber(writer, "nativeBytes", entry.NativeBytes);
+                WriteNumber(writer, "pinnedBytes", entry.PinnedBytes);
+                break;
+            case DiagnosticEventKind.PooledChunkReleased:
+                writer.WriteAttributeString("kind", "pooledChunkReleased");
+                WriteNumber(writer, "backing", entry.BackingId);
                 break;
             case DiagnosticEventKind.RowCreated:
             case DiagnosticEventKind.RowDestroyed:

@@ -37,7 +37,7 @@ internal sealed class RunnerSystemPlan<TInput> where TInput : unmanaged
                 for (var row = 0; row < chunk.Count; row++)
                 {
                     var entity = new Entity(chunk.Entities[row], chunk.Versions[row], worldId);
-                    rows[index++] = new RunnerRow(entity, archetype, chunkIndex, row);
+                    rows[index++] = new RunnerRow(entity, archetype, chunk.SlotIndex, row);
                 }
             }
         }

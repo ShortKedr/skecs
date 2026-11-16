@@ -19,6 +19,8 @@ internal static class CheckpointReader
             throw new InvalidDataException($"Unsupported checkpoint version {major}.{minor}, capabilities {capabilities}, allocator {allocator}.");
         var fingerprint = reader.ReadBytes();
         if (fingerprint.Length != 32) throw new InvalidDataException("Invalid checkpoint schema fingerprint length.");
+        if (options.RequireExactSchema && !registry.GetFingerprint().AsSpan().SequenceEqual(fingerprint))
+            throw new InvalidDataException("Checkpoint schema fingerprint does not match the codec registry.");
         var slotCount = Count(reader, limits.MaxSlots, "slot count");
         var freeCount = Count(reader, slotCount, "free ID count");
         var schemaCount = Count(reader, limits.MaxSchemas, "schema count");
@@ -32,8 +34,6 @@ internal static class CheckpointReader
         var schema = ReadSchemas(reader, registry, options, limits, schemaCount, omitted, structuralPath.Length != 0, ref workingBytes);
         if (!Fingerprint(schema.Values.Select(plan => plan.Source)).AsSpan().SequenceEqual(fingerprint))
             throw new InvalidDataException("Checkpoint schema fingerprint does not match the manifest.");
-        if (omitted.Count != 0 && options.OnOmitted is null)
-            throw new InvalidDataException("Omitting unknown schema data requires an OnOmitted callback.");
 
         var slots = ReadSlots(reader, slotCount, limits, out var liveCount);
         var free = ReadFreeIds(reader, freeCount, limits);
@@ -41,10 +41,10 @@ internal static class CheckpointReader
             return ReadLogical(reader, registry, options, limits, schema, slots, free, structuralPath, extensionCount,
                 omitted, workingBytes, out extensions);
 
-        var world = CreateWorld(slots, free, liveCount, options, workingBytes, limits, out _);
+        var world = CreateWorld(slots, free, liveCount, options, workingBytes, limits, out var rootBytes);
         try
         {
-            var componentBlocks = new ComponentBlocks(slots, limits, workingBytes, world);
+            var componentBlocks = new ComponentBlocks(slots, limits, workingBytes, world, rootBytes: rootBytes);
             var frame = ReadComponents(reader, schema, componentBlocks);
             workingBytes += componentBlocks.StorageBytes;
             var restoredExtensions = ReadExtensions(reader, frame, extensionCount, options, limits, omitted, workingBytes);
@@ -66,8 +66,24 @@ internal static class CheckpointReader
     {
         var capacity = options.WorldOptions.ChunkCapacity;
         if (capacity == 0) capacity = new WorldOptions().ChunkCapacity;
-        rootBytes = ((liveCount + (long)capacity - 1) / capacity) * (8L * capacity + 129) + 256;
-        CheckLimit(workingBytes + rootBytes, limits.MaxWorkingBytes, "working storage");
+        var control = options.WorldOptions.ChurnControl;
+        var perChunkOverhead = control is null ? 128L : 512L;
+        rootBytes = ((liveCount + (long)capacity - 1) / capacity) * (8L * capacity + 1 + perChunkOverhead) + 256;
+        var available = limits.MaxWorkingBytes - workingBytes;
+        if (control is not null)
+        {
+            // Charge the optional table reservation even when it exceeds the number of restored slots.
+            rootBytes += 40L * control.InitialEntityCapacity;
+            CheckLimit(rootBytes, available, "working storage");
+            foreach (var block in control.StartupBlocks)
+            {
+                var bytes = block.NativeBytes + 8L * capacity + perChunkOverhead;
+                if (block.Count > (available - rootBytes) / bytes)
+                    throw new InvalidDataException("Checkpoint startup reserve exceeds its working storage limit.");
+                rootBytes += block.Count * bytes;
+            }
+        }
+        CheckLimit(rootBytes, available, "working storage");
         try { return World.RestoreCheckpoint(slots, free, options.WorldOptions); }
         catch (ArgumentException error) { throw new InvalidDataException("Invalid checkpoint allocator metadata.", error); }
     }

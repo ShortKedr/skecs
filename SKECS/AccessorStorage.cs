@@ -19,7 +19,7 @@ internal sealed unsafe class AccessorStorage
         _componentType = componentType;
     }
 
-    public void Update(int id, World.EntityRecord record)
+    internal void EnsureCapacity(int id)
     {
         if (id >= _entries.Length)
         {
@@ -27,6 +27,10 @@ internal sealed unsafe class AccessorStorage
             Array.Resize(ref _entries, capacity);
             _world.DiagnosticsBuffer?.ResizeTable(DiagnosticTable.Accessor, TypeId, capacity, ManagedBufferBytes, _componentType);
         }
+    }
+
+    public void Update(int id, World.EntityRecord record)
+    {
         var address = record.Alive && record.Archetype!.HasComponent(TypeId)
             ? (nint)record.Archetype.GetComponentPointer(record.ChunkIndex, TypeId)
                 + record.RowIndex * record.Archetype.ComponentSize(TypeId)

@@ -19,6 +19,7 @@ public sealed class DiagnosticBuffer
     public int Capacity => _events.Length;
     public int Count { get; private set; }
     public long DroppedEvents { get; private set; }
+    public bool ChurnControlEnabled { get; private set; }
 
     public ref readonly DiagnosticEvent this[int index]
     {
@@ -40,10 +41,11 @@ public sealed class DiagnosticBuffer
     public void RecordDuration(string name, long elapsedTicks) =>
         Record(new DiagnosticEvent(DiagnosticEventKind.Duration, value: elapsedTicks, metadata: name));
 
-    internal void Attach(int chunkCapacity)
+    internal void Attach(int chunkCapacity, bool churnControlEnabled = false)
     {
         if (_attached) throw new InvalidOperationException("A diagnostic buffer can only be attached to one world.");
         _attached = true;
+        ChurnControlEnabled = churnControlEnabled;
         Record(new DiagnosticEvent(DiagnosticEventKind.WorldStarted, chunkCapacity));
     }
 
@@ -54,12 +56,28 @@ public sealed class DiagnosticBuffer
         Record(new DiagnosticEvent(DiagnosticEventKind.ArchetypeComponent, archetype, type.Size, type.Alignment,
             type.Id, metadata: type.RuntimeType));
 
-    internal void AllocateChunk(int archetype, int chunk, long nativeBytes, long pinnedBytes) =>
-        Record(new DiagnosticEvent(DiagnosticEventKind.ChunkAllocated, archetype, chunk,
-            value: nativeBytes, secondary: pinnedBytes));
+    internal void AllocateChunk(int archetype, int chunk, long nativeBytes, long pinnedBytes, long backingId = 0) =>
+        RecordBacking(DiagnosticEventKind.ChunkAllocated, archetype, chunk, backingId, nativeBytes, pinnedBytes);
 
     internal void ReleaseChunk(int archetype, int chunk) =>
         Record(new DiagnosticEvent(DiagnosticEventKind.ChunkReleased, archetype, chunk));
+
+    internal void PoolChunk(int archetype, int chunk, long backingId) =>
+        RecordBacking(DiagnosticEventKind.ChunkPooled, archetype, chunk, backingId);
+
+    internal void ReuseChunk(int archetype, int chunk, long backingId) =>
+        RecordBacking(DiagnosticEventKind.ChunkReused, archetype, chunk, backingId);
+
+    internal void AllocatePooledChunk(long backingId, long nativeBytes, long pinnedBytes) =>
+        RecordBacking(DiagnosticEventKind.PooledChunkAllocated, 0, 0, backingId, nativeBytes, pinnedBytes);
+
+    internal void ReleasePooledChunk(long backingId) =>
+        RecordBacking(DiagnosticEventKind.PooledChunkReleased, 0, 0, backingId);
+
+    private void RecordBacking(DiagnosticEventKind kind, int archetype, int chunk,
+        long backingId, long nativeBytes = 0, long pinnedBytes = 0) =>
+        Record(new DiagnosticEvent(kind, archetype, chunk, unchecked((int)backingId), (int)(backingId >> 32),
+            nativeBytes, pinnedBytes));
 
     internal void CreateRow(int archetype, int chunk, int entity) =>
         Record(new DiagnosticEvent(DiagnosticEventKind.RowCreated, archetype, chunk, entity));
@@ -100,7 +118,11 @@ public enum DiagnosticEventKind
     WorldDisposed,
     FrameStarted,
     FrameCompleted,
-    Duration
+    Duration,
+    ChunkPooled,
+    ChunkReused,
+    PooledChunkAllocated,
+    PooledChunkReleased
 }
 
 public enum DiagnosticTable
@@ -145,6 +167,7 @@ public readonly struct DiagnosticEvent
     public int ComponentSize => Detail;
     public int ComponentAlignment => RelatedIndex;
     public int ChunkIndex => Detail;
+    public long BackingId => ((long)RelatedDetail << 32) | (uint)RelatedIndex;
     public long NativeBytes => Value;
     public long PinnedBytes => Secondary;
     public int EntityId => RelatedIndex;

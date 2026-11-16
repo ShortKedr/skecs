@@ -147,7 +147,8 @@ internal sealed class ComponentBlocks
     private long _rows;
     private long _cells;
 
-    internal ComponentBlocks(CheckpointSlot[] slots, CheckpointLimits limits, long baseBytes, World? world, LogicalCheckpoint? logical = null)
+    internal ComponentBlocks(CheckpointSlot[] slots, CheckpointLimits limits, long baseBytes, World? world,
+        LogicalCheckpoint? logical = null, long rootBytes = 0)
     {
         _world = world;
         _logical = logical;
@@ -156,11 +157,7 @@ internal sealed class ComponentBlocks
         _baseBytes = baseBytes;
         var maxRows = Math.Min(RowsPerBlock, Math.Min(limits.MaxRowsPerBlock, slots.Length));
         _ids = new int[maxRows];
-        if (world is not null)
-        {
-            var stats = world.GetStorageStatistics();
-            StorageBytes = stats.NativeBytes + stats.ChunkCount * (8L * world.ChunkCapacity + 128) + 256;
-        }
+        StorageBytes = rootBytes;
         CheckLimit(CurrentBytes(), limits.MaxWorkingBytes, "working storage");
     }
 

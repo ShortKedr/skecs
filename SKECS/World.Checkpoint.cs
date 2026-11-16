@@ -38,7 +38,7 @@ public sealed partial class World
         var world = new World(options);
         try
         {
-            world._entityRecords.Capacity = slots.Length;
+            world._entityRecords.Capacity = Math.Max(world._entityRecords.Capacity, slots.Length);
             for (var id = 0; id < slots.Length; id++)
             {
                 var slot = slots[id];

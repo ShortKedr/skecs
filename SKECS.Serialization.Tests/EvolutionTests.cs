@@ -197,6 +197,53 @@ public sealed partial class CheckpointTests
             new CheckpointReadOptions { Limits = new CheckpointLimits { MaxDocumentBytes = bytes.Length - 1 } }));
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ExactSchemaRejectsBeforeStructuralOrComponentMigration(bool json, bool structural)
+    {
+        using var source = new World();
+        var entity = source.CreateEntity(81);
+        var original = IntRegistry();
+        var destination = new CodecRegistry().Register(new ComponentSchema(100, 2,
+            new FieldSchema(1, FieldKind.Int32)), new IntCodec());
+        var calls = 0;
+        if (structural)
+            destination.MigrateCheckpoint(original.GetFingerprint(), destination.GetFingerprint(), _ => calls++);
+        else
+            destination.Migrate(100, 1, 2, _ => calls++);
+
+        var legacy = Save(source, original, json);
+        var exact = new CheckpointReadOptions { RequireExactSchema = true, AllowUnknown = true };
+        var failure = Assert.Throws<InvalidDataException>(() => Load(legacy, destination, json, exact));
+        Assert.Contains("does not match the codec registry", failure.Message);
+        Assert.Equal(0, calls);
+        Assert.Equal(81, source.Get<int>(entity));
+
+        using var migrated = Load(legacy, destination, json);
+        Assert.Equal(1, calls);
+        using var matching = Load(Save(migrated, destination, json), destination, json, exact);
+        Assert.Equal(81, matching.Get<int>(matching.BindEntity(entity.Id, entity.Version)));
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void ExactSchemaIncludesUnusedRegistrations()
+    {
+        using var source = new World();
+        var entity = source.CreateEntity(81);
+        var legacy = Save(source, IntRegistry(), json: false);
+        var destination = IntRegistry().Register(new ComponentSchema(101, 1,
+            new FieldSchema(3, FieldKind.Int64)), new LongCodec());
+        using var compatible = Load(legacy, destination, json: false);
+        Assert.Equal(81, compatible.Get<int>(compatible.BindEntity(entity.Id, entity.Version)));
+        var failure = Assert.Throws<InvalidDataException>(() => Load(legacy, destination, json: false,
+            new CheckpointReadOptions { RequireExactSchema = true, Limits = new CheckpointLimits { MaxSlots = 0 } }));
+        Assert.Contains("does not match the codec registry", failure.Message);
+    }
+
     private static World ReadExtensions(Stream stream, CodecRegistry schema, bool json,
         out IReadOnlyList<CheckpointExtension> extensions, CheckpointReadOptions options)
         => json ? WorldSerializer.ReadJson(stream, schema, out extensions, options)

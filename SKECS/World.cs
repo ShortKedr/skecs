@@ -32,7 +32,7 @@ public sealed partial class World : IDisposable
     public World(WorldOptions options = default)
     {
         Id = Interlocked.Increment(ref _nextWorldId);
-        _options = options.Equals(default(WorldOptions)) ? new WorldOptions() : options;
+        _options = options.ChunkCapacity == 0 ? new WorldOptions() : options;
         _rootArchetype = new Archetype(this, ComponentSetKey.Empty, Array.Empty<ComponentType>());
         _archetypes.Add(ComponentSetKey.Empty, _rootArchetype);
         _archetypeList.Add(_rootArchetype);
@@ -40,6 +40,13 @@ public sealed partial class World : IDisposable
         _systems[SystemStage.PreUpdate] = new List<Action<World>>();
         _systems[SystemStage.Update] = new List<Action<World>>();
         _systems[SystemStage.PostUpdate] = new List<Action<World>>();
+
+        if (_options.ChurnControl is { } control)
+        {
+            _entityRecords.Capacity = control.InitialEntityCapacity;
+            _freeEntityIds.Capacity = control.InitialEntityCapacity;
+            _churnPool = new ChurnChunkPool(ChunkCapacity, control);
+        }
     }
 
     public int ChunkCapacity => _options.ChunkCapacity;
@@ -58,49 +65,64 @@ public sealed partial class World : IDisposable
     }
 
     public Entity CreateEntity()
-        => CreateEntityIn(_rootArchetype);
-
-    internal Entity CreateEntityIn(Archetype archetype)
     {
         ThrowIfDisposed();
-        return CreateEntityCore(archetype);
+        return CreateEntityCore(_rootArchetype);
     }
 
     private Entity CreateEntityCore(Archetype archetype)
+    {
+        var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
+        return PublishCreation(archetype, slot, entity, acquiredBacking);
+    }
+
+    private EntitySlot ReserveCreation(Archetype archetype, out Entity entity, out bool acquiredBacking)
     {
         var lastFree = _freeEntityIds.Count - 1;
         var reused = lastFree >= 0;
         var id = reused ? _freeEntityIds[lastFree] : _entityRecords.Count;
         if (!reused)
         {
+            // Accessor growth can fail. Complete it before allocating or exposing the new row.
+            foreach (var accessor in _accessors) accessor.EnsureCapacity(id);
             var grew = _diagnostics != null && _entityRecords.Count == _entityRecords.Capacity;
             _entityRecords.Add(default);
             if (grew) RecordDiagnosticEntityTable();
         }
-        var record = _entityRecords[id];
-        var entity = new Entity(id, reused ? record.Version : 1, Id);
-        EntitySlot slot;
+        entity = new Entity(id, reused ? _entityRecords[id].Version : 1, Id);
         try
         {
-            slot = archetype.AddEntity(entity);
+            return archetype.ReserveEntity(out acquiredBacking);
         }
         catch
         {
             if (!reused) _entityRecords.RemoveAt(id);
             throw;
         }
-        if (reused) _freeEntityIds.RemoveAt(lastFree);
+    }
 
-        record.Version = entity.Version;
-        record.Alive = true;
-        record.Archetype = archetype;
-        record.ChunkIndex = slot.ChunkIndex;
-        record.RowIndex = slot.RowIndex;
-        _entityRecords[id] = record;
-        RefreshAccessors(id, record);
-        if (_diagnostics != null) RecordDiagnosticCreate(archetype, slot.ChunkIndex, id);
+    private Entity PublishCreation(Archetype archetype, EntitySlot slot, Entity entity, bool acquiredBacking)
+    {
+        archetype.PublishEntity(slot, entity);
+        if (_freeEntityIds.Count != 0) _freeEntityIds.RemoveAt(_freeEntityIds.Count - 1);
+
+        var record = new EntityRecord
+        {
+            Version = entity.Version, Alive = true, Archetype = archetype,
+            ChunkIndex = slot.ChunkIndex, RowIndex = slot.RowIndex
+        };
+        _entityRecords[entity.Id] = record;
+        RefreshAccessors(entity.Id, record);
+        if (_diagnostics != null) RecordDiagnosticCreate(archetype, slot.ChunkIndex, entity.Id);
+        if (acquiredBacking) MaintainChurnPool();
 
         return entity;
+    }
+
+    private void CancelCreation(Archetype archetype, EntitySlot slot, Entity entity)
+    {
+        if (_freeEntityIds.Count == 0) _entityRecords.RemoveAt(entity.Id);
+        archetype.ReturnIfEmpty(slot.ChunkIndex);
     }
 
     public Entity CreateEntity<T1>(in T1 component1) where T1 : unmanaged
@@ -108,10 +130,17 @@ public sealed partial class World : IDisposable
         ThrowIfDisposed();
         var type1 = _componentTypes.GetOrCreate<T1>().Id;
         var archetype = GetCreationArchetype(type1, -1, -1);
-        var entity = CreateEntityIn(archetype);
-        var record = _entityRecords[entity.Id];
-        archetype.WriteComponent(record.ChunkIndex, record.RowIndex, type1, component1);
-        return entity;
+        var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
+        try
+        {
+            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type1, component1);
+        }
+        catch
+        {
+            CancelCreation(archetype, slot, entity);
+            throw;
+        }
+        return PublishCreation(archetype, slot, entity, acquiredBacking);
     }
 
     public Entity CreateEntity<T1, T2>(in T1 component1, in T2 component2)
@@ -126,12 +155,19 @@ public sealed partial class World : IDisposable
         var type2 = _componentTypes.GetOrCreate<T2>().Id;
         var type3 = _componentTypes.GetOrCreate<T3>().Id;
         var archetype = GetCreationArchetype(type1, type2, type3);
-        var entity = CreateEntityIn(archetype);
-        var record = _entityRecords[entity.Id];
-        archetype.WriteComponent(record.ChunkIndex, record.RowIndex, type1, component1);
-        archetype.WriteComponent(record.ChunkIndex, record.RowIndex, type2, component2);
-        archetype.WriteComponent(record.ChunkIndex, record.RowIndex, type3, component3);
-        return entity;
+        var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
+        try
+        {
+            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type1, component1);
+            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type2, component2);
+            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type3, component3);
+        }
+        catch
+        {
+            CancelCreation(archetype, slot, entity);
+            throw;
+        }
+        return PublishCreation(archetype, slot, entity, acquiredBacking);
     }
 
     public EntityFactory<T1, T2> PrepareEntity<T1, T2>() where T1 : unmanaged where T2 : unmanaged
@@ -164,11 +200,19 @@ public sealed partial class World : IDisposable
     internal Entity CreateEntityIn<T1, T2>(Archetype archetype, int type1, int type2, in T1 component1, in T2 component2)
         where T1 : unmanaged where T2 : unmanaged
     {
-        var entity = CreateEntityIn(archetype);
-        var record = _entityRecords[entity.Id];
-        archetype.WriteComponent(record.ChunkIndex, record.RowIndex, type1, component1);
-        archetype.WriteComponent(record.ChunkIndex, record.RowIndex, type2, component2);
-        return entity;
+        ThrowIfDisposed();
+        var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
+        try
+        {
+            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type1, component1);
+            archetype.WriteComponent(slot.ChunkIndex, slot.RowIndex, type2, component2);
+        }
+        catch
+        {
+            CancelCreation(archetype, slot, entity);
+            throw;
+        }
+        return PublishCreation(archetype, slot, entity, acquiredBacking);
     }
 
     public ComponentAccessor<T> GetAccessor<T>() where T : unmanaged
@@ -178,7 +222,13 @@ public sealed partial class World : IDisposable
         foreach (var accessor in _accessors)
             if (accessor.TypeId == typeId) return new ComponentAccessor<T>(accessor);
         var storage = new AccessorStorage(typeId, this, typeof(T));
-        for (var id = 0; id < _entityRecords.Count; id++) storage.Update(id, _entityRecords[id]);
+        if (_options.ChurnControl is { InitialEntityCapacity: > 0 } control)
+            storage.EnsureCapacity(control.InitialEntityCapacity - 1);
+        for (var id = 0; id < _entityRecords.Count; id++)
+        {
+            storage.EnsureCapacity(id);
+            storage.Update(id, _entityRecords[id]);
+        }
         _accessors.Add(storage);
         return new ComponentAccessor<T>(storage);
     }
@@ -197,6 +247,11 @@ public sealed partial class World : IDisposable
         }
         long accessorBytes = 0;
         foreach (var accessor in _accessors) accessorBytes += accessor.ManagedBufferBytes;
+        if (_churnPool is { } pool)
+        {
+            nativeBytes = pool.NativeBytes;
+            chunks = checked((int)(pool.AllocationCount - pool.ReleaseCount));
+        }
         return new StorageStatistics(_archetypeList.Count, chunks, entities, nativeBytes, accessorBytes);
     }
 
@@ -227,6 +282,9 @@ public sealed partial class World : IDisposable
     private void DestroyEntityCore(Entity entity)
     {
         var record = _entityRecords[entity.Id];
+        var canReuse = record.Version < int.MaxValue;
+        var grew = canReuse && _freeEntityIds.Count == _freeEntityIds.Capacity;
+        if (grew) _freeEntityIds.Capacity = Math.Max(4, checked(_freeEntityIds.Capacity * 2));
         var removed = record.Archetype!.RemoveAt(record.ChunkIndex, record.RowIndex);
         UpdateMovedEntity(removed);
 
@@ -234,17 +292,16 @@ public sealed partial class World : IDisposable
         record.ChunkIndex = -1;
         record.RowIndex = -1;
         record.Alive = false;
-        var canReuse = record.Version < int.MaxValue;
         if (canReuse) record.Version++;
         _entityRecords[entity.Id] = record;
         RefreshAccessors(entity.Id, record);
         if (canReuse)
         {
-            var grew = _diagnostics != null && _freeEntityIds.Count == _freeEntityIds.Capacity;
             _freeEntityIds.Add(entity.Id);
             if (grew) RecordDiagnosticFreeTable(_freeEntityIds.Capacity);
         }
         if (_diagnostics != null) RecordDiagnosticDestroy(entity.Id, removed);
+        CompleteChurnChange(removed);
     }
 
     public void Add<T>(Entity entity, in T component)
@@ -299,8 +356,17 @@ public sealed partial class World : IDisposable
 
         var transition = record.Archetype.GetRemoveTransition(typeId);
         var destination = transition.Destination;
-        var slot = destination.AddEntity(entity);
-        transition.Copy(record.ChunkIndex, record.RowIndex, slot);
+        var slot = destination.ReserveEntity(out var acquiredBacking);
+        try
+        {
+            transition.Copy(record.ChunkIndex, record.RowIndex, slot);
+        }
+        catch
+        {
+            destination.ReturnIfEmpty(slot.ChunkIndex);
+            throw;
+        }
+        destination.PublishEntity(slot, entity);
         var removed = record.Archetype.RemoveAt(record.ChunkIndex, record.RowIndex);
         UpdateMovedEntity(removed);
 
@@ -310,6 +376,7 @@ public sealed partial class World : IDisposable
         _entityRecords[entity.Id] = record;
         RefreshAccessors(entity.Id, record);
         if (_diagnostics != null) RecordDiagnosticTransition(transition, removed, slot.ChunkIndex);
+        CompleteChurnChange(removed, acquiredBacking);
         return true;
     }
 
@@ -421,6 +488,7 @@ public sealed partial class World : IDisposable
         Run(SystemStage.PreUpdate);
         if (!_disposed) Run(SystemStage.Update);
         if (!_disposed) Run(SystemStage.PostUpdate);
+        if (!_disposed) MaintainChurnPool();
     }
 
     internal ComponentType GetComponentType<T>()
@@ -489,9 +557,18 @@ public sealed partial class World : IDisposable
 
         var transition = source.GetAddTransition(typeId);
         var destination = transition.Destination;
-        var slot = destination.AddEntity(entity);
-        transition.Copy(record.ChunkIndex, record.RowIndex, slot);
-        destination.WriteComponent(slot.ChunkIndex, slot.RowIndex, typeId, component);
+        var slot = destination.ReserveEntity(out var acquiredBacking);
+        try
+        {
+            transition.Copy(record.ChunkIndex, record.RowIndex, slot);
+            destination.WriteComponent(slot.ChunkIndex, slot.RowIndex, typeId, component);
+        }
+        catch
+        {
+            destination.ReturnIfEmpty(slot.ChunkIndex);
+            throw;
+        }
+        destination.PublishEntity(slot, entity);
         var removed = source.RemoveAt(record.ChunkIndex, record.RowIndex);
         UpdateMovedEntity(removed);
 
@@ -501,6 +578,7 @@ public sealed partial class World : IDisposable
         _entityRecords[entity.Id] = record;
         RefreshAccessors(entity.Id, record);
         if (_diagnostics != null) RecordDiagnosticTransition(transition, removed, slot.ChunkIndex);
+        CompleteChurnChange(removed, acquiredBacking);
     }
 
     private void UpdateMovedEntity(Archetype.RemovalResult removed)
@@ -575,6 +653,7 @@ public sealed partial class World : IDisposable
         {
             _archetypeList[i].Dispose();
         }
+        _churnPool?.Dispose();
         _diagnostics?.DisposeWorld();
     }
 
