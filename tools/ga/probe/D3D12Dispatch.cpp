@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <cstdio>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -57,6 +58,7 @@ void transition(ID3D12GraphicsCommandList* list, ID3D12Resource* resource,
 struct Buffer
 {
     ComPtr<ID3D12Resource> upload, gpu, readback;
+    size_t capacity = 0;
 };
 
 using Register = std::tuple<D3D12_DESCRIPTOR_RANGE_TYPE, uint32_t, uint32_t>;
@@ -101,6 +103,14 @@ struct D3D12Kernel::State
     ComPtr<ID3D12RootSignature> root;
     ComPtr<ID3D12PipelineState> pipeline;
     ComPtr<ID3D12CommandQueue> queue;
+    ComPtr<ID3D12CommandAllocator> allocator;
+    ComPtr<ID3D12GraphicsCommandList> list;
+    ComPtr<ID3D12DescriptorHeap> heap;
+    ComPtr<ID3D12Fence> fence;
+    std::unique_ptr<void, CloseEvent> event;
+    uint64_t fenceValue = 0;
+    UINT descriptorIncrement = 0;
+    std::vector<Buffer> buffers;
     std::mutex executionLock;
 };
 
@@ -123,7 +133,8 @@ D3D12Kernel::D3D12Kernel(IDXGIAdapter1* adapter, std::span<const uint32_t> dxil,
         throw std::runtime_error(std::string(static_cast<const char*>(signatureErrors->GetBufferPointer()), signatureErrors->GetBufferSize()));
     check(status, "D3D12SerializeRootSignature");
 
-    auto& [layouts, device, root, pipeline, queue, executionLock] = *state;
+    auto& [layouts, device, root, pipeline, queue, allocator, list, heap, fence, event,
+        fenceValue, descriptorIncrement, buffers, executionLock] = *state;
     check(D3D12CreateDevice(adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)), "D3D12CreateDevice");
     check(device->CreateRootSignature(0, signatureBlob->GetBufferPointer(), signatureBlob->GetBufferSize(), IID_PPV_ARGS(&root)),
         "CreateRootSignature");
@@ -134,6 +145,16 @@ D3D12Kernel::D3D12Kernel(IDXGIAdapter1* adapter, std::span<const uint32_t> dxil,
     D3D12_COMMAND_QUEUE_DESC queueDesc{D3D12_COMMAND_LIST_TYPE_COMPUTE, D3D12_COMMAND_QUEUE_PRIORITY_NORMAL,
         D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
     check(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue)), "CreateCommandQueue");
+    check(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)), "CreateCommandAllocator");
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, static_cast<UINT>(bindings.size()),
+        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
+    check(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&heap)), "CreateDescriptorHeap");
+    descriptorIncrement = device->GetDescriptorHandleIncrementSize(heapDesc.Type);
+    buffers.resize(bindings.size());
+    check(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)), "CreateFence");
+    event.reset(CreateEventW(nullptr, FALSE, FALSE, nullptr));
+    if (!event)
+        check(HRESULT_FROM_WIN32(GetLastError()), "CreateEventW");
 }
 
 D3D12Kernel::~D3D12Kernel() = default;
@@ -142,7 +163,8 @@ void D3D12Kernel::execute(uint32_t groupCount, std::span<D3D12Binding> bindings)
 {
     if (!groupCount || groupCount > D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION)
         throw std::runtime_error("D3D12 compute dispatch group count is out of range");
-    auto& [layouts, device, root, pipeline, queue, executionLock] = *state;
+    auto& [layouts, device, root, pipeline, queue, allocator, list, heap, fence, event,
+        fenceValue, descriptorIncrement, buffers, executionLock] = *state;
     if (bindings.size() != layouts.size())
         throw std::runtime_error("D3D12 dispatch descriptor count changed after pipeline creation");
     for (size_t index = 0; index < bindings.size(); ++index)
@@ -151,18 +173,7 @@ void D3D12Kernel::execute(uint32_t groupCount, std::span<D3D12Binding> bindings)
     std::lock_guard lock(executionLock);
     check(device->GetDeviceRemovedReason(), "D3D12 device before dispatch");
 
-    ComPtr<ID3D12CommandAllocator> allocator;
-    check(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&allocator)), "CreateCommandAllocator");
-    ComPtr<ID3D12GraphicsCommandList> list;
-    check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, allocator.Get(), pipeline.Get(), IID_PPV_ARGS(&list)), "CreateCommandList");
-
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, static_cast<UINT>(bindings.size()),
-        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
-    ComPtr<ID3D12DescriptorHeap> heap;
-    check(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&heap)), "CreateDescriptorHeap");
     auto cpuHandle = heap->GetCPUDescriptorHandleForHeapStart();
-    auto descriptorIncrement = device->GetDescriptorHandleIncrementSize(heapDesc.Type);
-    std::vector<Buffer> buffers(bindings.size());
     for (size_t index = 0; index < bindings.size(); ++index, cpuHandle.ptr += descriptorIncrement)
     {
         const auto& binding = bindings[index];
@@ -172,13 +183,27 @@ void D3D12Kernel::execute(uint32_t groupCount, std::span<D3D12Binding> bindings)
             throw std::runtime_error("D3D12 buffer has invalid layout");
         constexpr uint64_t alignment = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
         const auto allocated = binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_CBV ? (bytes + alignment - 1) & ~(alignment - 1) : bytes;
-        buffer.upload = makeBuffer(device.Get(), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_FLAG_NONE,
-            D3D12_RESOURCE_STATE_GENERIC_READ, allocated);
+        if (buffer.capacity < allocated)
+        {
+            Buffer replacement;
+            replacement.upload = makeBuffer(device.Get(), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_FLAG_NONE,
+                D3D12_RESOURCE_STATE_GENERIC_READ, allocated);
+            if (binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_UAV)
+            {
+                replacement.gpu = makeBuffer(device.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+                    D3D12_RESOURCE_STATE_COMMON, allocated);
+                replacement.readback = makeBuffer(device.Get(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_FLAG_NONE,
+                    D3D12_RESOURCE_STATE_COPY_DEST, allocated);
+            }
+            replacement.capacity = allocated;
+            buffer = std::move(replacement);
+        }
         void* mapped;
         D3D12_RANGE readNone{0, 0};
         check(buffer.upload->Map(0, &readNone, &mapped), "Map upload");
-        std::memset(mapped, 0, allocated);
         std::memcpy(mapped, binding.words.data(), bytes);
+        if (allocated != bytes)
+            std::memset(static_cast<char*>(mapped) + bytes, 0, allocated - bytes);
         D3D12_RANGE uploadWritten{0, allocated};
         buffer.upload->Unmap(0, &uploadWritten);
 
@@ -198,12 +223,6 @@ void D3D12Kernel::execute(uint32_t groupCount, std::span<D3D12Binding> bindings)
         }
         else if (binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_UAV)
         {
-            buffer.gpu = makeBuffer(device.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-                D3D12_RESOURCE_STATE_COPY_DEST, bytes);
-            buffer.readback = makeBuffer(device.Get(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_FLAG_NONE,
-                D3D12_RESOURCE_STATE_COPY_DEST, bytes);
-            list->CopyBufferRegion(buffer.gpu.Get(), 0, buffer.upload.Get(), 0, bytes);
-            transition(list.Get(), buffer.gpu.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             D3D12_UNORDERED_ACCESS_VIEW_DESC view{};
             view.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
             view.Buffer.NumElements = static_cast<UINT>(bytes / binding.stride);
@@ -214,6 +233,24 @@ void D3D12Kernel::execute(uint32_t groupCount, std::span<D3D12Binding> bindings)
         {
             throw std::runtime_error("unsupported D3D12 descriptor type");
         }
+    }
+
+    // No command list is in flight while the execution lock is held at this point.
+    check(allocator->Reset(), "Reset command allocator");
+    if (list)
+        check(list->Reset(allocator.Get(), pipeline.Get()), "Reset command list");
+    else
+        check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, allocator.Get(), pipeline.Get(), IID_PPV_ARGS(&list)),
+            "CreateCommandList");
+    for (size_t index = 0; index < buffers.size(); ++index)
+    {
+        const auto& buffer = buffers[index];
+        if (!buffer.gpu)
+            continue;
+        const auto bytes = bindings[index].words.size() * sizeof(uint32_t);
+        // Buffers decay to COMMON at the previous execution boundary. The copy promotes to COPY_DEST.
+        list->CopyBufferRegion(buffer.gpu.Get(), 0, buffer.upload.Get(), 0, bytes);
+        transition(list.Get(), buffer.gpu.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
 
     ID3D12DescriptorHeap* heaps[]{heap.Get()};
@@ -229,33 +266,36 @@ void D3D12Kernel::execute(uint32_t groupCount, std::span<D3D12Binding> bindings)
         transition(list.Get(), buffer.gpu.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
         list->CopyBufferRegion(buffer.readback.Get(), 0, buffer.gpu.Get(), 0, bindings[index].words.size() * sizeof(uint32_t));
     }
-    check(list->Close(), "Close command list");
-    ComPtr<ID3D12Fence> fence;
-    check(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)), "CreateFence");
-    std::unique_ptr<void, CloseEvent> event(CreateEventW(nullptr, FALSE, FALSE, nullptr));
-    if (!event)
-        check(HRESULT_FROM_WIN32(GetLastError()), "CreateEventW");
-    check(fence->SetEventOnCompletion(1, event.get()), "SetEventOnCompletion");
+    const auto closed = list->Close();
+    if (FAILED(closed))
+        list.Reset(); // A failed Close leaves the list permanently unresettable.
+    check(closed, "Close command list");
+    if (fenceValue == std::numeric_limits<uint64_t>::max() - 1)
+        throw std::runtime_error("D3D12 fence value exhausted");
+    const auto submittedValue = fenceValue + 1;
+    check(fence->SetEventOnCompletion(submittedValue, event.get()), "SetEventOnCompletion");
+    fenceValue = submittedValue;
     ID3D12CommandList* submission[]{list.Get()};
     queue->ExecuteCommandLists(1, submission);
-    const auto signal = queue->Signal(fence.Get(), 1);
+    const auto signal = queue->Signal(fence.Get(), submittedValue);
     if (FAILED(signal))
     {
         // The list was already submitted. Establish a fence or observe device removal
         // before releasing anything the GPU might still be using.
         while (SUCCEEDED(device->GetDeviceRemovedReason()))
         {
-            if (SUCCEEDED(queue->Signal(fence.Get(), 1)))
+            if (SUCCEEDED(queue->Signal(fence.Get(), submittedValue)))
                 break;
             Sleep(1);
         }
     }
     DWORD wait = WAIT_TIMEOUT;
-    while (wait == WAIT_TIMEOUT && SUCCEEDED(device->GetDeviceRemovedReason()))
+    while ((wait == WAIT_TIMEOUT || (wait == WAIT_OBJECT_0 && fence->GetCompletedValue() < submittedValue))
+        && SUCCEEDED(device->GetDeviceRemovedReason()))
         wait = WaitForSingleObject(event.get(), 1000);
     if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT)
     {
-        while (fence->GetCompletedValue() < 1 && SUCCEEDED(device->GetDeviceRemovedReason()))
+        while (fence->GetCompletedValue() < submittedValue && SUCCEEDED(device->GetDeviceRemovedReason()))
             Sleep(1);
         throw std::runtime_error("D3D12 fence wait failed");
     }
