@@ -8,7 +8,7 @@ The maintained tools build and validate the Web host, capture browser evidence, 
 
 ## Mono compiler comparison
 
-`build-mono-study.ps1` freezes current source into a new ignored study directory and builds isolated variants. It requires a separately installed project-local Windows SDK and its matching wasm-tools packs. The scripts target SDK 8.0.425 and runtime packs 8.0.31; `prepare-mono-lto-cache.ps1` additionally expects Emscripten 3.1.34. The default SDK directory is `artifacts/tooling/tmp/dotnet-aot`.
+`build-mono-study.ps1` freezes current source into a new ignored study directory and builds isolated variants. Install the project-local Windows SDK from [the Web SDK pin](../../SpaceBattle.Web/global.json) and its matching wasm-tools packs. `prepare-mono-lto-cache.ps1` uses the frozen Web project's runtime patch to locate Emscripten 3.1.34. The default SDK directory is `artifacts/tooling/tmp/dotnet-aot`.
 
 | Variant | Native C compilation | AOT bitcode and final link |
 | --- | --- | --- |

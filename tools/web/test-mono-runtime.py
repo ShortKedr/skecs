@@ -22,6 +22,8 @@ class MonoRuntimeTests(unittest.TestCase):
         self.assertNotEqual(sdk.get("allowPrerelease"), True)
         self.assertEqual([item.attrib["Include"] for item in project.findall(".//PackageReference")],
                          ["Microsoft.AspNetCore.Components.WebAssembly"])
+        self.assertRegex(properties["RuntimeFrameworkVersion"], r"^8\.0\.\d+$")
+        self.assertEqual(project.find(".//PackageReference").attrib["Version"], "$(RuntimeFrameworkVersion)")
         self.assertFalse(project.findall(".//PackageDownload"))
 
     def test_retired_build_entry_points_are_absent(self):

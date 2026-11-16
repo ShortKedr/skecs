@@ -5,11 +5,14 @@ $studyPath = [IO.Path]::GetFullPath((Join-Path $root $Study))
 if (-not $studyPath.StartsWith((Join-Path $root "artifacts/tooling/tmp") + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw "Project-local ignored study required" }
 $cache = Join-Path $studyPath "D-private-cache"
 if (Test-Path -LiteralPath $cache) { throw "Refusing to reuse cache" }
+[xml]$project = Get-Content -Raw -LiteralPath (Join-Path $studyPath "source/SpaceBattle.Web/SpaceBattle.Web.csproj")
+$runtimeVersion = $project.SelectSingleNode("/Project/PropertyGroup/RuntimeFrameworkVersion").InnerText
+if ($runtimeVersion -notmatch '^8\.0\.\d+$') { throw "Expected a stable .NET 8 runtime in the frozen Web project" }
 $packs = Join-Path $root "artifacts/tooling/tmp/dotnet-aot/packs"
-$sdk = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Sdk.win-x64/8.0.31/tools"
-$python = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Python.win-x64/8.0.31/tools"
-$node = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Node.win-x64/8.0.31/tools/bin/node.exe"
-$original = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Cache.win-x64/8.0.31/tools/emscripten/cache"
+$sdk = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Sdk.win-x64/$runtimeVersion/tools"
+$python = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Python.win-x64/$runtimeVersion/tools"
+$node = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Node.win-x64/$runtimeVersion/tools/bin/node.exe"
+$original = Join-Path $packs "Microsoft.NET.Runtime.Emscripten.3.1.34.Cache.win-x64/$runtimeVersion/tools/emscripten/cache"
 Copy-Item -LiteralPath $original -Destination $cache -Recurse
 $env:DOTNET_EMSCRIPTEN_LLVM_ROOT = Join-Path $sdk "bin"
 $env:DOTNET_EMSCRIPTEN_BINARYEN_ROOT = $sdk

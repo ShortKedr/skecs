@@ -91,7 +91,7 @@ NuGet-зависимости объявлены в проектах и восс�
 SpaceBattle.Core, SpaceBattle.Simulations и SpaceBattle.Replay,
 а также закреплённые runtime LeoECS Lite, LeoECS Classic, Morpeh, StaticEcs и StaticPack,
 описанные выше,
-.NET/Blazor 8.0.31 (MIT и исходные уведомления о сторонних компонентах) и Lucide 1.55.0
+.NET/Blazor 8.0.34 (MIT и исходные уведомления о сторонних компонентах) и Lucide 1.55.0
 (ISC / MIT для иконок на основе Feather). Статический сайт содержит оригинальные
 лицензии, copyright и provenance изображений в
 [каталоге лицензий](SpaceBattle.Web/wwwroot/licenses/), включая

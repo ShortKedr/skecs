@@ -8,7 +8,7 @@
 
 ## Сравнение компилятора Mono
 
-`build-mono-study.ps1` фиксирует текущие исходники в новом игнорируемом каталоге и собирает изолированные варианты. Нужны отдельно установленные локальный Windows SDK и соответствующие пакеты wasm-tools. Скрипты рассчитаны на SDK 8.0.425 и runtime-пакеты 8.0.31; `prepare-mono-lto-cache.ps1` также ожидает Emscripten 3.1.34. Каталог SDK по умолчанию — `artifacts/tooling/tmp/dotnet-aot`.
+`build-mono-study.ps1` фиксирует текущие исходники в новом игнорируемом каталоге и собирает изолированные варианты. Установите в проекте [закреплённую версию Windows SDK](../../SpaceBattle.Web/global.json) и соответствующие пакеты wasm-tools. `prepare-mono-lto-cache.ps1` использует версию runtime из зафиксированного Web-проекта для поиска Emscripten 3.1.34. Каталог SDK по умолчанию — `artifacts/tooling/tmp/dotnet-aot`.
 
 | Вариант | Компиляция native C | AOT bitcode и финальная линковка |
 | --- | --- | --- |

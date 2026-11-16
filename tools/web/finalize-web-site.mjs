@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const contract = "png-assets-v1";
-export const runtime = "8.0.31";
 export const requiredFiles = Object.freeze([
   "app.js", "styles.css", "_framework/blazor.boot.json", "assets/web-atlases.json",
   "assets/lucide.min.js", "_framework/blazor.webassembly.js",
@@ -102,6 +101,12 @@ function sourceBytes(sources, filename) {
 export function buildFinalizedSite(sources) {
   assert.ok(sources instanceof Map, "Expected a Map of site file buffers");
   const app = utf8(sourceBytes(sources, "app.js"), "app.js");
+  const bootFile = "_framework/blazor.boot.json";
+  const boot = JSON.parse(utf8(sourceBytes(sources, bootFile), bootFile));
+  const runtimeModules = Object.keys(boot.resources?.jsModuleRuntime ?? {});
+  const runtimeMatch = /^dotnet\.runtime\.(\d+\.\d+\.\d+)\.[\w-]+\.js$/.exec(runtimeModules[0] ?? "");
+  assert.ok(runtimeModules.length === 1 && runtimeMatch, "Expected one versioned runtime module in blazor.boot.json");
+  const runtime = runtimeMatch[1];
   const modules = [...new Set(staticImports(app).map(entry => entry.file))].sort();
   assert.ok(!modules.includes("app.js"), "App must not import itself");
   const files = {};

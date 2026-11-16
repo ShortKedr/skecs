@@ -91,6 +91,15 @@ try {
     timeout: 120000,
   });
   assert.ok(await page.evaluate(() => window.spaceBattle?.ready), await page.locator("#load-detail").textContent());
+  const runtime = await page.evaluate(async () => {
+    const response = await fetch(new URL("build-identity.json", document.baseURI));
+    if (!response.ok) throw new Error(`Build identity returned HTTP ${response.status}`);
+    const identity = await response.json();
+    return { identity: identity.runtime, loaded: getDotnetRuntime(0).runtimeBuildInfo.productVersion };
+  });
+  assert.match(runtime.identity, /^\d+\.\d+\.\d+$/);
+  assert.equal(runtime.loaded, runtime.identity, "Loaded Mono version must match the published build identity");
+  results.push({ check: "loaded-runtime-version", passed: true, ...runtime });
   const state = () =>
     page.evaluate(() => JSON.parse(window.render_game_to_text()));
   async function checkEntities() {

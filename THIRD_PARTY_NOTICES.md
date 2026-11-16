@@ -88,7 +88,7 @@ The [WebAssembly demo](SpaceBattle.Web/README.md) distributes compiled SKECS,
 SpaceBattle.Core, SpaceBattle.Simulations and SpaceBattle.Replay,
 along with the pinned LeoECS Lite, LeoECS Classic, Morpeh, StaticEcs and StaticPack
 runtimes described above,
-.NET/Blazor 8.0.31 (MIT and upstream third-party notices), and Lucide 1.55.0
+.NET/Blazor 8.0.34 (MIT and upstream third-party notices), and Lucide 1.55.0
 (ISC / MIT for Feather-derived icons). The static site ships the original license
 texts, copyright notices and artwork provenance in its
 [license directory](SpaceBattle.Web/wwwroot/licenses/), including a

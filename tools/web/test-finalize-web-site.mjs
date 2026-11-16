@@ -25,7 +25,7 @@ function fixtureSources() {
     "collider-debug.js": "export const draw = () => 1;\r\n",
     "web-atlases.js": "export const loadAtlases = () => 2;\r\n",
     "styles.css": "body { color: red; }\r\n",
-    "_framework/blazor.boot.json": '{"resources":{}}\n',
+    "_framework/blazor.boot.json": '{"resources":{"jsModuleRuntime":{"dotnet.runtime.8.0.31.abc.js":"sha256-fixture"}}}\n',
     "assets/web-atlases.json": '{"schema":1,"revision":"png-atlases-v1"}\n',
     "assets/lucide.min.js": "window.lucide = {};\n",
     "_framework/blazor.webassembly.js": "window.Blazor = {};\n",
@@ -89,6 +89,22 @@ test("identity schema uses lowercase string hashes of final app and all existing
   const newer = buildFinalizedSite(changed);
   assert.notEqual(newer.identity.files["observer-camera.js"], result.identity.files["observer-camera.js"]);
   assert.notEqual(newer.identity.files["app.js"], result.identity.files["app.js"]);
+});
+
+test("identity reads the runtime version from the boot manifest and rejects ambiguity", () => {
+  const sources = fixtureSources();
+  const bootFile = "_framework/blazor.boot.json";
+  function setRuntimeModules(names) {
+    const jsModuleRuntime = Object.fromEntries(names.map(name => [name, "sha256-fixture"]));
+    sources.set(bootFile, Buffer.from(JSON.stringify({ resources: { jsModuleRuntime } })));
+  }
+  const runtime = "dotnet.runtime.8.0.34.def.js";
+  setRuntimeModules([runtime]);
+  assert.equal(buildFinalizedSite(sources).identity.runtime, "8.0.34");
+  setRuntimeModules([runtime, "dotnet.runtime.8.0.31.abc.js"]);
+  assert.throws(() => buildFinalizedSite(sources), /Expected one versioned runtime module/);
+  setRuntimeModules([]);
+  assert.throws(() => buildFinalizedSite(sources), /Expected one versioned runtime module/);
 });
 
 test("missing base files or imported modules and unsafe import traversal are rejected before writes", () => {
