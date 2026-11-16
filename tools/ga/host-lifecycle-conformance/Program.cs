@@ -21,15 +21,22 @@ using var visibilityModule = checkVisibility
     : null;
 await ExerciseDevice("webgpu", browserDevice, browserStartup, browserContract, checkVisibility);
 #else
-if (args.Length != 1 || args[0] != "cpu")
+bool endurance = args is ["cpu", "endurance"] or [_, _, _, _, "endurance"];
+int cycles = endurance ? 256 : 1;
+if (args is ["cpu"] or ["cpu", "endurance"])
 {
-    if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
-        !int.TryParse(args[3], out int index) || index < 0)
-        throw new ArgumentException("Usage: HostLifecycleConformance cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index>");
-    await RunDevice(args[0], args[1], args[2], index);
+    for (int cycle = 0; cycle < cycles; cycle++)
+        await Exercise(CpuWorkload, "CPU-only", 127);
+    if (endurance)
+        Console.WriteLine($"endurance=passed fixture=host-lifecycle lane=cpu cycles={cycles}");
 }
 else
-    await Exercise(CpuWorkload, "CPU-only", 127);
+{
+    if (args.Length != (endurance ? 5 : 4) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+        !int.TryParse(args[3], out int index) || index < 0)
+        throw new ArgumentException("Usage: HostLifecycleConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index>) [endurance]");
+    await RunDevice(args[0], args[1], args[2], index, cycles);
+}
 #endif
 
 static DeterministicWorkload<HostInput> CpuWorkload() =>
@@ -56,7 +63,7 @@ static GaSystemRequest ObserverRequest(GaContractIdentity contract) =>
     new(contract with { SystemId = "host-observer" }, [], DeclaredCpuStage: true);
 
 #if !GA_BROWSER_CONFORMANCE
-static async Task RunDevice(string backend, string bundle, string native, int index)
+static async Task RunDevice(string backend, string bundle, string native, int index, int cycles)
 {
     var contract = CreateContract();
     var stem = Path.Combine(bundle, contract.SystemId);
@@ -70,11 +77,38 @@ static async Task RunDevice(string backend, string bundle, string native, int in
     var device = devices[index];
     using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact]), ObserverRequest(contract)],
         [device], allowExperimental: true);
-    await ExerciseDevice(backend, device, startup, contract);
+    var enduranceKernel = cycles > 1 && startup.Succeeded ? (GaPackedKernel)startup.GetPreparedKernel(contract.SystemId) : null;
+    int totalRows = 0, totalSubmissions = 0, totalDrains = 0;
+    for (int cycle = 0; cycle < cycles; cycle++)
+    {
+        var result = await ExerciseDevice(backend, device, startup, contract);
+        totalRows += result.Rows;
+        totalSubmissions += result.Submissions;
+        totalDrains += result.Drains;
+        if (enduranceKernel is not null)
+        {
+            Require(ReferenceEquals(enduranceKernel, startup.GetPreparedKernel(contract.SystemId)),
+                "Host lifecycle replaced the prepared kernel.");
+            await enduranceKernel.WaitForIdleAsync();
+        }
+    }
+    if (enduranceKernel is not null)
+    {
+        startup.Dispose();
+        bool disposed = false;
+        try { await enduranceKernel.WaitForIdleAsync(); }
+        catch (ObjectDisposedException) { disposed = true; }
+        Require(disposed, "Startup disposal left the prepared kernel usable.");
+        Console.WriteLine($"endurance=passed fixture=host-lifecycle lane={backend} cycles={cycles} " +
+            $"deviceRows={totalRows} submissions={totalSubmissions} drains={totalDrains} " +
+            $"completedEvents={cycles * 4 * (HostSession.RowCount + 1)} pendingResets={cycles} faultResets={cycles} " +
+            $"pendingDisposals={cycles} preparedKernelReused=passed preparedKernelDisposal=passed");
+    }
 }
 #endif
 
-static async Task ExerciseDevice(string backend, IGaDevice device, GaStartupResult startup, GaContractIdentity contract,
+static async Task<(int Rows, int Submissions, int Drains)> ExerciseDevice(
+    string backend, IGaDevice device, GaStartupResult startup, GaContractIdentity contract,
     bool checkVisibility = false)
 {
     Require(startup.Succeeded && startup.SelectedPlan == GaSelectedPlan.Mixed &&
@@ -99,6 +133,7 @@ static async Task ExerciseDevice(string backend, IGaDevice device, GaStartupResu
     Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={device.Info.ApiVersion} driver={device.Info.Driver} " +
         $"artifact={startup.Decisions[0].ArtifactId} source={contract.SourceDigest} ir={contract.IrDigest} " +
         $"deviceRows={deviceRows} submissions={batch.Submitted} drains={batch.Discarded} route=mixed faultParity=passed");
+    return (deviceRows, batch.Submitted, batch.Discarded);
 }
 
 static async Task<GaExecutionException> Exercise(Func<DeterministicWorkload<HostInput>> workload, string lane, int chunk,

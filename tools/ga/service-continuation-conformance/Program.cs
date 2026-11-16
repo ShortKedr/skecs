@@ -6,15 +6,22 @@ using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 
-if (args is ["cpu"])
+bool endurance = args is ["cpu", "endurance"] or [_, _, _, _, "endurance"];
+int cycles = endurance ? 512 : 1;
+if (args is ["cpu"] or ["cpu", "endurance"])
 {
-    await ContinuationChecks.RunAsync(CpuPlan, "cpu", 127);
+    for (int cycle = 0; cycle < cycles; cycle++)
+        await ContinuationChecks.RunAsync(CpuPlan, "cpu", 127);
+    if (endurance)
+        Console.WriteLine($"endurance=passed fixture=service-continuation lane=cpu cycles={cycles}");
     return;
 }
 
-if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+if (args.Length != (endurance ? 5 : 4) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Usage: ServiceContinuationConformance cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <bridge> <index>");
+    throw new ArgumentException("Usage: ServiceContinuationConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <bridge> <index>) [endurance]");
+#else
+const int cycles = 1;
 #endif
 
 var contract = new GaContractIdentity(ServiceAdapterRowCodec.SystemId, "service-continuation/1",
@@ -57,6 +64,9 @@ string lane = args[0];
 ContinuationChecks.Require(startup.Succeeded && startup.SelectedPlan == GaSelectedPlan.Mixed &&
     startup.Decisions[0].Route == GaRoute.Gpu && startup.Decisions[1] is { Route: GaRoute.Cpu, Reason: GaStartupReason.DeclaredCpuStage },
     string.Join(", ", startup.Decisions.Select(choice => $"{choice.Route} {choice.Reason} {choice.Detail}")));
+#if !GA_BROWSER_CONFORMANCE
+var enduranceKernel = endurance ? (GaPackedKernel)startup.GetPreparedKernel(contract.SystemId) : null;
+#endif
 
 int deviceRows = 0;
 DeterministicWorkload<IntegrationFrame> GpuPlan(ContactService service) =>
@@ -71,26 +81,54 @@ DeterministicWorkload<IntegrationFrame> GpuPlan(ContactService service) =>
         AddService(group, service);
     });
 
-var cpu = await ContinuationChecks.RunAsync(CpuPlan, "cpu", 127);
+int totalRows = 0, totalTicks = 0, totalRestoredTicks = 0;
+for (int cycle = 0; cycle < cycles; cycle++)
+{
+    deviceRows = 0;
+    var cpu = await ContinuationChecks.RunAsync(CpuPlan, "cpu", 127);
 #if GA_BROWSER_CONFORMANCE
-bool pending = false;
-var gpu = await ContinuationChecks.RunAsync(GpuPlan, lane, 64, () => pending = true);
+    bool pending = false;
+    var gpu = await ContinuationChecks.RunAsync(GpuPlan, lane, 64, () => pending = true);
 #else
-var gpu = await ContinuationChecks.RunAsync(GpuPlan, lane, 64);
+    var gpu = await ContinuationChecks.RunAsync(GpuPlan, lane, 64);
 #endif
-int passRows = gpu.Sum(frame => frame.Rows);
-int replayRows = gpu.Where(frame => frame.Tick > ContinuationChecks.ForkTick).Sum(frame => frame.Rows);
-int witnessRows = gpu[ContinuationChecks.ForkTick].Rows + 2 * gpu[^1].Rows;
-ContinuationChecks.Require(passRows + replayRows + witnessRows == deviceRows,
-    "Device rows differ across continuation and fault witnesses.");
-ContinuationChecks.Compare(cpu, gpu, "CPU and mixed execution");
+    int passRows = gpu.Sum(frame => frame.Rows);
+    int replayRows = gpu.Where(frame => frame.Tick > ContinuationChecks.ForkTick).Sum(frame => frame.Rows);
+    int witnessRows = gpu[ContinuationChecks.ForkTick].Rows + 2 * gpu[^1].Rows;
+    ContinuationChecks.Require(passRows + replayRows + witnessRows == deviceRows,
+        $"Device rows differ across continuation and fault witnesses at cycle {cycle + 1}.");
+    ContinuationChecks.Compare(cpu, gpu, $"CPU and mixed execution at cycle {cycle + 1}");
 #if GA_BROWSER_CONFORMANCE
-ContinuationChecks.Require(pending, "WebGPU ServiceContinuation did not observe a pending device readback.");
-Console.WriteLine("WebGPU ServiceContinuation pendingReadback=passed");
+    ContinuationChecks.Require(pending, "WebGPU ServiceContinuation did not observe a pending device readback.");
+    Console.WriteLine("WebGPU ServiceContinuation pendingReadback=passed");
+#else
+    if (enduranceKernel is not null)
+    {
+        ContinuationChecks.Require(ReferenceEquals(enduranceKernel, startup.GetPreparedKernel(contract.SystemId)),
+            "Continuation replaced the prepared kernel.");
+        await enduranceKernel.WaitForIdleAsync();
+    }
 #endif
-Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} driver={device.Info.Driver} artifact={startup.Decisions[0].ArtifactId} " +
-    $"source={contract.SourceDigest} ir={contract.IrDigest} irVersion={contract.IrVersion} route=mixed deviceRows={deviceRows} " +
-    $"service={serviceContract.SimulationContractId} serviceSchema={ContactService.ExtensionVersion} crossExecutor=passed");
+    totalRows += deviceRows;
+    totalTicks += gpu.Length;
+    totalRestoredTicks += gpu.Length - ContinuationChecks.ForkTick;
+    Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} driver={device.Info.Driver} artifact={startup.Decisions[0].ArtifactId} " +
+        $"source={contract.SourceDigest} ir={contract.IrDigest} irVersion={contract.IrVersion} route=mixed deviceRows={deviceRows} " +
+        $"service={serviceContract.SimulationContractId} serviceSchema={ContactService.ExtensionVersion} crossExecutor=passed");
+}
+#if !GA_BROWSER_CONFORMANCE
+if (enduranceKernel is not null)
+{
+    startup.Dispose();
+    bool disposed = false;
+    try { await enduranceKernel.WaitForIdleAsync(); }
+    catch (ObjectDisposedException) { disposed = true; }
+    ContinuationChecks.Require(disposed, "Startup disposal left the prepared kernel usable.");
+    Console.WriteLine($"endurance=passed fixture=service-continuation lane={lane} cycles={cycles} " +
+        $"ticks={totalTicks} restoredTicks={totalRestoredTicks} deviceRows={totalRows} faultRecoveries={cycles} " +
+        "preparedKernelReused=passed preparedKernelDisposal=passed");
+}
+#endif
 
 static DeterministicWorkload<IntegrationFrame> CpuPlan(ContactService service) =>
     new DeterministicWorkload<IntegrationFrame>().AddCommitGroup(SystemStage.Update, group =>

@@ -13,7 +13,9 @@ param(
     [string]$AngleDirectory,
     [ValidateSet('D3D11', 'Vulkan', 'OpenGl')]
     [string]$AngleRenderer,
-    [string]$AngleDevice
+    [string]$AngleDevice,
+    [ValidateSet('endurance')]
+    [string[]]$Profile
 )
 
 & "$PSScriptRoot/../Run-GameplayConformance.ps1" -FixtureDirectory $PSScriptRoot -SystemId service-continuation -KernelSources ServiceKernel.cs `
