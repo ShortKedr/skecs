@@ -28,9 +28,12 @@ internal sealed class GaBuildRequest
     public string AdapterClass { get; init; } = "GaCpuAdapter";
     public GaPolicy Policy { get; init; } = GaPolicy.Auto;
     public string? SlangAdapter { get; init; }
+    public string? SlangCompilerExecutable { get; init; }
     public string Target { get; init; } = "vulkan";
     public int WorkgroupX { get; init; } = GaSlangModule.ThreadsPerGroup;
     public string? DxcDirectory { get; init; }
+    public string? FxcDirectory { get; init; }
+    public string? SpirvCrossExecutable { get; init; }
     public bool CheckOverflow { get; init; }
     public string LanguageVersion { get; init; } = "12.0";
     public string[] Defines { get; init; } = [];
@@ -59,12 +62,19 @@ internal sealed class GaBuildRequest
             throw new ArgumentException("defines must be C# preprocessor identifiers.");
         if (SlangAdapter is not null)
             ArgumentException.ThrowIfNullOrWhiteSpace(SlangAdapter);
-        if (Target is not ("vulkan" or "d3d12"))
-            throw new ArgumentException("target must be vulkan or d3d12.");
-        if (WorkgroupX < 1 || (Target == "d3d12" && WorkgroupX > GaSlangEmitter.MaximumD3D12WorkgroupX))
+        if (SlangCompilerExecutable is not null)
+            ArgumentException.ThrowIfNullOrWhiteSpace(SlangCompilerExecutable);
+        if (Target is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "webgpu"))
+            throw new ArgumentException("target must be vulkan, d3d12, d3d11, opengl, or webgpu.");
+        if (WorkgroupX < 1 ||
+            ((Target is "d3d12" or "d3d11") && WorkgroupX > GaSlangEmitter.MaximumD3D12WorkgroupX))
             throw new ArgumentException("workgroupX must be positive and within the target's group size limit.");
         if (DxcDirectory is not null)
             ArgumentException.ThrowIfNullOrWhiteSpace(DxcDirectory);
+        if (FxcDirectory is not null)
+            ArgumentException.ThrowIfNullOrWhiteSpace(FxcDirectory);
+        if (SpirvCrossExecutable is not null)
+            ArgumentException.ThrowIfNullOrWhiteSpace(SpirvCrossExecutable);
     }
 
     public CSharpCompilation CreateCompilation(string requestDirectory)

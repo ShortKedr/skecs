@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('vulkan', 'd3d12')]
+    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl')]
     [string[]]$Backend = @('vulkan', 'd3d12'),
     [ValidateRange(0, 2147483647)]
     [int[]]$DeviceIndex = @(0),
@@ -9,7 +9,9 @@ param(
     [string]$ProbeDirectory,
     [switch]$BuildOnly,
     [switch]$VulkanValidation,
-    [switch]$CpuOnly
+    [switch]$CpuOnly,
+    [string]$FxcDirectory,
+    [string]$SpirvCrossExecutable
 )
 
 & "$PSScriptRoot/../Run-GameplayConformance.ps1" -FixtureDirectory $PSScriptRoot -SystemId host-lifecycle -KernelSources HostKernel.cs `

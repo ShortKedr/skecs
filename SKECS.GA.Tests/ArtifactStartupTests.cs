@@ -86,6 +86,35 @@ public sealed class ArtifactStartupTests
     }
 
     [Fact]
+    public void GlslRequiresDesktopProfileAndExplicitStorageNamespace()
+    {
+        var fixture = new Fixture();
+        var manifest = fixture.Manifest with
+        {
+            Toolchain = fixture.Manifest.Toolchain with { Format = GaArtifactFormat.Glsl, TargetProfile = "glsl_430" },
+            DeclaredBindings = fixture.Manifest.DeclaredBindings.Select(binding => binding with
+            {
+                Namespace = GaBindingNamespace.OpenGlShaderStorage, Space = 0, Count = 1
+            }).ToArray()
+        };
+        Assert.NotNull(Load(manifest, "#version 430\nvoid main() {}\n"u8).Bundle);
+        Assert.Null(Load(manifest, "#version 310 es\nvoid main() {}\n"u8).Bundle);
+        Assert.Null(Load(manifest, "#version 430\n\0"u8).Bundle);
+        Assert.Null(Load(manifest with { Toolchain = manifest.Toolchain with { TargetProfile = "glsl_es_310" } },
+            "#version 430\nvoid main() {}\n"u8).Bundle);
+        Assert.Throws<InvalidDataException>(() => (manifest with
+        {
+            DeclaredBindings = [manifest.DeclaredBindings[0] with { Space = 1 }, manifest.DeclaredBindings[1]]
+        }).GetCanonicalBytes());
+
+        GaArtifactCandidate Load(GaArtifactManifest value, ReadOnlySpan<byte> shader)
+        {
+            value = value with { ArtifactDigest = GaArtifactManifest.ComputeDigest(shader) };
+            return GaArtifactCandidate.Load(value.GetCanonicalBytes(), value.GetContentId(), shader, fixture.Reflection, []);
+        }
+    }
+
+    [Fact]
     public void StartupDistinguishesCpuPolicyAndInvalidSelectedArtifact()
     {
         var fixture = new Fixture();

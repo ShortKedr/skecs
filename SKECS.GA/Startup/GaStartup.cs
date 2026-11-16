@@ -37,6 +37,8 @@ public interface IGaDevice
     // Prepare validates target-specific limits and bindings, creates the pipeline and runs its probe.
     // A failure is returned only after releasing any partially created device resources.
     GaPreparation Prepare(GaArtifactBundle artifact);
+
+    ValueTask<GaPreparation> PrepareAsync(GaArtifactBundle artifact) => new(Prepare(artifact));
 }
 
 public sealed class GaArtifactCandidate
@@ -121,7 +123,17 @@ public static class GaStartup
 {
     public static GaStartupResult Select(
         GaPolicy policy, IReadOnlyList<GaSystemRequest> systems, IReadOnlyList<IGaDevice> devices,
-        bool allowExperimental = false)
+        bool allowExperimental = false) =>
+        SelectCore(policy, systems, devices, allowExperimental, asynchronous: false).GetAwaiter().GetResult();
+
+    public static ValueTask<GaStartupResult> SelectAsync(
+        GaPolicy policy, IReadOnlyList<GaSystemRequest> systems, IReadOnlyList<IGaDevice> devices,
+        bool allowExperimental = false) =>
+        SelectCore(policy, systems, devices, allowExperimental, asynchronous: true);
+
+    private static async ValueTask<GaStartupResult> SelectCore(
+        GaPolicy policy, IReadOnlyList<GaSystemRequest> systems, IReadOnlyList<IGaDevice> devices,
+        bool allowExperimental, bool asynchronous)
     {
         ArgumentNullException.ThrowIfNull(systems);
         ArgumentNullException.ThrowIfNull(devices);
@@ -141,7 +153,7 @@ public static class GaStartup
         try
         {
             for (int i = 0; i < systems.Count; i++)
-                decisions[i] = SelectSystem(policy, systems[i], devices, allowExperimental, kernels);
+                decisions[i] = await SelectSystem(policy, systems[i], devices, allowExperimental, asynchronous, kernels);
         }
         catch (Exception error)
         {
@@ -161,9 +173,9 @@ public static class GaStartup
         return new GaStartupResult(policy, decisions, kernels);
     }
 
-    private static GaStartupDecision SelectSystem(
+    private static async ValueTask<GaStartupDecision> SelectSystem(
         GaPolicy policy, GaSystemRequest system, IReadOnlyList<IGaDevice> devices, bool allowExperimental,
-        Dictionary<string, IGaPreparedKernel> kernels)
+        bool asynchronous, Dictionary<string, IGaPreparedKernel> kernels)
     {
         if (system.DeclaredCpuStage)
             return new GaStartupDecision(system.Contract, GaRoute.Cpu, GaStartupReason.DeclaredCpuStage);
@@ -202,7 +214,9 @@ public static class GaStartup
                 string? detail = null;
                 if (reason == GaStartupReason.None)
                 {
-                    var preparation = device.Prepare(bundle);
+                    var preparation = asynchronous
+                        ? await device.PrepareAsync(bundle)
+                        : device.Prepare(bundle);
                     if (preparation.Reason == GaStartupReason.None && preparation.Kernel is { } kernel)
                     {
                         kernels.Add(system.Contract.SystemId, kernel);

@@ -51,7 +51,7 @@ public sealed class GaArtifactBundle
         var ownedSourceMap = sourceMap.ToArray();
         if (ownedArtifact.Length == 0 || GaArtifactManifest.ComputeDigest(ownedArtifact) != normalized.ArtifactDigest)
             throw new InvalidDataException("GA shader artifact is empty or has an unexpected digest.");
-        if (!HasExpectedFormat(normalized.Toolchain.Format, ownedArtifact))
+        if (!HasExpectedFormat(normalized.Toolchain, ownedArtifact))
             throw new InvalidDataException("GA shader artifact does not have the declared target format.");
         if (ownedReflection.Length == 0 || GaArtifactManifest.ComputeDigest(ownedReflection) != normalized.ReflectionDigest)
             throw new InvalidDataException("GA target reflection is empty or has an unexpected digest.");
@@ -61,15 +61,17 @@ public sealed class GaArtifactBundle
         return new GaArtifactBundle(normalized, expectedContentId, ownedArtifact, ownedReflection, ownedSourceMap);
     }
 
-    private static bool HasExpectedFormat(GaArtifactFormat format, ReadOnlySpan<byte> artifact) => format switch
+    private static bool HasExpectedFormat(GaToolchain toolchain, ReadOnlySpan<byte> artifact) => toolchain.Format switch
     {
         GaArtifactFormat.SpirV => artifact.Length >= 20 && artifact.Length % 4 == 0 &&
             BinaryPrimitives.ReadUInt32LittleEndian(artifact) == 0x07230203 &&
             BinaryPrimitives.ReadUInt32LittleEndian(artifact[12..]) != 0 &&
             BinaryPrimitives.ReadUInt32LittleEndian(artifact[16..]) == 0,
-        GaArtifactFormat.Dxil or GaArtifactFormat.Dxbc => IsDirect3DContainer(format, artifact),
+        GaArtifactFormat.Dxil or GaArtifactFormat.Dxbc => IsDirect3DContainer(toolchain.Format, artifact),
         GaArtifactFormat.MetalLibrary => artifact.StartsWith("MTLB"u8),
         GaArtifactFormat.Wgsl => true, // The WebGPU shader module validates the source.
+        GaArtifactFormat.Glsl => toolchain.TargetProfile == "glsl_430" &&
+            artifact.StartsWith("#version 430\n"u8) && artifact.IndexOf((byte)0) < 0,
         _ => false
     };
 

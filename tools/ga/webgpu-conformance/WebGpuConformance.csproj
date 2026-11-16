@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RuntimeFrameworkVersion>8.0.34</RuntimeFrameworkVersion>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <WasmBuildNative>false</WasmBuildNative>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <DefineConstants>$(DefineConstants);GA_BROWSER_CONFORMANCE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="$(RuntimeFrameworkVersion)" />
+    <ProjectReference Include="../../../SKECS.GA.Backend.WebGpu/SKECS.GA.Backend.WebGpu.csproj" />
+    <Compile Include="../movement-conformance/MovementKernel.cs" />
+    <Compile Include="../movement-conformance/Program.cs" />
+    <Compile Include="$(Bundle)/ga-adapter.g.cs" />
+    <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
+    <Content Include="../../../SKECS.GA.Backend.WebGpu/ga-webgpu.mjs" Link="wwwroot/ga-webgpu.mjs" />
+    <Content Include="$(Bundle)/movement.wgsl;$(Bundle)/movement.manifest.json;$(Bundle)/movement.content-id;$(Bundle)/movement.layout;$(Bundle)/movement.source-map.json"
+             Link="wwwroot/bundle/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

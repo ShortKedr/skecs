@@ -1,14 +1,16 @@
 using System.Diagnostics;
 using SKECS;
 using SKECS.GA;
+using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 
 if (args.Length != 1 || args[0] != "cpu")
 {
-    if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12") ||
+    if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
         !int.TryParse(args[3], out int index) || index < 0)
-        throw new ArgumentException("Usage: HostLifecycleConformance cpu | <vulkan|d3d12> <bundle> <native bridge> <device index>");
+        throw new ArgumentException("Usage: HostLifecycleConformance cpu | <vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index>");
     RunDevice(args[0], args[1], args[2], index);
 }
 else
@@ -33,7 +35,8 @@ static void RunDevice(string backend, string bundle, string native, int index)
     Require(contract is { EventCapacity: 1, TickResourceWords: 1 }, "Unexpected host kernel schema.");
     var stem = Path.Combine(bundle, contract.SystemId);
     var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
-        File.ReadAllText(stem + ".content-id").Trim(), File.ReadAllBytes(stem + (backend == "vulkan" ? ".spv" : ".dxil")),
+        File.ReadAllText(stem + ".content-id").Trim(),
+        File.ReadAllBytes(stem + (backend switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
         File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
     var devices = Open(backend, native, out var owner);
     using (owner)
@@ -229,6 +232,18 @@ static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposabl
         var vulkan = GaVulkanBackend.Open(path);
         owner = vulkan;
         return vulkan.Devices;
+    }
+    if (backend == "d3d11")
+    {
+        var d3d11 = GaD3D11Backend.Open(path);
+        owner = d3d11;
+        return d3d11.Devices;
+    }
+    if (backend == "opengl")
+    {
+        var gl = GaOpenGlBackend.Open(path);
+        owner = gl;
+        return gl.Devices;
     }
     var d3d12 = GaD3D12Backend.Open(path);
     owner = d3d12;

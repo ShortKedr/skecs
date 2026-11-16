@@ -53,9 +53,14 @@ public sealed class GaPackedDispatchResult
 public sealed class GaPackedSubmission
 {
     private readonly Task<GaPackedDispatchResult> _completion;
+    private readonly bool _canBlock;
     private int _discarded;
 
-    internal GaPackedSubmission(Task<GaPackedDispatchResult> completion) => _completion = completion;
+    internal GaPackedSubmission(Task<GaPackedDispatchResult> completion, bool canBlock = true)
+    {
+        _completion = completion;
+        _canBlock = canBlock;
+    }
 
     public bool IsCompleted => _completion.IsCompleted;
 
@@ -67,21 +72,31 @@ public sealed class GaPackedSubmission
 
     public GaPackedDispatchResult Drain()
     {
-        var result = _completion.GetAwaiter().GetResult();
+        if (!_canBlock && !IsCompleted)
+            throw new InvalidOperationException("This graphics submission requires asynchronous readback.");
+        return ReadResult(_completion.GetAwaiter().GetResult());
+    }
+
+    public async ValueTask<GaPackedDispatchResult> DrainAsync() =>
+        ReadResult(await _completion.ConfigureAwait(false));
+
+    private GaPackedDispatchResult ReadResult(GaPackedDispatchResult result)
+    {
         if (Volatile.Read(ref _discarded) != 0)
             throw new OperationCanceledException("The graphics submission was drained and discarded.");
         return result;
     }
 
-    // Commands already running on the GPU drain before their result is discarded.
+    // Browser readback can complete after discard. The kernel retains ownership until then.
     public void Discard()
     {
         Interlocked.Exchange(ref _discarded, 1);
-        _completion.GetAwaiter().GetResult();
+        if (_canBlock || IsCompleted)
+            _completion.GetAwaiter().GetResult();
     }
 }
 
-public abstract class GaPackedKernel : IGaPreparedKernel
+public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
 {
     private readonly object _gate = new();
     private readonly uint _workgroupSize;
@@ -91,6 +106,7 @@ public abstract class GaPackedKernel : IGaPreparedKernel
     private readonly int? _bufferRowWords;
     private readonly IReadOnlyList<GaSourceSpan> _sourceMap;
     private Task<GaPackedDispatchResult>? _active;
+    private Task? _releaseTask;
     private bool _disposed;
 
     protected GaPackedKernel(uint workgroupSize, uint maxGroups, uint maxBufferBytes,
@@ -120,6 +136,8 @@ public abstract class GaPackedKernel : IGaPreparedKernel
         _tickResourceWords = tickResourceWords;
         _bufferRowWords = bufferRowWords;
     }
+
+    protected virtual bool SupportsBlockingDispatch => true;
 
     public GaPackedSubmission BeginDispatch(
         ReadOnlySpan<uint> input, int rowWidthWords, CancellationToken cancellationToken = default) =>
@@ -179,41 +197,80 @@ public abstract class GaPackedKernel : IGaPreparedKernel
             snapshot.CopyTo(capturedInput.AsSpan(input.Length));
             var output = new uint[outputLength];
             var faults = new uint[faultLength];
-            var completion = Task.Run(() =>
-            {
-                var deviceStart = measureDevice ? Stopwatch.GetTimestamp() : 0;
-                Dispatch((uint)groups, capturedInput, output, faults);
-                var deviceTicks = measureDevice ? Stopwatch.GetTimestamp() - deviceStart : 0;
-                return new GaPackedDispatchResult(output, faults, _sourceMap, deviceTicks);
-            });
+            bool canBlock = SupportsBlockingDispatch;
+            var completion = canBlock
+                ? Task.Run(() =>
+                {
+                    var deviceStart = measureDevice ? Stopwatch.GetTimestamp() : 0;
+                    Dispatch((uint)groups, capturedInput, output, faults);
+                    var deviceTicks = measureDevice ? Stopwatch.GetTimestamp() - deviceStart : 0;
+                    return new GaPackedDispatchResult(output, faults, _sourceMap, deviceTicks);
+                })
+                : CompleteAsync((uint)groups, capturedInput, output, faults, measureDevice);
             _active = completion;
-            return new GaPackedSubmission(completion);
+            return new GaPackedSubmission(completion, canBlock);
         }
+    }
+
+    private async Task<GaPackedDispatchResult> CompleteAsync(
+        uint groups, uint[] input, uint[] output, uint[] faults, bool measureDevice)
+    {
+        var deviceStart = measureDevice ? Stopwatch.GetTimestamp() : 0;
+        await DispatchAsync(groups, input, output, faults);
+        var deviceTicks = measureDevice ? Stopwatch.GetTimestamp() - deviceStart : 0;
+        return new GaPackedDispatchResult(output, faults, _sourceMap, deviceTicks);
     }
 
     public void Dispose()
     {
+        bool canBlock = SupportsBlockingDispatch;
+        var release = StartRelease(canBlock);
+        if (canBlock || release.IsCompleted)
+            release.GetAwaiter().GetResult();
+    }
+
+    public ValueTask DisposeAsync() => new(StartRelease(SupportsBlockingDispatch));
+
+    private Task StartRelease(bool canBlock)
+    {
         lock (_gate)
         {
             if (_disposed)
-                return;
+                return _releaseTask ?? Task.CompletedTask;
             _disposed = true;
+            var pending = _active;
+            _active = null;
+            if (!canBlock)
+                return _releaseTask = ReleaseAfterReadback(pending);
             try
             {
-                _active?.GetAwaiter().GetResult();
+                pending?.GetAwaiter().GetResult();
             }
-            catch (Exception) when (_active is { IsCompletedSuccessfully: false })
+            catch (Exception)
             {
                 // The submission retains its failure for polling and drain observers.
             }
-            finally
-            {
-                _active = null;
-                Release();
-            }
+            Release();
+            return Task.CompletedTask;
         }
     }
 
+    private async Task ReleaseAfterReadback(Task<GaPackedDispatchResult>? pending)
+    {
+        try
+        {
+            if (pending is not null)
+                await pending;
+        }
+        catch (Exception)
+        {
+            // The submission retains its failure for polling and drain observers.
+        }
+        Release();
+    }
+
     protected abstract void Dispatch(uint groups, uint[] input, uint[] output, uint[] faults);
+    protected virtual Task DispatchAsync(uint groups, uint[] input, uint[] output, uint[] faults) =>
+        throw new NotSupportedException("This graphics kernel requires blocking dispatch.");
     protected abstract void Release();
 }

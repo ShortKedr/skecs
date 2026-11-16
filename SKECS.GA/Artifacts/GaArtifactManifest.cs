@@ -46,7 +46,7 @@ public sealed record GaContractIdentity(
     public bool UsesDomainOrder { get; init; }
 }
 
-public enum GaArtifactFormat { SpirV, Dxil, Dxbc, MetalLibrary, Wgsl }
+public enum GaArtifactFormat { SpirV, Dxil, Dxbc, MetalLibrary, Wgsl, Glsl }
 
 public sealed record GaToolchain(
     string SlangVersion, string DownstreamVersion, [property: JsonRequired] GaArtifactFormat Format, string TargetProfile,
@@ -57,7 +57,7 @@ public enum GaResourceAccess { Read, Write, ReadWrite }
 public enum GaBindingNamespace
 {
     VulkanDescriptor, VulkanPushConstants, D3DConstantBuffer, D3DResource, D3DUnorderedAccess,
-    D3DSampler, MetalBuffer, MetalTexture, MetalSampler, WebGpuBinding
+    D3DSampler, MetalBuffer, MetalTexture, MetalSampler, WebGpuBinding, OpenGlShaderStorage
 }
 
 public sealed record GaLayoutField(
@@ -244,6 +244,8 @@ public sealed record GaArtifactManifest(
             GaArtifactFormat.MetalLibrary => binding.Namespace is GaBindingNamespace.MetalBuffer
                 or GaBindingNamespace.MetalTexture or GaBindingNamespace.MetalSampler,
             GaArtifactFormat.Wgsl => binding.Namespace == GaBindingNamespace.WebGpuBinding,
+            GaArtifactFormat.Glsl => binding.Namespace == GaBindingNamespace.OpenGlShaderStorage &&
+                binding.Space == 0 && binding.Kind == GaResourceKind.StorageBuffer,
             _ => false
         };
         if (!validNamespace)

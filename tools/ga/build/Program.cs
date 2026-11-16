@@ -23,7 +23,10 @@ if (args is ["--help"] or ["-h"])
 
         Optional properties
           sourceRoot (.), adapterClass (GaCpuAdapter), policy (auto), slangAdapter
-          target (vulkan or d3d12), dxcDirectory (for d3d12)
+          target (vulkan, d3d12, d3d11, opengl, or webgpu)
+          dxcDirectory (d3d12), fxcDirectory (d3d11), spirvCrossExecutable (opengl)
+          OpenGL also uses the pinned spirv-opt.exe in the SPIRV-Cross directory.
+          slangCompilerExecutable (webgpu) uses the pinned slangc.exe and adjacent slang.dll.
           workgroupX (64)          One-dimensional GPU workgroup width
           checkOverflow (false), languageVersion (12.0), defines, nullable (disable)
           allowUnsafe (false), assemblyName (GaConsumer), outputKind (dynamicallyLinkedLibrary)
@@ -154,11 +157,12 @@ static async Task<GaBuildOutput> Publish(GaBuildRequest request, string requestD
                     throw new IOException($"Existing GA output directory '{destination}' failed its content checks.", failure);
                 break;
             }
-            catch (Exception failure) when (OperatingSystem.IsWindows() && attempt < 4 && Directory.Exists(staging) &&
+            catch (Exception failure) when (OperatingSystem.IsWindows() && attempt < 6 && Directory.Exists(staging) &&
                 (failure is UnauthorizedAccessException || failure is IOException &&
-                    (failure.HResult & 0xffff) is 32 or 33))
+                    (failure.HResult & 0xffff) is 5 or 32 or 33))
             {
-                await Task.Delay(25 * (attempt + 1));
+                // A just-produced artifact can still be held by a Windows file scanner.
+                await Task.Delay(25 << attempt);
             }
         }
         return new GaBuildOutput(destination, contentId, report);
@@ -179,29 +183,61 @@ static async Task<GpuBuildResult> BuildGpu(
 {
     if (request.Policy == GaPolicy.CpuOnly)
         return new GpuBuildResult(GpuBuildStatus.NotRequested);
-    if (request.SlangAdapter is null || !File.Exists(Path.GetFullPath(request.SlangAdapter, requestDirectory)))
-        return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SlangAdapterMissing",
-            Detail: "Supply the pinned Slang API adapter executable to build a GPU package.");
+    bool webGpu = request.Target == "webgpu";
+    string? executable = webGpu ? request.SlangCompilerExecutable : request.SlangAdapter;
+    string? slang = executable is null ? null : Path.GetFullPath(executable, requestDirectory);
+    if (slang is null || !File.Exists(slang))
+        return webGpu
+            ? new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SlangCompilerMissing",
+                Detail: "Supply the pinned slangc.exe to build a WebGPU package.")
+            : new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SlangAdapterMissing",
+                Detail: "Supply the pinned Slang API adapter executable to build a GPU package.");
+    if (webGpu && !File.Exists(Path.Combine(Path.GetDirectoryName(slang)!, "slang.dll")))
+        return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SlangLibraryMissing",
+            Detail: "Supply the pinned slang.dll beside slangc.exe.");
     if (request.Target == "d3d12" && (request.DxcDirectory is null ||
         !File.Exists(Path.Combine(Path.GetFullPath(request.DxcDirectory, requestDirectory), "dxcompiler.dll"))))
         return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "DxcMissing",
             Detail: "Supply the directory containing the pinned dxcompiler.dll to build a D3D12 package.");
+    if (request.Target == "d3d11" && (request.FxcDirectory is null ||
+        !File.Exists(Path.Combine(Path.GetFullPath(request.FxcDirectory, requestDirectory), "d3dcompiler_47.dll"))))
+        return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "FxcMissing",
+            Detail: "Supply the directory containing the pinned d3dcompiler_47.dll to build a D3D11 package.");
+    string? cross = null;
+    if (request.Target == "opengl")
+    {
+        cross = request.SpirvCrossExecutable is null ? null : Path.GetFullPath(request.SpirvCrossExecutable, requestDirectory);
+        if (cross is null || !File.Exists(cross))
+            return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SpirvCrossMissing",
+                Detail: "Supply the pinned SPIRV-Cross executable to build an OpenGL package.");
+        if (!File.Exists(Path.Combine(Path.GetDirectoryName(cross)!, "spirv-opt.exe")))
+            return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SpirvOptMissing",
+                Detail: "Supply the pinned spirv-opt.exe beside the SPIRV-Cross executable.");
+    }
 
     try
     {
-        string slang = Path.GetFullPath(request.SlangAdapter, requestDirectory);
-        var bundle = request.Target == "d3d12"
-            ? await GaD3D12Packager.Build(program, request.SimulationContractId, slang,
-                Path.GetFullPath(request.DxcDirectory!, requestDirectory), staging, request.ArtifactName, request.WorkgroupX)
-            : await GaVulkanPackager.Build(program, request.SimulationContractId, slang, staging, request.ArtifactName,
-                request.WorkgroupX);
+        var bundle = request.Target switch
+        {
+            "webgpu" => await GaWebGpuPackager.Build(program, request.SimulationContractId, slang,
+                staging, request.ArtifactName, request.WorkgroupX),
+            "opengl" => await GaOpenGlPackager.Build(program, request.SimulationContractId, slang, cross!,
+                staging, request.ArtifactName, request.WorkgroupX),
+            "d3d11" => await GaD3D11Packager.Build(program, request.SimulationContractId, slang,
+                Path.GetFullPath(request.FxcDirectory!, requestDirectory), staging, request.ArtifactName, request.WorkgroupX),
+            "d3d12" => await GaD3D12Packager.Build(program, request.SimulationContractId, slang,
+                Path.GetFullPath(request.DxcDirectory!, requestDirectory), staging, request.ArtifactName, request.WorkgroupX),
+            _ => await GaVulkanPackager.Build(program, request.SimulationContractId, slang, staging, request.ArtifactName,
+                request.WorkgroupX)
+        };
         return new GpuBuildResult(GpuBuildStatus.Emitted, bundle.ContentId, request.ArtifactName + ".manifest.json");
     }
     catch (NotSupportedException unsupported)
     {
         return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "GpuLoweringUnavailable", Detail: unsupported.Message);
     }
-    catch (Exception failure) when (failure is InvalidDataException or Win32Exception or IOException or UnauthorizedAccessException)
+    catch (Exception failure) when (failure is InvalidDataException or Win32Exception or IOException
+        or UnauthorizedAccessException or DecoderFallbackException)
     {
         return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "GpuCompilationFailed",
             Detail: failure.Message.Replace(staging, "<output>", StringComparison.OrdinalIgnoreCase));

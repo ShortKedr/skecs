@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using SKECS;
 using SKECS.GA;
+using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 using SKECS.Numerics;
 
@@ -12,9 +14,9 @@ if (args is ["cpu", var cpuProfile])
     return;
 }
 
-if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12") ||
+if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12> <bundle> <native bridge> <device index> <profile>'.");
+    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index> <profile>'.");
 
 var contract = new GaContractIdentity(CarrierAdapterRowCodec.SystemId, "carrier-capacity/1",
     CarrierAdapterRowCodec.SourceDigest, CarrierAdapterRowCodec.IrDigest, CarrierAdapterRowCodec.ComponentSchemaDigest,
@@ -33,7 +35,7 @@ Require(contract is { EventCapacity: 1, UsesCommands: false, UsesDomainOrder: tr
 string stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] == "vulkan" ? ".spv" : ".dxil")),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 using IDisposable backend = Open(args[0], args[2], out var devices);
 Require(deviceIndex < devices.Count, $"Only {devices.Count} devices are available.");
@@ -261,6 +263,18 @@ static IDisposable Open(string api, string library, out IReadOnlyList<IGaDevice>
         var backend = GaVulkanBackend.Open(library);
         devices = backend.Devices;
         return backend;
+    }
+    if (api == "d3d11")
+    {
+        var d3d11 = GaD3D11Backend.Open(library);
+        devices = d3d11.Devices;
+        return d3d11;
+    }
+    if (api == "opengl")
+    {
+        var gl = GaOpenGlBackend.Open(library);
+        devices = gl.Devices;
+        return gl;
     }
     var d3d12 = GaD3D12Backend.Open(library);
     devices = d3d12.Devices;

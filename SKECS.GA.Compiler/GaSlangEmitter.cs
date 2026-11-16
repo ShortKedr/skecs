@@ -18,6 +18,9 @@ public static class GaSlangEmitter
 
     public static GaSlangModule EmitVulkan(GaProgram program, int workgroupX) => Emit(program, workgroupX, vulkan: true);
 
+    public static GaSlangModule EmitWebGpu(GaProgram program, int workgroupX) =>
+        Emit(program, workgroupX, vulkan: true, webGpu: true);
+
     public static GaSlangModule EmitD3D12(GaProgram program) => EmitD3D12(program, GaSlangModule.ThreadsPerGroup);
 
     public static GaSlangModule EmitD3D12(GaProgram program, int workgroupX)
@@ -26,14 +29,14 @@ public static class GaSlangEmitter
         return Emit(program, workgroupX, vulkan: false);
     }
 
-    private static GaSlangModule Emit(GaProgram program, int workgroupX, bool vulkan)
+    private static GaSlangModule Emit(GaProgram program, int workgroupX, bool vulkan, bool webGpu = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workgroupX);
-        return new Emitter(program).Emit(vulkan, workgroupX);
+        return new Emitter(program, webGpu).Emit(vulkan, workgroupX);
     }
 
-    private sealed class Emitter(GaProgram program)
+    private sealed class Emitter(GaProgram program, bool webGpu)
     {
         private readonly StringBuilder _code = new();
         private readonly List<GaSourceSpan> _sources = new();
@@ -55,6 +58,16 @@ public static class GaSlangEmitter
 
         internal GaSlangModule Emit(bool vulkan, int workgroupX)
         {
+            if (webGpu && (program.UsesSnapshot || program.TickResourceWords != 0 || program.BufferSchema is not null))
+            {
+                // Slang 2025.6.1 does not lower StructuredBuffer.GetDimensions to WGSL.
+                _code.Append("""
+                    uint gaWgslInputLength(StructuredBuffer<uint> words)
+                    {
+                        __intrinsic_asm "arrayLength(&$0)";
+                    }
+                    """.ReplaceLineEndings("\n")).Append("\n\n");
+            }
             if (program.UsesFixed)
                 _code.Append(GaFixedSlangLibrary.Load()).Append('\n');
             if (program.UsesSnapshot)
@@ -146,12 +159,18 @@ public static class GaSlangEmitter
             return new GaSlangModule(_code.ToString(), Array.AsReadOnly(_sources.ToArray()));
         }
 
-        private static string ReadSnapshotLibrary()
+        private string ReadSnapshotLibrary()
         {
             using var stream = typeof(GaSlangEmitter).Assembly.GetManifestResourceStream("SKECS.GA.GaSnapshotV1.slang")
                 ?? throw new InvalidOperationException("Missing Slang implementation of the GA snapshot format.");
             using var source = new StreamReader(stream);
-            return source.ReadToEnd().ReplaceLineEndings("\n");
+            string library = source.ReadToEnd().ReplaceLineEndings("\n");
+            if (!webGpu)
+                return library;
+            const string dimensions = "uint bufferWords, stride;\n    words.GetDimensions(bufferWords, stride);";
+            if (!library.Contains(dimensions, StringComparison.Ordinal))
+                throw new InvalidOperationException("Missing snapshot dimension query for WGSL lowering.");
+            return library.Replace(dimensions, "uint bufferWords = gaWgslInputLength(words);", StringComparison.Ordinal);
         }
 
         private void SnapshotLayout(int stride)
@@ -167,8 +186,7 @@ public static class GaSlangEmitter
             else
             {
                 Line($"uint gaSnapshotStart = 1u + gaInput[0] * {Word(stride)};");
-                Line("uint gaInputWords, gaInputStride;");
-                Line("gaInput.GetDimensions(gaInputWords, gaInputStride);");
+                ReadInputLength();
             }
             Line("uint gaSnapshotWords = gaInputWords - min(gaSnapshotStart, gaInputWords);");
             Line("GaSnapshotViewV1 gaSnapshotView;");
@@ -194,10 +212,20 @@ public static class GaSlangEmitter
             }
         }
 
+        private void ReadInputLength()
+        {
+            if (webGpu)
+                Line("uint gaInputWords = gaWgslInputLength(gaInput);");
+            else
+            {
+                Line("uint gaInputWords, gaInputStride;");
+                Line("gaInput.GetDimensions(gaInputWords, gaInputStride);");
+            }
+        }
+
         private void GuardRowDimensions(int stride)
         {
-            Line("uint gaInputWords, gaInputStride;");
-            Line("gaInput.GetDimensions(gaInputWords, gaInputStride);");
+            ReadInputLength();
             Line($"if (gaInputWords < 1u || gaInput[0] > (gaInputWords - 1u) / {Word(stride)}) return;");
         }
 

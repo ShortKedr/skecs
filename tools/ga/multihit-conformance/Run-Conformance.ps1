@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('vulkan', 'd3d12')]
+    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl')]
     [ValidateNotNullOrEmpty()]
     [string[]]$Backend = @('vulkan', 'd3d12'),
     [ValidateRange(0, 2147483647)]
@@ -13,7 +13,9 @@ param(
     [string]$DotNetSdkVersion = '8.0.428',
     [string]$ProbeDirectory,
     [switch]$VulkanValidation,
-    [switch]$CpuOnly
+    [switch]$CpuOnly,
+    [string]$FxcDirectory,
+    [string]$SpirvCrossExecutable
 )
 
 $PSBoundParameters['Profile'] = $Profile

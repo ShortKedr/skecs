@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('vulkan', 'd3d12')]
+    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl')]
     [string[]]$Backend = @('vulkan', 'd3d12'),
     [ValidateRange(0, 2147483647)]
     [int[]]$DeviceIndex = @(0),
@@ -12,7 +12,9 @@ param(
     [string]$ProbeDirectory,
     [switch]$VulkanValidation,
     [switch]$CpuOnly,
-    [switch]$BuildOnly
+    [switch]$BuildOnly,
+    [string]$FxcDirectory,
+    [string]$SpirvCrossExecutable
 )
 
 $PSBoundParameters['Profile'] = $Profile

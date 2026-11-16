@@ -2,14 +2,16 @@ using System.Diagnostics;
 using System.Text.Json;
 using SKECS;
 using SKECS.GA;
+using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 using SKECS.Numerics;
 
-if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12") ||
+if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0 ||
     args[4] is not ("smoke" or "matrix" or "short" or "long"))
-    throw new ArgumentException("Usage: ShotBurstConformance <vulkan|d3d12> <bundle> <native bridge> <device index> <smoke|matrix|short|long>");
+    throw new ArgumentException("Usage: ShotBurstConformance <vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index> <smoke|matrix|short|long>");
 
 var contract = new GaContractIdentity(ShotBurstAdapterRowCodec.SystemId, "shot-burst-capacity/1",
     ShotBurstAdapterRowCodec.SourceDigest, ShotBurstAdapterRowCodec.IrDigest,
@@ -29,7 +31,7 @@ Check(contract is { EventCapacity: 2, UsesCommands: false, UsesDomainOrder: true
 var stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] == "vulkan" ? ".spv" : ".dxil")),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
 using (owner)
@@ -311,6 +313,18 @@ static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDispos
         var vk = GaVulkanBackend.Open(library);
         owner = vk;
         return vk.Devices;
+    }
+    if (backend == "d3d11")
+    {
+        var d3d11 = GaD3D11Backend.Open(library);
+        owner = d3d11;
+        return d3d11.Devices;
+    }
+    if (backend == "opengl")
+    {
+        var gl = GaOpenGlBackend.Open(library);
+        owner = gl;
+        return gl.Devices;
     }
     var dx = GaD3D12Backend.Open(library);
     owner = dx;

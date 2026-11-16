@@ -1,6 +1,7 @@
 #include "VulkanDispatch.h"
 #include "WordsFile.h"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <charconv>
@@ -21,6 +22,10 @@
 
 #if defined(_WIN32) && !defined(SKECS_GA_PROBE_VULKAN_ONLY)
 #include "D3D12Dispatch.h"
+#include <d3d11shader.h>
+#include <d3dcompiler.h>
+#include <memory>
+#include <type_traits>
 #include <wrl/client.h>
 #define SKECS_GA_PROBE_D3D12 1
 #else
@@ -32,7 +37,7 @@ namespace
 using Slang::ComPtr;
 using slang::ParameterCategory;
 
-enum class Target { Vulkan, D3D12 };
+enum class Target { Vulkan, D3D12, D3D11 };
 
 void require(bool condition, const char* message)
 {
@@ -46,6 +51,43 @@ void checkSlang(SlangResult result, slang::IBlob* diagnostics, const char* messa
         std::cerr.write(static_cast<const char*>(diagnostics->getBufferPointer()), diagnostics->getBufferSize());
     require(SLANG_SUCCEEDED(result), message);
 }
+
+#if SKECS_GA_PROBE_D3D12
+using FxcLibrary = std::unique_ptr<std::remove_pointer_t<HMODULE>, decltype(&FreeLibrary)>;
+
+FxcLibrary loadFxc(const char* directory)
+{
+    auto path = std::filesystem::absolute(directory) / L"d3dcompiler_47.dll";
+    FxcLibrary library(LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32),
+        &FreeLibrary);
+    require(library != nullptr, "could not load d3dcompiler_47.dll from the FXC directory");
+    return library;
+}
+
+template<typename T>
+T fxcExport(const FxcLibrary& library, const char* name)
+{
+    auto entry = std::bit_cast<T>(GetProcAddress(library.get(), name));
+    require(entry != nullptr, "required FXC export missing");
+    return entry;
+}
+
+std::vector<uint32_t> compileDxbc(slang::IBlob* hlsl, const char* entryName, const char* directory)
+{
+    auto library = loadFxc(directory);
+    auto compile = fxcExport<decltype(&D3DCompile)>(library, "D3DCompile");
+    Microsoft::WRL::ComPtr<ID3DBlob> shader, diagnostics;
+    // The optimizing FXC paths fail on generated control flow with structured UAV writes.
+    const auto result = compile(hlsl->getBufferPointer(), hlsl->getBufferSize(), "Kernel.hlsl", nullptr, nullptr,
+        entryName, "cs_5_0", D3DCOMPILE_SKIP_OPTIMIZATION, 0, &shader, &diagnostics);
+    if (diagnostics && diagnostics->GetBufferSize() > 1)
+        std::cerr.write(static_cast<const char*>(diagnostics->GetBufferPointer()), diagnostics->GetBufferSize() - 1);
+    require(SUCCEEDED(result) && shader && shader->GetBufferSize() % sizeof(uint32_t) == 0,
+        "FXC could not compile the Slang HLSL to DXBC");
+    const auto* words = static_cast<const uint32_t*>(shader->GetBufferPointer());
+    return {words, words + shader->GetBufferSize() / sizeof(uint32_t)};
+}
+#endif
 
 slang::VariableLayoutReflection* findField(slang::TypeLayoutReflection* type, const char* name)
 {
@@ -166,29 +208,36 @@ struct Program
 };
 
 Program compileProgram(slang::IGlobalSession* global, const std::string& source, const char* entryName,
-    std::optional<bool> permuted = std::nullopt, Target shaderTarget = Target::Vulkan)
+    std::optional<bool> permuted = std::nullopt, Target shaderTarget = Target::Vulkan,
+    [[maybe_unused]] const char* fxcDirectory = nullptr)
 {
-    const bool d3d12 = shaderTarget == Target::D3D12;
     slang::TargetDesc target;
-    target.format = d3d12 ? SLANG_DXIL : SLANG_SPIRV;
-    target.profile = global->findProfile(d3d12 ? "sm_6_0" : "spirv_1_3");
     slang::CompilerOptionEntry entryOption{slang::CompilerOptionName::VulkanUseEntryPointName,
         {slang::CompilerOptionValueKind::Int, 1}};
-    if (d3d12)
+    switch (shaderTarget)
     {
+    case Target::D3D12:
+        target.format = SLANG_DXIL;
+        target.profile = global->findProfile("sm_6_0");
         global->setDownstreamCompilerForTransition(SLANG_HLSL, SLANG_DXIL, SLANG_PASS_THROUGH_DXC);
-    }
-    else
-    {
+        break;
+    case Target::D3D11:
+        target.format = SLANG_HLSL;
+        target.profile = global->findProfile("sm_5_0");
+        break;
+    case Target::Vulkan:
+        target.format = SLANG_SPIRV;
+        target.profile = global->findProfile("spirv_1_3");
         target.flags = SLANG_TARGET_FLAG_GENERATE_SPIRV_DIRECTLY;
         target.compilerOptionEntries = &entryOption;
         target.compilerOptionEntryCount = 1;
+        break;
     }
     require(target.profile != SLANG_PROFILE_UNKNOWN, "pinned shader profile missing");
 
     slang::PreprocessorMacroDesc defines[]{
         {"PERMUTE_BINDINGS", permuted.value_or(false) ? "1" : "0"},
-        {"PROBE_D3D12", d3d12 ? "1" : "0"}};
+        {"PROBE_D3D12", shaderTarget == Target::D3D12 ? "1" : "0"}};
     slang::SessionDesc description;
     description.targets = &target;
     description.targetCount = 1;
@@ -221,7 +270,15 @@ Program compileProgram(slang::IGlobalSession* global, const std::string& source,
     checkSlang(result, diagnostics, "getEntryPointCode failed");
     result = program.linked->getEntryPointMetadata(0, 0, program.metadata.writeRef(), diagnostics.writeRef());
     checkSlang(result, diagnostics, "getEntryPointMetadata failed");
-    require(code && program.metadata && code->getBufferSize() % sizeof(uint32_t) == 0, "invalid code or absent metadata");
+    require(code && program.metadata, "invalid code or absent metadata");
+#if SKECS_GA_PROBE_D3D12
+    if (shaderTarget == Target::D3D11)
+    {
+        program.code = compileDxbc(code.get(), entryName, fxcDirectory);
+        return program;
+    }
+#endif
+    require(code->getBufferSize() % sizeof(uint32_t) == 0, "invalid binary code");
     const auto words = static_cast<const uint32_t*>(code->getBufferPointer());
     program.code.assign(words, words + code->getBufferSize() / sizeof(uint32_t));
     return program;
@@ -281,17 +338,66 @@ CompiledFixture compileFixture(slang::IGlobalSession* global, const std::string&
     return {std::move(program.code), manifest};
 }
 
-void writeStorageLayout(const std::filesystem::path& path, const Program& program, const char* entryName, Target target)
+#if SKECS_GA_PROBE_D3D12
+struct DxbcStorage
 {
-    const bool d3d12 = target == Target::D3D12;
+    D3D_SHADER_INPUT_TYPE type;
+    uint32_t index;
+    uint32_t count;
+};
+
+void verifyDxbcStorage(const Program& program, const std::array<SlangUInt, 3>& groupSize,
+    std::vector<DxbcStorage> storage, const char* fxcDirectory)
+{
+    auto compiler = loadFxc(fxcDirectory);
+    auto reflect = fxcExport<decltype(&D3DReflect)>(compiler, "D3DReflect");
+    Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+    require(SUCCEEDED(reflect(program.code.data(), program.code.size() * sizeof(uint32_t),
+        IID_PPV_ARGS(&reflection))), "D3DReflect could not read emitted DXBC");
+
+    D3D11_SHADER_DESC description{};
+    require(SUCCEEDED(reflection->GetDesc(&description))
+        && D3D11_SHVER_GET_TYPE(description.Version) == D3D11_SHVER_COMPUTE_SHADER
+        && D3D11_SHVER_GET_MAJOR(description.Version) == 5
+        && D3D11_SHVER_GET_MINOR(description.Version) == 0,
+        "FXC did not emit a compute shader model 5.0 artifact");
+    UINT width = 0, height = 0, depth = 0;
+    reflection->GetThreadGroupSize(&width, &height, &depth);
+    require(groupSize == std::array<SlangUInt, 3>{width, height, depth},
+        "FXC and Slang workgroup reflections disagree");
+    require(description.BoundResources == storage.size(), "FXC and Slang storage usage counts disagree");
+    for (UINT index = 0; index < description.BoundResources; ++index)
+    {
+        D3D11_SHADER_INPUT_BIND_DESC binding{};
+        require(SUCCEEDED(reflection->GetResourceBindingDesc(index, &binding)), "cannot reflect DXBC binding");
+        const auto found = std::find_if(storage.begin(), storage.end(), [&](const DxbcStorage& expected)
+        {
+            return binding.Type == expected.type && binding.BindPoint == expected.index
+                && binding.BindCount == expected.count;
+        });
+        require(found != storage.end(), "FXC and Slang storage reflections disagree");
+        storage.erase(found);
+    }
+}
+#endif
+
+void writeStorageLayout(const std::filesystem::path& path, const Program& program, const char* entryName, Target target,
+    [[maybe_unused]] const char* fxcDirectory)
+{
+    const bool direct3D = target != Target::Vulkan;
     auto layout = program.layout;
     auto entryPoint = layout->getEntryPointByIndex(0);
     require(!layout->getGlobalParamsVarLayout()->getTypeLayout()->getContainerVarLayout()
         && !entryPoint->getTypeLayout()->getContainerVarLayout(), "only explicit global storage bindings are supported");
     std::array<SlangUInt, 3> groupSize{};
     entryPoint->getComputeThreadGroupSize(3, groupSize.data());
-    std::ofstream stream(path);
-    stream << "slang\t2025.6.1\ntarget\t" << (d3d12 ? "dxil\tsm_6_0" : "spirv\tspirv_1_3")
+#if SKECS_GA_PROBE_D3D12
+    std::vector<DxbcStorage> dxbcStorage;
+#endif
+    // The artifact manifest hashes these bytes, including the LF record delimiters.
+    std::ofstream stream(path, std::ios::binary);
+    stream << "slang\t2025.6.1\ntarget\t"
+        << (target == Target::D3D11 ? "dxbc\tsm_5_0" : direct3D ? "dxil\tsm_6_0" : "spirv\tspirv_1_3")
         << "\nentry\t" << entryName << "\nworkgroup\t"
         << groupSize[0] << '\t' << groupSize[1] << '\t' << groupSize[2] << '\n';
     for (unsigned i = 0; i < layout->getParameterCount(); ++i)
@@ -301,7 +407,7 @@ void writeStorageLayout(const std::filesystem::path& path, const Program& progra
         auto resource = type->isArray() ? type->getElementTypeLayout() : type;
         auto access = resource->getResourceAccess();
         auto element = resource->getElementTypeLayout();
-        auto category = d3d12
+        auto category = direct3D
             ? (access == SLANG_RESOURCE_ACCESS_READ ? ParameterCategory::ShaderResource : ParameterCategory::UnorderedAccess)
             : ParameterCategory::DescriptorTableSlot;
         require(variable->getCategory() == category
@@ -310,10 +416,23 @@ void writeStorageLayout(const std::filesystem::path& path, const Program& progra
             && element && element->getType()->getScalarType() == slang::TypeReflection::ScalarType::UInt32,
             "only StructuredBuffer<uint> and RWStructuredBuffer<uint> are supported");
         auto binding = reflectBinding(variable, program.metadata, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, category);
+#if SKECS_GA_PROBE_D3D12
+        if (target == Target::D3D11)
+        {
+            require(binding.set == 0, "D3D11 storage resources must use register space zero");
+            if (binding.used)
+                dxbcStorage.push_back({access == SLANG_RESOURCE_ACCESS_READ ? D3D_SIT_STRUCTURED : D3D_SIT_UAV_RWSTRUCTURED,
+                    binding.index, binding.count});
+        }
+#endif
         stream << "binding\t" << variable->getName() << '\t' << binding.set << '\t' << binding.index << '\t'
             << binding.count << "\tstorage\t" << (access == SLANG_RESOURCE_ACCESS_READ ? "r" : "rw") << '\t'
             << (binding.used ? "used" : "unused") << '\t' << element->getStride() << '\t' << element->getAlignment() << '\n';
     }
+#if SKECS_GA_PROBE_D3D12
+    if (target == Target::D3D11)
+        verifyDxbcStorage(program, groupSize, std::move(dxbcStorage), fxcDirectory);
+#endif
     stream.close();
     require(static_cast<bool>(stream), "could not write reflected layout");
 }
@@ -525,10 +644,12 @@ int main(int argc, char** argv)
 #endif
         }
         const bool buildDxil = argc == 7 && std::string_view(argv[1]) == "compile-dxil";
-        const bool build = buildDxil || (argc == 6 && std::string_view(argv[1]) == "compile");
+        const bool buildDxbc = argc == 7 && std::string_view(argv[1]) == "compile-dxbc";
+        const bool build = buildDxil || buildDxbc || (argc == 6 && std::string_view(argv[1]) == "compile");
         const bool d3d12 = buildDxil || (argc == 5 && std::string_view(argv[1]) == "d3d12");
 #if !SKECS_GA_PROBE_D3D12
         require(!d3d12, "this probe was built without D3D12 support");
+        require(!buildDxbc, "this probe was built without D3D11 support");
 #endif
         require(build || d3d12 || argc == 3,
             "usage: ga-slang-probe <Probe.slang> <out directory>\n"
@@ -536,6 +657,7 @@ int main(int argc, char** argv)
 #if SKECS_GA_PROBE_D3D12
             "       ga-slang-probe d3d12 <Probe.slang> <out directory> <DXC directory>\n"
             "       ga-slang-probe compile-dxil <source.slang> <entry> <out.dxil> <out.layout> <DXC directory>\n"
+            "       ga-slang-probe compile-dxbc <source.slang> <entry> <out.dxbc> <out.layout> <FXC directory>\n"
 #endif
         );
         std::ifstream sourceFile(argv[build || d3d12 ? 2 : 1], std::ios::binary);
@@ -546,11 +668,11 @@ int main(int argc, char** argv)
         require(std::string_view(global->getBuildTagString()) == "2025.6.1", "expected pinned Slang 2025.6.1");
         if (d3d12)
             global->setDownstreamCompilerPath(SLANG_PASS_THROUGH_DXC, argv[buildDxil ? 6 : 4]);
-        auto target = d3d12 ? Target::D3D12 : Target::Vulkan;
+        auto target = buildDxbc ? Target::D3D11 : d3d12 ? Target::D3D12 : Target::Vulkan;
         if (build)
         {
-            auto program = compileProgram(global, source, argv[3], std::nullopt, target);
-            writeStorageLayout(argv[5], program, argv[3], target);
+            auto program = compileProgram(global, source, argv[3], std::nullopt, target, buildDxbc ? argv[6] : nullptr);
+            writeStorageLayout(argv[5], program, argv[3], target, buildDxbc ? argv[6] : nullptr);
             ga::writeWords(argv[4], program.code);
             return 0;
         }

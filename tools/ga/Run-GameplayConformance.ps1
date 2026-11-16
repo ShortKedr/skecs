@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string[]]$KernelSources,
     [Parameter(Mandatory)][string]$AdapterClass,
     [Parameter(Mandatory)][string]$ProjectName,
-    [ValidateSet('vulkan', 'd3d12')]
+    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl')]
     [ValidateNotNullOrEmpty()]
     [string[]]$Backend = @('vulkan', 'd3d12'),
     [ValidateRange(0, 2147483647)]
@@ -18,7 +18,9 @@ param(
     [string[]]$AdditionalPackageSource,
     [switch]$VulkanValidation,
     [switch]$CpuOnly,
-    [switch]$BuildOnly
+    [switch]$BuildOnly,
+    [string]$FxcDirectory,
+    [string]$SpirvCrossExecutable
 )
 
 $ErrorActionPreference = 'Stop'
@@ -30,6 +32,14 @@ $framework = Get-ChildItem "$dotnetRoot/packs/Microsoft.NETCore.App.Ref" -Direct
     Where-Object Name -Match '^8\.0\.\d+$' | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (!$framework) { throw 'The .NET 8 reference pack is required.' }
 if (!$CpuOnly -and !$env:VULKAN_SDK) { throw 'The Windows Vulkan SDK is required for GPU routes.' }
+if (!$CpuOnly -and $Backend -contains 'd3d11') {
+    if (!$FxcDirectory) { throw 'Set FxcDirectory to the pinned Windows SDK x64 compiler directory for D3D11.' }
+    $FxcDirectory = (Resolve-Path -LiteralPath $FxcDirectory).Path
+}
+if (!$CpuOnly -and $Backend -contains 'opengl') {
+    if (!$SpirvCrossExecutable) { throw 'Set SpirvCrossExecutable to the pinned translator for OpenGL.' }
+    $SpirvCrossExecutable = (Resolve-Path -LiteralPath $SpirvCrossExecutable).Path
+}
 
 $artifacts = (New-Item -ItemType Directory -Force "$source/artifacts/ga/$SystemId").FullName
 $build = "$artifacts/build"
@@ -60,7 +70,7 @@ foreach ($setting in $environment.GetEnumerator()) {
 try {
     if (!$CpuOnly) {
         if (!$ProbeDirectory) {
-            & "$PSScriptRoot/probe/build-probe.ps1" -BuildOnly
+            & "$PSScriptRoot/probe/build-probe.ps1" -BuildOnly -FxcDirectory $FxcDirectory -SpirvCrossExecutable $SpirvCrossExecutable
             if ($LASTEXITCODE) { throw 'GA native probe build failed.' }
             $ProbeDirectory = "$source/artifacts/ga/probe"
         }
@@ -104,6 +114,8 @@ try {
             target = if ($CpuOnly) { 'vulkan' } else { $target }
             workgroupX = $WorkgroupX
             dxcDirectory = if ($target -eq 'd3d12') { $nativeTools }
+            fxcDirectory = if ($target -eq 'd3d11') { $FxcDirectory }
+            spirvCrossExecutable = if ($target -eq 'opengl') { $SpirvCrossExecutable }
         } | ConvertTo-Json | Set-Content -LiteralPath $request -Encoding utf8
         $report = & $dotnet "$cli/Ga.Build.dll" $request
         if ($LASTEXITCODE) { throw "GA bundle build failed for $target. $report" }
