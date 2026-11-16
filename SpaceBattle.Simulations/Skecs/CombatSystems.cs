@@ -170,7 +170,7 @@ public sealed partial class Battle
         public void Execute(ref Transform t, ref Motion m, ref Particle p)
         { t.Previous = t.Position; t.Position += m.Velocity * Dt; }
     }
-    private void ResolveHits()
+    private void ResolveHits(IReadOnlyDictionary<EntityKey, bool>? particleExpiry)
     {
         foreach (var contact in physics.Contacts)
         {
@@ -210,7 +210,20 @@ public sealed partial class Battle
             Damage(target, p.Damage * MathF.Max(0.2f, speed / 40), false, true);
             Counters.DebrisHits++; Effect(impact, Vector2.Zero, 0, 2); retired.Add(row.Entity);
         }
-        foreach (var row in particles) if (Store.Get<Particle>(row.Entity).ExpiresTick <= Tick) retired.Add(row.Entity);
+        if (particleExpiry == null)
+        {
+            foreach (var row in particles)
+                if (Store.Get<Particle>(row.Entity).ExpiresTick <= Tick) retired.Add(row.Entity);
+            return;
+        }
+        foreach (var row in particles)
+        {
+            // Hit effects spawned during this tick have no entry in the prepared table.
+            bool expired = particleExpiry.TryGetValue(row.Entity, out bool prepared)
+                ? prepared
+                : Store.Get<Particle>(row.Entity).ExpiresTick <= Tick;
+            if (expired) retired.Add(row.Entity);
+        }
     }
     private bool Outside(Vector2 position) => MathF.Abs(position.X) > Config.ArenaHalfSize * 2.5f || MathF.Abs(position.Y) > Config.ArenaHalfSize * 2.5f;
     public void Damage(EntityKey e, float amount, bool plasma, bool fragment)

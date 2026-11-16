@@ -42,6 +42,22 @@ public sealed partial class Battle
         var query = queryParticleCollector ??= world.Query<Particle>();
         query.ForEach(ref processor);
     }
+
+    internal readonly record struct ParticleExpiryRow(EntityKey Entity, int ExpiresTick);
+
+    internal void CopyParticleExpiryRows(List<ParticleExpiryRow> destination)
+    {
+        destination.Clear();
+        var query = queryParticleCollector ??= world.Query<Particle>();
+        var collector = new ParticleExpiryCollector(destination);
+        query.ForEach(ref collector);
+    }
+
+    private struct ParticleExpiryCollector(List<ParticleExpiryRow> destination) : global::SKECS.IQueryProcessor<Particle>
+    {
+        public void Execute(global::SKECS.Entity entity, ref Particle particle)
+            => destination.Add(new(new(entity.Id, entity.Version), particle.ExpiresTick));
+    }
     private global::SKECS.Query<Identity, Brain, Transform>? queryAiSystem;
     private unsafe void RunAiSystem(ref AiSystem processor)
     {

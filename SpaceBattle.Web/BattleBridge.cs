@@ -29,6 +29,7 @@ public static unsafe partial class BattleBridge
     [JSExport]
     public static void Dispose()
     {
+        ResetGa();
         battle?.Dispose();
         battle = null;
         NativeMemory.Free(buffer);
@@ -60,6 +61,7 @@ public static unsafe partial class BattleBridge
             "high" => 2,
             _ => throw new ArgumentOutOfRangeException(nameof(requestedProfile))
         };
+        ResetGa();
         battle?.Dispose();
         battle = null;
 
@@ -85,6 +87,7 @@ public static unsafe partial class BattleBridge
     public static int Advance(int ticks)
     {
         if (ticks is < 0 or > 600) throw new ArgumentOutOfRangeException(nameof(ticks));
+        if (ticks > 0) gaPrepared = null;
         var current = Current;
         for (int i = 0; i < ticks; i++)
         {
@@ -105,6 +108,7 @@ public static unsafe partial class BattleBridge
     public static double DiagnosticStep(int ticks)
     {
         if (ticks is < 0 or > 120) throw new ArgumentOutOfRangeException(nameof(ticks));
+        if (ticks > 0) gaPrepared = null;
         var started = Stopwatch.GetTimestamp();
         var current = Current;
         for (int i = 0; i < ticks; i++)

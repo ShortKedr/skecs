@@ -1,0 +1,77 @@
+{
+    "parameters": [
+        {
+            "name": "gaInput",
+            "binding": {"kind": "descriptorTableSlot", "index": 0},
+            "type": {
+                "kind": "resource",
+                "baseShape": "structuredBuffer",
+                "resultType": {
+                    "kind": "scalar",
+                    "scalarType": "uint32"
+                }
+            }
+        },
+        {
+            "name": "gaOutput",
+            "binding": {"kind": "descriptorTableSlot", "index": 1},
+            "type": {
+                "kind": "resource",
+                "baseShape": "structuredBuffer",
+                "access": "readWrite",
+                "resultType": {
+                    "kind": "scalar",
+                    "scalarType": "uint32"
+                }
+            }
+        },
+        {
+            "name": "gaFaults",
+            "binding": {"kind": "descriptorTableSlot", "index": 2},
+            "type": {
+                "kind": "resource",
+                "baseShape": "structuredBuffer",
+                "access": "readWrite",
+                "resultType": {
+                    "kind": "scalar",
+                    "scalarType": "uint32"
+                }
+            }
+        }
+    ],
+    "entryPoints": [
+        {
+            "name": "main",
+            "stage": "compute",
+            "parameters": [
+                {
+                    "name": "id",
+                    "semanticName": "SV_DISPATCHTHREADID",
+                    "type": {
+                        "kind": "vector",
+                        "elementCount": 3,
+                        "elementType": {
+                            "kind": "scalar",
+                            "scalarType": "uint32"
+                        }
+                    }
+                }
+            ],
+            "threadGroupSize": [64, 1, 1],
+            "bindings": [
+                {
+                    "name": "gaInput",
+                    "binding": {"kind": "descriptorTableSlot", "index": 0, "used": 1}
+                },
+                {
+                    "name": "gaOutput",
+                    "binding": {"kind": "descriptorTableSlot", "index": 1, "used": 1}
+                },
+                {
+                    "name": "gaFaults",
+                    "binding": {"kind": "descriptorTableSlot", "index": 2, "used": 1}
+                }
+            ]
+        }
+    ]
+}

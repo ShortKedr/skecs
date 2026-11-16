@@ -8,6 +8,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   const query = new URLSearchParams(location.search);
   const frameworks = Object.freeze({
     skecs: { label: "SKECS", exportName: "BattleBridge" },
+    "skecs-ga": { label: "SKECS GA", exportName: "BattleBridge" },
     lite: { label: "LeoEcsLite", exportName: "LeoEcsLiteBattleBridge" },
     classic: { label: "LeoEcs", exportName: "LeoEcsClassicBattleBridge" },
     morpeh: { label: "Morpeh", exportName: "MorpehBattleBridge" },
@@ -21,6 +22,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   const testMode = query.get("test") === "1";
   const diagnosticMode = ["simulation", "render", "minimal", "normal"].includes(query.get("diagnostics")) ? query.get("diagnostics") : null;
   const imageLess = diagnosticMode === "simulation" || diagnosticMode === "minimal";
+  $("framework").querySelector('[value="skecs-ga"]').disabled = Boolean(diagnosticMode);
   let assetState = null, buildIdentity = null, revisions = null;
   let fatalError = null, frameRequest = 0, frameStopped = false, canvasResizes = 0;
   let contextLost = false, frames = 0;
@@ -55,6 +57,10 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       fit: "Fit arena",
       running: "Simulation running",
       paused: "Paused",
+      gaOff: "Particle expiry · GA idle",
+      gaInitializing: "Particle expiry · Starting WebGPU",
+      gaWebgpu: "Particle expiry · WebGPU",
+      gaCpu: "Particle expiry · CPU",
       error: "Simulation unavailable",
       destroyed: "Ship destroyed",
       ships: "ships",
@@ -139,6 +145,10 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       fit: "Вся арена",
       running: "Симуляция идёт",
       paused: "Пауза",
+      gaOff: "Срок жизни частиц · GA ожидает запуска",
+      gaInitializing: "Срок жизни частиц · Запуск WebGPU",
+      gaWebgpu: "Срок жизни частиц · WebGPU",
+      gaCpu: "Срок жизни частиц · CPU",
       error: "Симуляция недоступна",
       destroyed: "Корабль уничтожен",
       ships: "кораблей",
@@ -218,6 +228,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     last = 0,
     busy = false,
     runtimeStarted = false;
+  let gaPending = null;
   let observedPosition = null, observationMain = null, observationTarget = null,
     observationReason = null, observationBounds = null, observationClock = 0, observationSwitches = 0;
   let runtime,
@@ -456,14 +467,63 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     $("colliders").setAttribute("aria-pressed", String(colliderDebug));
     draw();
   }
-  function advance(ticks) {
-    const started = performance.now();
-    accept(bridge.Advance(ticks));
+  function acceptAdvance(pointer, started, ticks) {
+    accept(pointer);
     lastAdvanceMs = performance.now() - started;
     tickCostMs = lastAdvanceMs / ticks;
   }
+  function advance(ticks) {
+    const started = performance.now();
+    acceptAdvance(bridge.Advance(ticks), started, ticks);
+  }
+  const gaLabels = { off: "gaOff", initializing: "gaInitializing", webgpu: "gaWebgpu", cpu: "gaCpu" };
+  function gaStatus() {
+    return ready && framework === "skecs-ga" ? bridge.GaStatus() : "off";
+  }
+  function updateGaStatus() {
+    const label = $("ga-status");
+    const status = gaStatus();
+    label.hidden = !ready || framework !== "skecs-ga";
+    label.dataset.status = status;
+    const detail = t(gaLabels[status]);
+    if (label.textContent !== detail) label.textContent = detail;
+  }
+  function commitGaTick() {
+    gaPending = null;
+    const started = performance.now();
+    acceptAdvance(bridge.CommitGaTick(), started, 1);
+    updateGaStatus();
+  }
+  async function prepareGaTick(manual) {
+    const pending = { prepared: false, reset: null };
+    gaPending = pending;
+    try {
+      const moduleHash = buildIdentity.files["ga-webgpu.js"];
+      if (!/^[a-f0-9]{64}$/.test(moduleHash)) throw new Error("Missing WebGPU module identity. Reload the page.");
+      const moduleUrl = new URL("ga-webgpu.js?v=" + moduleHash, document.baseURI);
+      const preparation = bridge.PrepareGaTick(moduleUrl.href);
+      updateGaStatus();
+      await preparation;
+      pending.prepared = true;
+    } catch (error) {
+      gaPending = null;
+      if (!pending.reset) throw error;
+    }
+    if (pending.reset) {
+      gaPending = null;
+      resetBattle(pending.reset);
+      return false;
+    }
+    if (ready && (manual || (!paused && !document.hidden))) {
+      commitGaTick();
+      if (!manual) rateTicks++;
+    } else {
+      updateGaStatus();
+    }
+    return true;
+  }
   function reset() {
-    if (!ready || busy) return;
+    if (!ready || (busy && !gaPending)) return;
     const seed = Number($("seed").value);
     if (
       $("seed").value === "" ||
@@ -476,9 +536,17 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       return;
     }
     $("seed").setCustomValidity("");
+    const settings = { requested: $("framework").value, profile: $("profile").value, seed };
+    if (gaPending && !gaPending.prepared) {
+      gaPending.reset = settings;
+      return;
+    }
+    gaPending = null;
+    resetBattle(settings);
+  }
+  function resetBattle({ requested, profile, seed }) {
     try {
       stopFollowing();
-      const requested = $("framework").value;
       if (bridge !== bridgeExports[frameworks[requested].exportName]) {
         bridge.Dispose();
         bridge = bridgeExports[frameworks[requested].exportName];
@@ -490,7 +558,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       }
       framework = requested;
       $("framework-name").textContent = frameworks[framework].label;
-      const pointer = bridge.Reset($("profile").value, seed);
+      const pointer = bridge.Reset(profile, seed);
       if (colliderDebug) bridge.DebugColliders(true);
       revisions ||= { revision: bridge.Revision(), fleetRevision: bridge.FleetRevision(), deploymentRevision: bridge.DeploymentRevision(),
         physicsRevision: bridge.PhysicsRevision(), damageRevision: bridge.DamageRevision(), tacticalRevision: bridge.TacticalRevision() };
@@ -820,6 +888,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     ctx.fill();
   }
   function updateUI() {
+    updateGaStatus();
     if (!ready || !snapshot) return;
     $("status").textContent = t(paused ? "paused" : "running");
     $("live-dot").style.background = paused ? "#89979e" : "#55d6e8";
@@ -969,6 +1038,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     $("load-detail").textContent = String(error?.message || error);
     $("retry").hidden = false;
     $("status").textContent = t("error");
+    updateGaStatus();
   }
   async function start() {
     $("load-state").hidden = false;
@@ -1027,23 +1097,27 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     const elapsed = Math.min(100, interval);
     last = now;
     if (ready && !paused && !testMode && !document.hidden && !busy) {
+      if (gaPending?.prepared) {
+        commitGaTick();
+        rateTicks++;
+      }
       accumulator += elapsed * speed;
       const budgetTicks =
         tickCostMs > 0
           ? Math.max(1, Math.floor(catchUpBudgetMs / tickCostMs))
           : 1;
-      const ticks = Math.min(12, budgetTicks, Math.floor(accumulator / tickMs));
+      const ticks = gaPending ? 0 : Math.min(framework === "skecs-ga" ? 1 : 12, budgetTicks, Math.floor(accumulator / tickMs));
       if (ticks) {
-        try {
+        if (framework === "skecs-ga") {
+          void prepareGaTick(false).catch(error => fail(error, "ga-tick"));
+        } else {
           advance(ticks);
           rateTicks += ticks;
-          accumulator -= ticks * tickMs;
-          discardedTicks += Math.max(0, accumulator / tickMs - 12);
-          accumulator = Math.min(accumulator, tickMs * 12);
-        } catch (error) {
-          fail(error);
         }
+        accumulator -= ticks * tickMs;
       }
+      discardedTicks += Math.max(0, accumulator / tickMs - 12);
+      accumulator = Math.min(accumulator, tickMs * 12);
     }
     if (ready && !paused && !testMode && !document.hidden && interval > 100)
       discardedTicks += ((interval - 100) * speed) / tickMs;
@@ -1268,13 +1342,19 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   new ResizeObserver(resize).observe(canvas);
   window.advanceTime = async (ms) => {
     if (!ready) throw new Error("Simulation not ready");
+    if (busy || (gaPending && !gaPending.prepared)) throw new Error("Simulation advancement already pending");
     if (!Number.isFinite(ms) || ms < 0) throw new Error("Invalid duration");
     busy = true;
     try {
       let ticks = Math.round((ms * 60) / 1000);
       while (ticks > 0) {
-        const count = Math.min(600, ticks);
-        advance(count);
+        const count = Math.min(framework === "skecs-ga" ? 1 : 600, ticks);
+        if (framework === "skecs-ga") {
+          if (gaPending?.prepared) commitGaTick();
+          else if (!await prepareGaTick(true)) return snapshot;
+        } else {
+          advance(count);
+        }
         ticks -= count;
         if (ticks > 0) await new Promise((resolve) => setTimeout(resolve, 0));
       }
@@ -1329,6 +1409,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       ready,
       paused,
       framework,
+      ga: { status: gaStatus(), deviceRows: ready && framework === "skecs-ga" ? bridge.GaDeviceRows() : 0 },
       profile: snapshot?.profile || $("profile").value,
       seed: snapshot?.seed ?? Number($("seed").value),
       tick: snapshot?.tick || 0,
@@ -1439,6 +1520,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   localize();
   if (!Object.hasOwn(frameworks, requestedFramework)) { fail(new Error("Unknown framework: " + requestedFramework), "framework"); return; }
   if (query.has("diagnostics") && !diagnosticMode) { fail(new Error("Unknown paused diagnostic mode"), "diagnostics"); return; }
+  if (diagnosticMode && framework === "skecs-ga") { fail(new Error("Paused diagnostics require an ordinary framework mode"), "diagnostics"); return; }
   if (!ctx) { fail(contextError || new Error("Canvas 2D context is unavailable"), "context"); return; }
   resize();
   if (!diagnosticMode && !frameStopped) frameRequest = requestAnimationFrame(frame);

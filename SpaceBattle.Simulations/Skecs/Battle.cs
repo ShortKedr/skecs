@@ -105,7 +105,17 @@ public sealed partial class Battle : IDisposable
         return e;
     }
 
-    public void Step()
+    public void Step() => StepCore(null);
+
+    internal void StepWithParticleExpiry(int tick, IReadOnlyDictionary<EntityKey, bool> expired)
+    {
+        ArgumentNullException.ThrowIfNull(expired);
+        if (tick != unchecked(Tick + 1))
+            throw new InvalidOperationException("Particle expiry must be classified for the next battle tick.");
+        StepCore(expired);
+    }
+
+    private void StepCore(IReadOnlyDictionary<EntityKey, bool>? particleExpiry)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         var start = Stopwatch.GetTimestamp(); var previous = start;
@@ -123,7 +133,7 @@ public sealed partial class Battle : IDisposable
         var carrier = new CarrierSystem { Battle = this }; RunCarrierSystem(ref carrier);
         var docking = new DockSystem { Battle = this }; RunDockSystem(ref docking); Mark(5);
         StepPhysics(); Mark(6);
-        ResolveHits(); Mark(7);
+        ResolveHits(particleExpiry); Mark(7);
         FlushLifecycle(); Store.Commit(); CompactMovingRows(); SyncTurrets(); CollectShips();
         UpdateWarpReinforcements(); Mark(8);
         LastTickMs = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;

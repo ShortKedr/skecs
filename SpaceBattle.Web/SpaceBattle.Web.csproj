@@ -22,6 +22,10 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="$(RuntimeFrameworkVersion)" />
     <ProjectReference Include="../SpaceBattle.Core/SpaceBattle.Core.csproj" />
     <ProjectReference Include="../SpaceBattle.Replay/SpaceBattle.Replay.csproj" />
+    <ProjectReference Include="../SKECS.GA.Backend.WebGpu/SKECS.GA.Backend.WebGpu.csproj" />
+    <Content Include="../SKECS.GA.Backend.WebGpu/ga-webgpu.mjs" Link="wwwroot/ga-webgpu.js" />
+    <EmbeddedResource Include="Ga/Bundle/particle-expiry.*"
+                      LogicalName="SpaceBattle.Web.Ga.Bundle.%(Filename)%(Extension)" />
     <Content Include="../SpaceBattle.Game/Assets/ships-atlas.png" Link="wwwroot/assets/ships-atlas.png" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../SpaceBattle.Game/Assets/ships-atlas.json" Link="wwwroot/assets/ships-atlas.json" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="../SpaceBattle.Game/Assets/guns-atlas.png" Link="wwwroot/assets/guns-atlas.png" CopyToPublishDirectory="PreserveNewest" />

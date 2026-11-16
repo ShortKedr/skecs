@@ -9,7 +9,7 @@ export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.u
 export const contract = "png-assets-v1";
 export const requiredFiles = Object.freeze([
   "app.js", "styles.css", "_framework/blazor.boot.json", "assets/web-atlases.json",
-  "assets/lucide.min.js", "_framework/blazor.webassembly.js",
+  "assets/lucide.min.js", "_framework/blazor.webassembly.js", "ga-webgpu.js",
 ]);
 const indexReferences = Object.freeze({
   "app.js": "src", "styles.css": "href", "assets/lucide.min.js": "src",

@@ -24,6 +24,7 @@ function fixtureSources() {
     "observer-camera.js": 'export const observe = () => "camera";\r\n',
     "collider-debug.js": "export const draw = () => 1;\r\n",
     "web-atlases.js": "export const loadAtlases = () => 2;\r\n",
+    "ga-webgpu.js": "export const openDevice = () => null;\r\n",
     "styles.css": "body { color: red; }\r\n",
     "_framework/blazor.boot.json": '{"resources":{"jsModuleRuntime":{"dotnet.runtime.8.0.31.abc.js":"sha256-fixture"}}}\n',
     "assets/web-atlases.json": '{"schema":1,"revision":"png-atlases-v1"}\n',
@@ -76,7 +77,7 @@ test("identity schema uses lowercase string hashes of final app and all existing
   assert.deepEqual(sources, before);
   assert.deepEqual(Object.keys(result.identity), ["schema", "contract", "files", "runtime"]);
   assert.equal(result.identity.schema, 1); assert.equal(result.identity.contract, "png-assets-v1");
-  assert.equal(result.identity.runtime, "8.0.31"); assert.equal(Object.keys(result.identity.files).length, 9);
+  assert.equal(result.identity.runtime, "8.0.31"); assert.equal(Object.keys(result.identity.files).length, 10);
   for (const [file, hash] of Object.entries(result.identity.files)) {
     assert.match(hash, /^[a-f0-9]{64}$/);
     assert.equal(hash, sha256(file === "app.js" ? result.appBytes : sources.get(file)));
@@ -237,7 +238,7 @@ test("CLI fixture smoke reports app identity after finalization", async () => {
   await withFixture(async ({ site, sources }) => {
     const stdout = execFileSync(process.execPath, [path.join(projectRoot, "tools/web/finalize-web-site.mjs"),
       "--site", site], { cwd: projectRoot, encoding: "utf8" });
-    assert.deepEqual(JSON.parse(stdout), { site, contract: "png-assets-v1", runtime: "8.0.31", files: 9,
+    assert.deepEqual(JSON.parse(stdout), { site, contract: "png-assets-v1", runtime: "8.0.31", files: 10,
       appSha256: buildFinalizedSite(sources).identity.files["app.js"] });
   });
 });

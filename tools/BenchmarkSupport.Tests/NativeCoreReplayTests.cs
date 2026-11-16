@@ -35,11 +35,13 @@ public sealed class NativeCoreReplayTests
             Physics = new PhysicsSettings { CacheContactCandidates = contactCache }
         };
         using var skecs = new SkecsBattle(config);
+        using var skecsPrepared = new SkecsBattle(config);
         using var leoecslite = new SpaceBattle.Simulations.LeoEcsLite.Battle(config);
         using var leoecsclassic = new SpaceBattle.Simulations.LeoEcsClassic.Battle(config);
         using var morpeh = new SpaceBattle.Simulations.Morpeh.Battle(config);
         using var staticecs = new SpaceBattle.Simulations.StaticEcs.Battle(config);
         var skecsHash = new ReplayHash(skecs.CopyReplayState, skecs.Counters, skecs.Tactics);
+        var preparedHash = new ReplayHash(skecsPrepared.CopyReplayState, skecsPrepared.Counters, skecsPrepared.Tactics);
         var leoecsliteHash = new ReplayHash(leoecslite.CopyReplayState, leoecslite.Counters, leoecslite.Tactics);
         var leoecsclassicHash = new ReplayHash(leoecsclassic.CopyReplayState, leoecsclassic.Counters, leoecsclassic.Tactics);
         var morpehHash = new ReplayHash(morpeh.CopyReplayState, morpeh.Counters, morpeh.Tactics);
@@ -49,9 +51,13 @@ public sealed class NativeCoreReplayTests
         var sawContactEnd = false;
         var sawProjectiles = false;
         var sawParticles = false;
+        var sawPreparedExpiry = false;
+        var expiryRows = new List<SkecsBattle.ParticleExpiryRow>();
+        var expired = new Dictionary<EntityKey, bool>();
         for (var tick = 0; tick <= CorpusTicks; tick++)
         {
             var expected = skecsHash.Capture();
+            ReplayHash.RequireMatch("SKECS prepared particle expiry", tick, expected, preparedHash.Capture());
             ReplayHash.RequireMatch("LeoEcsLite", tick, expected, leoecsliteHash.Capture());
             ReplayHash.RequireMatch("LeoEcsClassic", tick, expected, leoecsclassicHash.Capture());
             ReplayHash.RequireMatch("Morpeh", tick, expected, morpehHash.Capture());
@@ -65,6 +71,16 @@ public sealed class NativeCoreReplayTests
             sawProjectiles |= skecs.ProjectileCount > 0;
             sawParticles |= skecs.ParticleCount > 0;
             if (tick == CorpusTicks) break;
+            skecsPrepared.CopyParticleExpiryRows(expiryRows);
+            expired.Clear();
+            int next = tick + 1;
+            foreach (var row in expiryRows)
+            {
+                bool expires = row.ExpiresTick <= next;
+                expired.Add(row.Entity, expires);
+                sawPreparedExpiry |= expires;
+            }
+            skecsPrepared.StepWithParticleExpiry(next, expired);
             skecs.Step();
             leoecslite.Step();
             leoecsclassic.Step();
@@ -73,6 +89,7 @@ public sealed class NativeCoreReplayTests
         }
         Assert.True(sawProjectiles && skecs.Counters.Shots > 0, "The corpus must include live projectiles.");
         Assert.True(sawParticles, "The corpus must include transient effect entities.");
+        Assert.True(sawPreparedExpiry, "The prepared route must retire at least one transient effect.");
         Assert.True(skecs.Counters.Builds > 0 && skecs.Counters.ShipsDestroyed > 0, "The corpus must include ship creation and retirement.");
         Assert.True(skecs.Counters.StructuralAdds > 0 && skecs.Counters.StructuralRemoves > 0, "The corpus must include component lifetime churn.");
         Assert.True(sawContact && sawContactEnd, "The corpus must include contacts starting and ending.");

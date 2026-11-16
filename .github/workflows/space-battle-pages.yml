@@ -118,8 +118,8 @@ jobs:
         run: ./tools/web/test-build-mono-study.ps1
       - name: Validate browser simulation, controls and responsive rendering
         run: node tools/web/check-web.mjs --site artifacts/tooling/tmp/pages-site/demo --base "/${{ github.event.repository.name }}/demo/" --require-mode aot-binary --require-docs
-      - name: Compare every native framework tick against SKECS
-        run: node SpaceBattle.Web/check-frameworks.mjs --site artifacts/tooling/tmp/pages-site/demo --base "/${{ github.event.repository.name }}/demo/" --ticks 1200 --require-mode aot-binary --output artifacts/tooling/tmp/web-framework-checks
+      - name: Compare every framework and GA fallback tick against SKECS
+        run: node SpaceBattle.Web/check-frameworks.mjs --site artifacts/tooling/tmp/pages-site/demo --base "/${{ github.event.repository.name }}/demo/" --ticks 1200 --require-mode aot-binary --disable-gpu --output artifacts/tooling/tmp/web-framework-checks
       - name: Desktop WebKit bounded iOS regression smoke (not device verification)
         run: node tools/web/run-ios-smoke.mjs --site artifacts/tooling/tmp/pages-site/demo --browser webkit --repeats 1 --ticks 24 --faults --retry reload --raf-faults --output artifacts/tooling/tmp/ios-webkit-smoke.json
       - name: Retain browser evidence
