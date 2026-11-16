@@ -15,6 +15,12 @@ using SKECS.Numerics;
 using static MovementFixture;
 
 #if !GA_BROWSER_CONFORMANCE
+if (args.Length > 0 && args[0] == "measure")
+{
+    await MovementMeasurements.Run(args);
+    return;
+}
+
 if (args is ["cpu", var cpuProfile])
 {
     Console.WriteLine($"source={MovementAdapterRowCodec.SourceDigest} ir={MovementAdapterRowCodec.IrDigest} " +

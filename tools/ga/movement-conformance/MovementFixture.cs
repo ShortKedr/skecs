@@ -139,7 +139,7 @@ internal static class MovementFixture
         world.DestroyEntity(world.CreateEntity());
     }
 
-    static void VerifyWorld(World world, MovementOracle oracle, string lane, int tick)
+    internal static void VerifyWorld(World world, MovementOracle oracle, string lane, int tick)
     {
         var snapshot = world.OpenCheckpoint();
         int rows = oracle.Positions.Length;
@@ -171,7 +171,7 @@ internal static class MovementFixture
         }
     }
 
-    static async Task Complete(DeterministicRunner<MovementFrame> runner, int budget, int tick)
+    internal static async Task Complete(DeterministicRunner<MovementFrame> runner, int budget, int tick)
     {
         var timer = Stopwatch.StartNew();
         var spinner = new SpinWait();
