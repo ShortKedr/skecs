@@ -2,7 +2,6 @@
 #include "WordsFile.h"
 
 #include <array>
-#include <bit>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -64,7 +63,7 @@ bool testDevice(uint32_t index, const std::vector<uint32_t>& spirv, bool softwar
         for (uint32_t i = 0; i < rowCount; ++i)
         {
             constexpr std::array boundaries{-7, std::numeric_limits<int32_t>::min(), 7, std::numeric_limits<int32_t>::max()};
-            input.push_back(std::bit_cast<uint32_t>(boundaries[i % boundaries.size()]));
+            input.push_back(static_cast<uint32_t>(boundaries[i % boundaries.size()]));
         }
         auto dispatch = [&](uint32_t groups)
         {
@@ -77,8 +76,8 @@ bool testDevice(uint32_t index, const std::vector<uint32_t>& spirv, bool softwar
         check(dispatch((rowCount + 63) / 64));
         for (uint32_t i = 0; i < rowCount; ++i)
         {
-            const int32_t value = std::bit_cast<int32_t>(input[i + 1]);
-            if (std::bit_cast<int32_t>(quotient[i]) != value / 3 || std::bit_cast<int32_t>(remainder[i]) != value % 3)
+            const int32_t value = static_cast<int32_t>(input[i + 1]);
+            if (static_cast<int32_t>(quotient[i]) != value / 3 || static_cast<int32_t>(remainder[i]) != value % 3)
                 throw std::runtime_error("native persistent pipeline returned an incorrect row");
         }
         if (quotient.back() != sentinel || remainder.back() != sentinel)

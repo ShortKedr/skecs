@@ -4,8 +4,28 @@ using EglBool = unsigned;
 using EglInt = int;
 using EglEnum = unsigned;
 
-constexpr EglInt eglNone = 0x3038, eglVersion = 0x3054;
+constexpr EglInt eglNone = 0x3038, eglVersion = 0x3054, eglExtensions = 0x3055;
 constexpr EglEnum eglOpenGlEsApi = 0x30a0, eglPlatformAngle = 0x3202;
+
+struct AnglePciId
+{
+    uint32_t vendor = 0, device = 0;
+    bool operator==(const AnglePciId&) const = default;
+};
+
+bool hasEglExtension(const char* extensions, std::string_view name)
+{
+    if (!extensions)
+        return false;
+    const std::string_view list(extensions);
+    for (auto pos = list.find(name); pos != std::string_view::npos; pos = list.find(name, pos + name.size()))
+    {
+        const auto end = pos + name.size();
+        if ((pos == 0 || list[pos - 1] == ' ') && (end == list.size() || list[end] == ' '))
+            return true;
+    }
+    return false;
+}
 
 class AngleModule
 {
@@ -77,15 +97,20 @@ public:
     const GlFunction<EglBool> releaseThread = egl.bind<decltype(releaseThread)>("eglReleaseThread");
     const GlFunction<EglInt> error = egl.bind<decltype(error)>("eglGetError");
 
-    AngleDisplay(const std::filesystem::path& directory, uint32_t renderer)
+    AngleDisplay(const std::filesystem::path& directory, uint32_t renderer, AnglePciId pci)
         : gles(directory / L"libGLESv2.dll"), egl(directory / L"libEGL.dll")
     {
         const auto address = extension("eglGetPlatformDisplayEXT");
         require(address != nullptr, "ANGLE eglGetPlatformDisplayEXT unavailable");
         const auto platform = std::bit_cast<GlFunction<EglHandle, EglEnum, void*, const EglInt*>>(address);
         constexpr EglInt backendType = 0x3203, deviceType = 0x3209, hardware = 0x320a;
+        constexpr EglInt deviceIdHigh = 0x34d6, deviceIdLow = 0x34d7;
         constexpr EglInt backends[]{0x3208, 0x3450, 0x320d}; // D3D11, Vulkan, OpenGL
-        const EglInt attributes[]{backendType, backends[renderer], deviceType, hardware, eglNone};
+        if (pci.vendor)
+            require(hasEglExtension(query(nullptr, eglExtensions), "EGL_ANGLE_platform_angle_device_id"),
+                "Explicit ANGLE PCI selection requires EGL_ANGLE_platform_angle_device_id");
+        const EglInt attributes[]{backendType, backends[renderer], deviceType, hardware, pci.vendor ? deviceIdHigh : eglNone,
+            static_cast<EglInt>(pci.vendor), deviceIdLow, static_cast<EglInt>(pci.device), eglNone};
         const auto candidate = platform(eglPlatformAngle, nullptr, attributes);
         check(candidate != nullptr, "eglGetPlatformDisplayEXT(ANGLE hardware)");
         if (!query(candidate, eglVersion))
@@ -105,6 +130,68 @@ public:
     }
 
     EglHandle handle() const { return display; }
+
+    void verifyPciId(uint32_t renderer, AnglePciId requested) const
+    {
+        constexpr EglInt deviceExt = 0x322c;
+        using QueryAttribute = GlFunction<EglBool, EglHandle, EglInt, intptr_t*>;
+        using QueryDeviceString = GlFunction<const char*, EglHandle, EglInt>;
+        const auto displayAttribute = std::bit_cast<QueryAttribute>(extension("eglQueryDisplayAttribEXT"));
+        const auto deviceAttribute = std::bit_cast<QueryAttribute>(extension("eglQueryDeviceAttribEXT"));
+        const auto deviceString = std::bit_cast<QueryDeviceString>(extension("eglQueryDeviceStringEXT"));
+        require(displayAttribute && deviceAttribute && deviceString, "ANGLE EGL device query unavailable");
+        intptr_t rawDevice = 0;
+        check(displayAttribute(display, deviceExt, &rawDevice) != 0, "eglQueryDisplayAttribEXT(EGL_DEVICE_EXT)");
+        require(rawDevice != 0, "ANGLE returned no EGL device for PCI validation");
+        const auto device = reinterpret_cast<EglHandle>(rawDevice);
+        const auto* extensions = deviceString(device, eglExtensions);
+        const auto getAttribute = [&](EglInt attribute, const char* operation)
+        {
+            intptr_t value = 0;
+            check(deviceAttribute(device, attribute, &value) != 0, operation);
+            require(value != 0, operation);
+            return value;
+        };
+
+        AnglePciId actual;
+        if (renderer == 0)
+        {
+            require(hasEglExtension(extensions, "EGL_ANGLE_device_d3d"),
+                "ANGLE D3D11 PCI identity requires EGL_ANGLE_device_d3d");
+            const auto native = getAttribute(0x33a1, "eglQueryDeviceAttribEXT(EGL_D3D11_DEVICE_ANGLE)");
+            const auto d3d = reinterpret_cast<ID3D11Device*>(native);
+            Microsoft::WRL::ComPtr<IDXGIDevice> dxgi;
+            Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+            DXGI_ADAPTER_DESC info{};
+            require(SUCCEEDED(d3d->QueryInterface(IID_PPV_ARGS(&dxgi))) && SUCCEEDED(dxgi->GetAdapter(&adapter))
+                && SUCCEEDED(adapter->GetDesc(&info)), "Could not read the backing ANGLE DXGI adapter identity");
+            actual = {info.VendorId, info.DeviceId};
+        }
+        else
+        {
+            require(hasEglExtension(extensions, "EGL_ANGLE_device_vulkan"),
+                "ANGLE Vulkan PCI identity requires EGL_ANGLE_device_vulkan");
+            const auto instance = reinterpret_cast<VkInstance>(
+                getAttribute(0x34a9, "eglQueryDeviceAttribEXT(EGL_VULKAN_INSTANCE_ANGLE)"));
+            const auto physicalDevice = reinterpret_cast<VkPhysicalDevice>(
+                getAttribute(0x34ab, "eglQueryDeviceAttribEXT(EGL_VULKAN_PHYSICAL_DEVICE_ANGLE)"));
+            const auto getProcAddress = std::bit_cast<PFN_vkGetInstanceProcAddr>(
+                getAttribute(0x34d1, "eglQueryDeviceAttribEXT(EGL_VULKAN_GET_INSTANCE_PROC_ADDR)"));
+            const auto properties = std::bit_cast<PFN_vkGetPhysicalDeviceProperties>(
+                getProcAddress(instance, "vkGetPhysicalDeviceProperties"));
+            require(properties != nullptr, "ANGLE Vulkan device properties function unavailable");
+            VkPhysicalDeviceProperties info{};
+            properties(physicalDevice, &info);
+            actual = {info.vendorID, info.deviceID};
+        }
+        if (actual != requested)
+        {
+            char message[128];
+            std::snprintf(message, sizeof(message), "Requested ANGLE PCI %04x:%04x but ANGLE selected %04x:%04x",
+                requested.vendor, requested.device, actual.vendor, actual.device);
+            throw std::runtime_error(message);
+        }
+    }
 
     PROC find(const char* name) const
     {

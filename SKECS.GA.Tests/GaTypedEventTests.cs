@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using SKECS.Numerics;
@@ -212,6 +213,23 @@ public sealed class GaTypedEventTests
         var uintCodec = GaRowCodecEmitter.Emit(Compile("context.Emit(1u);"));
         string SchemaDigest(string code) => code.Split('\n').Single(line => line.Contains(" ComponentSchemaDigest = "));
         Assert.NotEqual(SchemaDigest(boolCodec), SchemaDigest(uintCodec));
+    }
+
+    [Fact]
+    public void SlangClearsOmittedFieldsAndRecordPaddingWithoutClearingAssignedWords()
+    {
+        var program = Compile("""
+            context.Emit(new Payload { Enabled = true, Tag = 13u, Amount = Fixed.FromRaw(8589934593L) });
+            context.Emit(0xF0000001u);
+            context.Emit(57);
+            """);
+        Assert.Equal(6, program.OutputPayloadWords);
+
+        string slang = GaSlangEmitter.EmitVulkan(program).Source;
+        var clearRanges = Regex.Matches(slang,
+            @"for \(uint (t\d+) = (\d+u); \1 < (\d+u); \+\+\1\)\s+gaOutput\[t\d+ \+ \1\] = 0u;")
+            .Select(loop => (loop.Groups[2].Value, loop.Groups[3].Value));
+        Assert.Equal(new[] { ("6u", "8u"), ("4u", "9u"), ("3u", "9u") }, clearRanges);
     }
 
     [Fact]

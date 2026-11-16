@@ -2,6 +2,9 @@
 
 #include <windows.h>
 #include <GL/gl.h>
+#include <d3d11.h>
+#include <vulkan/vulkan_core.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <array>
@@ -15,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -26,6 +30,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -488,7 +493,8 @@ class ContextWorker
     Job* pending = nullptr;
     bool stopping = false;
 
-    void run(const std::filesystem::path& directory, uint32_t renderer, std::promise<GaOpenGlDevice> ready)
+    void run(const std::filesystem::path& directory, uint32_t renderer, AnglePciId pci,
+        std::promise<GaOpenGlDevice> ready)
     {
         // Native contexts and their surfaces stay on the same worker thread.
         std::optional<AngleDisplay> angle;
@@ -497,7 +503,11 @@ class ContextWorker
         try
         {
             if (!directory.empty())
-                angle.emplace(directory, renderer);
+            {
+                angle.emplace(directory, renderer, pci);
+                if (pci.vendor)
+                    angle->verifyPciId(renderer, pci);
+            }
             const auto* display = angle ? &*angle : nullptr;
             context.open(display);
             gl.emplace(display);
@@ -533,11 +543,11 @@ class ContextWorker
     }
 
 public:
-    ContextWorker(std::filesystem::path directory = {}, uint32_t renderer = 0)
+    ContextWorker(std::filesystem::path directory = {}, uint32_t renderer = 0, AnglePciId pci = {})
     {
         std::promise<GaOpenGlDevice> ready;
         auto initialized = ready.get_future();
-        worker = std::thread(&ContextWorker::run, this, std::move(directory), renderer, std::move(ready));
+        worker = std::thread(&ContextWorker::run, this, std::move(directory), renderer, pci, std::move(ready));
         try
         {
             device = initialized.get();
@@ -581,7 +591,7 @@ class AngleLease
     {
         std::mutex mutex;
         std::filesystem::path directory;
-        std::array<std::weak_ptr<ContextWorker>, 3> workers;
+        std::map<std::tuple<uint32_t, uint32_t, uint32_t>, std::weak_ptr<ContextWorker>> workers;
     };
 
     static Registry& registry()
@@ -593,11 +603,12 @@ class AngleLease
     std::shared_ptr<ContextWorker> worker;
 
 public:
-    AngleLease(const std::filesystem::path& directory, uint32_t renderer)
+    AngleLease(const std::filesystem::path& directory, uint32_t renderer, AnglePciId pci)
     {
         auto& live = registry();
         std::lock_guard lock(live.mutex);
-        if (std::ranges::any_of(live.workers, [](const auto& entry) { return !entry.expired(); }))
+        std::erase_if(live.workers, [](const auto& entry) { return entry.second.expired(); });
+        if (!live.workers.empty())
         {
             std::error_code error;
             require(std::filesystem::equivalent(live.directory, directory, error),
@@ -606,13 +617,20 @@ public:
         else
             live.directory = directory;
 
-        auto& slot = live.workers[renderer];
+        const auto key = std::tuple{renderer, pci.vendor, pci.device};
+        if (renderer == 1)
+        {
+            // The Windows ANGLE Vulkan renderer can crash with two device selections live.
+            const auto active = live.workers.lower_bound({renderer, 0, 0});
+            require(active == live.workers.end() || std::get<0>(active->first) != renderer || active->first == key,
+                "An ANGLE Vulkan display with a different PCI selection is still in use");
+        }
+        auto& slot = live.workers[key];
         worker = slot.lock();
         if (!worker)
         {
-            // ANGLE backends can share one display internally. Keep context and
-            // pipeline operations on one worker across all handles for this renderer.
-            worker = std::make_shared<ContextWorker>(directory, renderer);
+            // Keep each ANGLE display and its pipeline operations on one worker.
+            worker = std::make_shared<ContextWorker>(directory, renderer, pci);
             slot = worker;
         }
     }
@@ -738,6 +756,27 @@ int32_t perform(char* error, uint32_t errorCapacity, Work work) noexcept
     }
     return 1;
 }
+
+int32_t openEsDevice(const wchar_t* angleDirectory, uint32_t renderer, std::optional<AnglePciId> pci,
+    void** context, char* error, uint32_t errorCapacity)
+{
+    return perform(error, errorCapacity, [&]
+    {
+        require(context != nullptr, "OpenGL ES context destination is required");
+        *context = nullptr;
+        require(angleDirectory && renderer <= 2, "OpenGL ES ANGLE directory and renderer are required");
+        if (pci)
+        {
+            require(pci->vendor != 0 && pci->vendor <= UINT16_MAX && pci->device <= UINT16_MAX,
+                "ANGLE PCI selection requires 16-bit IDs and a nonzero vendor ID");
+            require(renderer != 2, "Explicit PCI selection is unavailable for the ANGLE OpenGL renderer");
+        }
+        const std::filesystem::path directory(angleDirectory);
+        require(directory.is_absolute(), "OpenGL ES ANGLE DLL directory must be absolute");
+        auto angle = std::make_shared<AngleLease>(directory, renderer, pci.value_or(AnglePciId{}));
+        *context = new DeviceContext{angle->get().info(), std::move(angle)};
+    });
+}
 }
 
 int32_t skecs_ga_gl_open(void** context, char* error, uint32_t errorCapacity)
@@ -753,16 +792,13 @@ int32_t skecs_ga_gl_open(void** context, char* error, uint32_t errorCapacity)
 int32_t skecs_ga_gl_open_es(const wchar_t* angleDirectory, uint32_t renderer,
     void** context, char* error, uint32_t errorCapacity)
 {
-    return perform(error, errorCapacity, [&]
-    {
-        require(context != nullptr, "OpenGL ES context destination is required");
-        *context = nullptr;
-        require(angleDirectory && renderer <= 2, "OpenGL ES ANGLE directory and renderer are required");
-        const std::filesystem::path directory(angleDirectory);
-        require(directory.is_absolute(), "OpenGL ES ANGLE DLL directory must be absolute");
-        auto angle = std::make_shared<AngleLease>(directory, renderer);
-        *context = new DeviceContext{angle->get().info(), std::move(angle)};
-    });
+    return openEsDevice(angleDirectory, renderer, std::nullopt, context, error, errorCapacity);
+}
+
+int32_t skecs_ga_gl_open_es_device(const wchar_t* angleDirectory, uint32_t renderer, uint32_t vendorId,
+    uint32_t deviceId, void** context, char* error, uint32_t errorCapacity)
+{
+    return openEsDevice(angleDirectory, renderer, AnglePciId{vendorId, deviceId}, context, error, errorCapacity);
 }
 
 void skecs_ga_gl_close(void* context)

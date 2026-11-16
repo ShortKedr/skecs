@@ -150,19 +150,22 @@ GaFixedResult gaFixedDivide(uint2 signedA, uint2 signedB)
     uint2 a = gaWideMagnitude(signedA);
     uint3 numerator = uint3(0u, a);
     uint2 remainder = uint2(0u, 0u);
-    uint4 quotient = uint4(0u, 0u, 0u, 0u);
-    for (int bit = 95; bit >= 0; --bit)
+    uint3 quotient = uint3(0u, 0u, 0u);
+    // Shift whole words instead of indexing vector lanes in the loop.
+    for (uint bit = 0u; bit < 96u; ++bit)
     {
-        uint word = uint(bit) >> 5u;
-        uint offset = uint(bit) & 31u;
-        uint next = (numerator[word] >> offset) & 1u;
+        uint next = numerator.z >> 31u;
+        numerator = uint3(numerator.x << 1u,
+            (numerator.y << 1u) | (numerator.x >> 31u),
+            (numerator.z << 1u) | (numerator.y >> 31u));
         // remainder < divisor <= 2^63, so appending one bit fits in two words.
         remainder = uint2((remainder.x << 1u) | next, (remainder.y << 1u) | (remainder.x >> 31u));
-        if (!gaWideLess(remainder, divisor))
-        {
+        uint subtract = uint(!gaWideLess(remainder, divisor));
+        if (subtract != 0u)
             remainder = gaWideSubtract(remainder, divisor);
-            quotient[word] |= 1u << offset;
-        }
+        quotient = uint3((quotient.x << 1u) | subtract,
+            (quotient.y << 1u) | (quotient.x >> 31u),
+            (quotient.z << 1u) | (quotient.y >> 31u));
     }
-    return gaFixedRounded(quotient, remainder, divisor, gaWideNegative(signedA) != gaWideNegative(signedB));
+    return gaFixedRounded(uint4(quotient, 0u), remainder, divisor, gaWideNegative(signedA) != gaWideNegative(signedB));
 }

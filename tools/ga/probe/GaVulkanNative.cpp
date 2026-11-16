@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -145,9 +144,9 @@ int32_t skecs_ga_vk_probe(void* context, uint32_t index, char* error, uint32_t e
         std::vector<uint32_t> expectedQuotients, expectedRemainders;
         for (auto value : values)
         {
-            input.push_back(std::bit_cast<uint32_t>(value));
-            expectedQuotients.push_back(std::bit_cast<uint32_t>(value / 3));
-            expectedRemainders.push_back(std::bit_cast<uint32_t>(value % 3));
+            input.push_back(static_cast<uint32_t>(value));
+            expectedQuotients.push_back(static_cast<uint32_t>(value / 3));
+            expectedRemainders.push_back(static_cast<uint32_t>(value % 3));
         }
         expectedQuotients.push_back(sentinel);
         expectedRemainders.push_back(sentinel);
@@ -204,7 +203,7 @@ int32_t skecs_ga_vk_dispatch(void* kernel, uint32_t groupsX, const uint32_t* inp
             makeBuffer(state.locations[1], true, {output, output + outputLength}),
             makeBuffer(state.locations[2], true, {faults, faults + faultsLength})};
         state.native.execute(groupsX, {}, buffers);
-        std::ranges::copy(buffers[1].words, output);
-        std::ranges::copy(buffers[2].words, faults);
+        std::copy(buffers[1].words.begin(), buffers[1].words.end(), output);
+        std::copy(buffers[2].words.begin(), buffers[2].words.end(), faults);
     });
 }

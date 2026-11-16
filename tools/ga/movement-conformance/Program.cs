@@ -158,7 +158,7 @@ static void VerifyStartup(GaContractIdentity contract, GaArtifactCandidate artif
 
     string[] unverifiedOptions = device.Format == GaArtifactFormat.Dxbc
         ? ["Slang downstream FXC"]
-        : bundle.Manifest.Toolchain.Options.SkipLast(1).ToArray();
+        : bundle.Manifest.Toolchain.Options.Skip(1).ToArray();
     var unverifiedCompiler = bundle.Manifest with
     {
         Toolchain = bundle.Manifest.Toolchain with { Options = unverifiedOptions }

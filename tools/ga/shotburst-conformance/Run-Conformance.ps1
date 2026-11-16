@@ -15,7 +15,8 @@ param(
     [string]$SpirvCrossExecutable,
     [string]$AngleDirectory,
     [ValidateSet('D3D11', 'Vulkan', 'OpenGl')]
-    [string]$AngleRenderer
+    [string]$AngleRenderer,
+    [string]$AngleDevice
 )
 
 $PSBoundParameters['Profile'] = $Profile

@@ -23,7 +23,9 @@ param(
     [string]$SpirvCrossExecutable,
     [string]$AngleDirectory,
     [ValidateSet('D3D11', 'Vulkan', 'OpenGl')]
-    [string]$AngleRenderer
+    [string]$AngleRenderer,
+    [ValidatePattern('^(?!0000)[0-9A-Fa-f]{4}:[0-9A-Fa-f]{4}\z')]
+    [string]$AngleDevice
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,6 +75,7 @@ $environment = @{
 if ($angle) {
     $environment.SKECS_GA_ANGLE_DIRECTORY = $angle.FullName
     $environment.SKECS_GA_ANGLE_RENDERER = $AngleRenderer
+    $environment.SKECS_GA_ANGLE_DEVICE = if ($AngleDevice) { $AngleDevice } else { $null }
 }
 $previous = @{}
 foreach ($setting in $environment.GetEnumerator()) {

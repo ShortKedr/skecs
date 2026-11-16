@@ -388,7 +388,8 @@ public static class GaSlangEmitter
 
         private void WriteOutput(uint kind, string first, string second)
         {
-            WriteOutputHeader(kind, first, second);
+            string offset = WriteOutputHeader(kind, first, second);
+            ZeroOutputPayload(offset, 0, program.OutputPayloadWords);
             Line("++gaEventCount;");
         }
 
@@ -398,12 +399,6 @@ public static class GaSlangEmitter
             Line($"gaOutput[{offset}] = {Word(kind)};");
             Line($"gaOutput[{offset} + 1u] = {first};");
             Line($"gaOutput[{offset} + 2u] = {second};");
-            if (program.OutputPayloadWords != 0)
-            {
-                string index = Name();
-                Line($"for (uint {index} = {Word(GaOutputRecord.Words)}; {index} < {Word(GaOutputRecord.Words + program.OutputPayloadWords)}; ++{index})");
-                Line($"    gaOutput[{offset} + {index}] = 0u;");
-            }
             if (program.UsesDomainOrder)
             {
                 int domain = _recordWords - GaOutputRecord.DomainWordCount;
@@ -418,19 +413,46 @@ public static class GaSlangEmitter
             IReadOnlyList<GaAdditionValue> values)
         {
             string offset = WriteOutputHeader(kind, first, second);
+            // ANGLE D3D11 on Radeon can drop a payload store that overlaps an earlier clearing loop.
+            var populated = new bool[program.OutputPayloadWords];
             foreach (var value in values)
             {
-                int word = GaOutputRecord.Words + offsets[value.FieldIndex];
+                int payloadWord = offsets[value.FieldIndex];
+                int word = GaOutputRecord.Words + payloadWord;
+                populated[payloadWord] = true;
                 string bits = Value(value.Value);
                 if (value.Value.Type == GaScalar.Fixed)
                 {
+                    populated[payloadWord + 1] = true;
                     Line($"gaOutput[{offset} + {Word(word)}] = {bits}.x;");
                     Line($"gaOutput[{offset} + {Word(word + 1)}] = {bits}.y;");
                 }
                 else
                     Line($"gaOutput[{offset} + {Word(word)}] = {bits};");
             }
+            for (int start = 0; start < populated.Length;)
+            {
+                if (populated[start])
+                {
+                    start++;
+                    continue;
+                }
+                int end = start + 1;
+                while (end < populated.Length && !populated[end])
+                    end++;
+                ZeroOutputPayload(offset, start, end);
+                start = end;
+            }
             Line("++gaEventCount;");
+        }
+
+        private void ZeroOutputPayload(string offset, int start, int end)
+        {
+            if (start == end)
+                return;
+            string index = Name();
+            Line($"for (uint {index} = {Word(GaOutputRecord.Words + start)}; {index} < {Word(GaOutputRecord.Words + end)}; ++{index})");
+            Line($"    gaOutput[{offset} + {index}] = 0u;");
         }
 
         private static string Ticket(int index) => "gaTicket" + index.ToString(CultureInfo.InvariantCulture);

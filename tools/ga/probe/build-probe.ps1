@@ -89,7 +89,7 @@ if ($FxcDirectory) {
 if ($SpirvCrossExecutable) {
     Add-Content -LiteralPath $runner -Encoding ascii -Value @(
         ':opengl',
-        "cl $common /DSKECS_GA_GL_BUILD /I`"$output`" /LD /Fega-opengl-native.dll `"$PSScriptRoot\GaOpenGlNative.cpp`" /link opengl32.lib gdi32.lib user32.lib || exit /b 1",
+        "cl $common /DSKECS_GA_GL_BUILD /I`"$sdk\Include`" /I`"$output`" /LD /Fega-opengl-native.dll `"$PSScriptRoot\GaOpenGlNative.cpp`" /link opengl32.lib gdi32.lib user32.lib || exit /b 1",
         'exit /b 0'
     )
 }

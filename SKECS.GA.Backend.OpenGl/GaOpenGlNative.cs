@@ -61,13 +61,26 @@ internal sealed unsafe class GaOpenGlNative : SafeHandle
         return TakeLease(context, _close);
     }
 
-    internal Lease OpenEsContext(string angleDirectory, GaAngleRenderer renderer)
+    internal Lease OpenEsContext(string angleDirectory, GaAngleRenderer renderer, (ushort Vendor, ushort Device)? pciId)
     {
-        var openEs = (delegate* unmanaged[Cdecl]<char*, uint, nint*, byte*, uint, int>)Export("open_es");
         nint context;
         byte* error = stackalloc byte[ErrorCapacity];
+        int status;
         fixed (char* directory = angleDirectory)
-            Check(openEs(directory, (uint)renderer, &context, error, ErrorCapacity), error, "open the ANGLE OpenGL ES runtime");
+        {
+            if (pciId is { } adapter)
+            {
+                var openDevice = (delegate* unmanaged[Cdecl]<char*, uint, uint, uint, nint*, byte*, uint, int>)
+                    Export("open_es_device");
+                status = openDevice(directory, (uint)renderer, adapter.Vendor, adapter.Device, &context, error, ErrorCapacity);
+            }
+            else
+            {
+                var openEs = (delegate* unmanaged[Cdecl]<char*, uint, nint*, byte*, uint, int>)Export("open_es");
+                status = openEs(directory, (uint)renderer, &context, error, ErrorCapacity);
+            }
+        }
+        Check(status, error, "open the ANGLE OpenGL ES runtime");
         return TakeLease(context, _close);
     }
 

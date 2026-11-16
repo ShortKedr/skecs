@@ -26,6 +26,10 @@ SKECS_GA_GL_API int32_t SKECS_GA_GL_CALL skecs_ga_gl_open(void** context, char* 
 // ANGLE accepts an absolute DLL directory. Renderer 0 is D3D11, 1 is Vulkan, and 2 is OpenGL.
 SKECS_GA_GL_API int32_t SKECS_GA_GL_CALL skecs_ga_gl_open_es(const wchar_t* angleDirectory, uint32_t renderer,
     void** context, char* error, uint32_t errorCapacity);
+// D3D11 and Vulkan validate the backing PCI IDs before returning the context.
+// On ANGLE Vulkan all live contexts and kernels must use the same selection.
+SKECS_GA_GL_API int32_t SKECS_GA_GL_CALL skecs_ga_gl_open_es_device(const wchar_t* angleDirectory, uint32_t renderer,
+    uint32_t vendorId, uint32_t deviceId, void** context, char* error, uint32_t errorCapacity);
 SKECS_GA_GL_API void SKECS_GA_GL_CALL skecs_ga_gl_close(void* context);
 SKECS_GA_GL_API int32_t SKECS_GA_GL_CALL skecs_ga_gl_device_count(void* context, uint32_t* count,
     char* error, uint32_t errorCapacity);

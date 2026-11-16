@@ -65,11 +65,15 @@ internal static class GaOpenGlCompiler
         ValidateToolHash(optimizer, $"SPIRV-Tools {OptimizerVersion}", OptimizerSha256);
         string downstream = $"SPIRV-Tools {OptimizerVersion} sha256:{OptimizerSha256}, SPIRV-Cross {CrossRevision} sha256:{CrossSha256}";
         var (version, esFlag) = GetTranslationOptions(embeddedProfile);
+        string[] options =
+        [
+            "GenerateSpirvDirectly", "VulkanUseEntryPointName", SpirvTarget,
+            embeddedProfile ? "-O without --if-conversion" : "-O", $"--version {version}", esFlag
+        ];
+        if (embeddedProfile)
+            options = [.. options, "SKECS.GA GLSL ES codegen=2"];
         return new GaToolchain("2025.6.1", downstream, GaArtifactFormat.Glsl,
-            embeddedProfile ? "glsl_es_310" : "glsl_430",
-            ["GenerateSpirvDirectly", "VulkanUseEntryPointName", SpirvTarget,
-                embeddedProfile ? "-O without --if-conversion" : "-O", $"--version {version}", esFlag],
-            [], []);
+            embeddedProfile ? "glsl_es_310" : "glsl_430", options, [], []);
     }
 
     private static (string Version, string EsFlag) GetTranslationOptions(bool embeddedProfile) =>

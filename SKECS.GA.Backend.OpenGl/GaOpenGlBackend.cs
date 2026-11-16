@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -17,14 +18,16 @@ public sealed class GaOpenGlBackend : IDisposable
     private readonly GaOpenGlNative _api;
     private readonly GaOpenGlNative.Lease _context;
     private readonly bool _isEs;
+    private readonly bool _requiresCurrentEsCodegen;
     private readonly HashSet<uint> _probed = new();
     private bool _disposed;
 
-    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context, bool isEs)
+    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context, bool isEs, GaAngleRenderer renderer)
     {
         _api = api;
         _context = context;
         _isEs = isEs;
+        _requiresCurrentEsCodegen = isEs && renderer == GaAngleRenderer.D3D11;
         var devices = new IGaDevice[api.GetDeviceCount(context)];
         for (uint i = 0; i < devices.Length; i++)
             devices[i] = new Device(this, i, api.GetDevice(context, i));
@@ -37,11 +40,22 @@ public sealed class GaOpenGlBackend : IDisposable
         OpenCore(nativeLibraryPath, null, default);
 
     public static GaOpenGlBackend OpenEs(string nativeLibraryPath, string angleDirectory, GaAngleRenderer renderer)
+        => OpenEsCore(nativeLibraryPath, angleDirectory, renderer, null);
+
+    public static GaOpenGlBackend OpenEs(string nativeLibraryPath, string angleDirectory, GaAngleRenderer renderer,
+        ushort vendorId, ushort deviceId)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(vendorId);
+        return OpenEsCore(nativeLibraryPath, angleDirectory, renderer, (vendorId, deviceId));
+    }
+
+    private static GaOpenGlBackend OpenEsCore(string nativeLibraryPath, string angleDirectory, GaAngleRenderer renderer,
+        (ushort Vendor, ushort Device)? pciId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(angleDirectory);
         if (!Enum.IsDefined(renderer))
             throw new ArgumentOutOfRangeException(nameof(renderer));
-        return OpenCore(nativeLibraryPath, Path.GetFullPath(angleDirectory), renderer);
+        return OpenCore(nativeLibraryPath, Path.GetFullPath(angleDirectory), renderer, pciId);
     }
 
     public static GaOpenGlBackend OpenEsFromEnvironment(string nativeLibraryPath)
@@ -56,10 +70,19 @@ public sealed class GaOpenGlBackend : IDisposable
             "opengl" => GaAngleRenderer.OpenGl,
             _ => throw new InvalidOperationException("Set SKECS_GA_ANGLE_RENDERER to D3D11, Vulkan or OpenGl.")
         };
-        return OpenEs(nativeLibraryPath, directory, renderer);
+        var device = Environment.GetEnvironmentVariable("SKECS_GA_ANGLE_DEVICE");
+        if (string.IsNullOrEmpty(device))
+            return OpenEs(nativeLibraryPath, directory, renderer);
+        if (device.Length != 9 || device[4] != ':' ||
+            !ushort.TryParse(device.AsSpan(0, 4), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var vendorId) ||
+            !ushort.TryParse(device.AsSpan(5, 4), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var deviceId) ||
+            vendorId == 0)
+            throw new InvalidOperationException("SKECS_GA_ANGLE_DEVICE requires a PCI ID in VVVV:DDDD hexadecimal form with a nonzero vendor.");
+        return OpenEs(nativeLibraryPath, directory, renderer, vendorId, deviceId);
     }
 
-    private static GaOpenGlBackend OpenCore(string nativeLibraryPath, string? angleDirectory, GaAngleRenderer renderer)
+    private static GaOpenGlBackend OpenCore(string nativeLibraryPath, string? angleDirectory, GaAngleRenderer renderer,
+        (ushort Vendor, ushort Device)? pciId = null)
     {
         if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
             throw new PlatformNotSupportedException("The GA OpenGL adapters require a Windows x64 process.");
@@ -68,8 +91,8 @@ public sealed class GaOpenGlBackend : IDisposable
         GaOpenGlNative.Lease? context = null;
         try
         {
-            context = angleDirectory is null ? api.OpenContext() : api.OpenEsContext(angleDirectory, renderer);
-            return new GaOpenGlBackend(api, context, angleDirectory is not null);
+            context = angleDirectory is null ? api.OpenContext() : api.OpenEsContext(angleDirectory, renderer, pciId);
+            return new GaOpenGlBackend(api, context, angleDirectory is not null, renderer);
         }
         catch
         {
@@ -123,17 +146,24 @@ public sealed class GaOpenGlBackend : IDisposable
                 return new(null, GaStartupReason.IncompatibleManifest,
                     "The graphics context requires a matching one-dimensional GLSL GA kernel.");
 
+            var options = manifest.Toolchain.Options;
+            bool currentEsCodegen = _isEs && options is [_, _, _, _, _, _, "SKECS.GA GLSL ES codegen=2"];
             if (manifest.Toolchain is not
                 {
                     SlangVersion: "2025.6.1",
                     DownstreamVersion: PinnedToolchain,
-                    Options: ["GenerateSpirvDirectly", "VulkanUseEntryPointName", "--target-env=vulkan1.1", var optimization, var version, var dialect],
+                    Options: ["GenerateSpirvDirectly", "VulkanUseEntryPointName", "--target-env=vulkan1.1", var optimization, var version, var dialect, ..],
                     Defines.Count: 0,
                     Specializations.Count: 0
                 } || optimization != (_isEs ? "-O without --if-conversion" : "-O") ||
-                version != (_isEs ? "--version 310" : "--version 430") || dialect != (_isEs ? "--es" : "--no-es"))
+                version != (_isEs ? "--version 310" : "--version 430") || dialect != (_isEs ? "--es" : "--no-es") ||
+                (options.Count != 6 && !currentEsCodegen))
                 return new(null, GaStartupReason.IncompatibleManifest,
                     "OpenGL requires the verified Slang, SPIRV-Tools and SPIRV-Cross compiler options.");
+
+            if (_requiresCurrentEsCodegen && !currentEsCodegen)
+                return new(null, GaStartupReason.IncompatibleManifest,
+                    "Rebuild this GLSL ES bundle with the current Ga.Build for correct Fixed and typed event output on ANGLE D3D11.");
 
             if (!device.SupportsCompute(_isEs) || requirements.RequiredFeatures.Count != 0)
                 return new(null, GaStartupReason.MissingCapability,
