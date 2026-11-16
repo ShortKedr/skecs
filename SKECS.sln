@@ -97,6 +97,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SKECS.GA", "SKECS.GA\SKECS.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AdaptivePlacementFixture", "tools\AdaptivePlacementFixture\AdaptivePlacementFixture.csproj", "{361C9644-A345-41E0-BB98-11C5F243451A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AdaptivePlacementFixture.LegacyCoverage", "tools\AdaptivePlacementFixture.LegacyCoverage\AdaptivePlacementFixture.LegacyCoverage.csproj", "{36B49978-0DEE-46DF-9304-1DD797617723}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -635,6 +637,18 @@ Global
 		{361C9644-A345-41E0-BB98-11C5F243451A}.Release|x64.Build.0 = Release|Any CPU
 		{361C9644-A345-41E0-BB98-11C5F243451A}.Release|x86.ActiveCfg = Release|Any CPU
 		{361C9644-A345-41E0-BB98-11C5F243451A}.Release|x86.Build.0 = Release|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Debug|x64.Build.0 = Debug|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Debug|x86.Build.0 = Debug|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Release|Any CPU.Build.0 = Release|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Release|x64.ActiveCfg = Release|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Release|x64.Build.0 = Release|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Release|x86.ActiveCfg = Release|Any CPU
+		{36B49978-0DEE-46DF-9304-1DD797617723}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -674,5 +688,6 @@ Global
 		{6066D8E7-0638-4B5F-AE26-8EFEA02724E7} = {81BEDDD1-2F8E-4A45-9AA5-A655B63F4D53}
 		{596CFA5F-8FAA-416D-A85B-4E6AD04D7EE0} = {81BEDDD1-2F8E-4A45-9AA5-A655B63F4D53}
 		{361C9644-A345-41E0-BB98-11C5F243451A} = {81BEDDD1-2F8E-4A45-9AA5-A655B63F4D53}
+		{36B49978-0DEE-46DF-9304-1DD797617723} = {81BEDDD1-2F8E-4A45-9AA5-A655B63F4D53}
 	EndGlobalSection
 EndGlobal
