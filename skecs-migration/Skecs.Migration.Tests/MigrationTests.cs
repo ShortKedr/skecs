@@ -103,7 +103,7 @@ public sealed class MigrationTests
         const string before = """
             <?xml version="1.0"?>
             <Project><ItemGroup>
-              <PackageReference Include="ShortKedr.SECS" Version="0.1.0" />
+              <PackageReference Include="shortkedr.secs" Version="0.1.0" />
               <PackageReference Include='ShortKedr.SECS'><Version>0.1.0</Version></PackageReference>
               <PackageReference Include="ShortKedr.SECS" />
               <PackageReference Update="ShortKedr.SECS" VersionOverride="0.1.0" />
@@ -185,6 +185,85 @@ public sealed class MigrationTests
     {
         Assert.ThrowsAny<Exception>(() => MigrationEngine.RewriteProject(
             "<Project><PackageVersion Include=\"ShortKedr.SECS\" /></Project>"));
+    }
+
+    [Fact]
+    public void OnlyUnityPrecompiledSecsDllReferencesChange()
+    {
+        using var fixture = new ConsumerFixture();
+        const string before = """
+            {
+              "name": "SECS",
+              "references": ["SECS"],
+              "description": "До обновления: SECS.dll",
+              "custom": {"precompiledReferences": ["SECS.dll"]},
+              "overrideReferences": true,
+              "precompiledReferences": ["Other.dll", "SECS.dll", "Other.SECS.dll"]
+            }
+            """;
+        const string expected = """
+            {
+              "name": "SECS",
+              "references": ["SECS"],
+              "description": "До обновления: SECS.dll",
+              "custom": {"precompiledReferences": ["SECS.dll"]},
+              "overrideReferences": true,
+              "precompiledReferences": ["Other.dll", "SKECS.dll", "Other.SECS.dll"]
+            }
+            """;
+        var asmdef = fixture.WriteBytes("Assets/Game.asmdef", WithPreamble(new UTF8Encoding(true), before));
+        const string asmrefText = """{"reference":"SECS"}""";
+        var asmref = fixture.Write("Assets/Other/Game.asmref", asmrefText);
+
+        var changes = MigrationEngine.Plan(fixture.Root);
+        Assert.Equal(Path.GetFullPath(asmdef), Assert.Single(changes).Path);
+        Assert.Equal(WithPreamble(new UTF8Encoding(true), before), File.ReadAllBytes(asmdef));
+        MigrationEngine.Apply(changes);
+
+        Assert.Equal(WithPreamble(new UTF8Encoding(true), expected), File.ReadAllBytes(asmdef));
+        Assert.Equal(asmrefText, File.ReadAllText(asmref));
+        Assert.Empty(MigrationEngine.Plan(fixture.Root));
+    }
+
+    [Fact]
+    public void MalformedUnityAssemblyDefinitionStopsApplyBeforeAnyWrites()
+    {
+        using var fixture = new ConsumerFixture();
+        var valid = fixture.Write("A.cs", "using SECS;");
+        fixture.Write("Z.asmdef", """{"precompiledReferences":["SECS.dll",]}""");
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        Assert.Equal(1, MigrationCli.Run([.. fixture.Arguments, "--apply"], output, error));
+        Assert.Equal("using SECS;", File.ReadAllText(valid));
+        Assert.Contains("Z.asmdef", error.ToString());
+    }
+
+    [Fact]
+    public void PreviewWithoutOldPackageReportsUnverifiedEntitiesWithoutChangingTheirUses()
+    {
+        using var fixture = new ConsumerFixture();
+        const string source = """
+            using SECS;
+            var saved = new Entity(id, version);
+            _ = saved.IsValid;
+            _ = saved == other;
+            var foreign = new Other.Entity(id, version);
+            _ = foreign.IsValid;
+            """;
+        var file = fixture.Write("Program.cs", source);
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+
+        Assert.Equal(0, MigrationCli.Run(fixture.Arguments, output, error));
+        Assert.Equal(source, File.ReadAllText(file));
+        var preview = output.ToString();
+        Assert.Contains("Program.cs(2,13): Unverified Entity construction.", preview);
+        Assert.Contains("Program.cs(3,5): Unverified Entity API use.", preview);
+        Assert.Contains("Program.cs(4,5): Unverified Entity comparison.", preview);
+        Assert.DoesNotContain("Program.cs(5", preview);
+        Assert.DoesNotContain("Program.cs(6", preview);
+        Assert.DoesNotContain("BindEntity", preview);
     }
 
     [Fact]

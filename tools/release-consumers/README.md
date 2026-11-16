@@ -15,12 +15,15 @@ pwsh tools/release-consumers/Invoke-UnitySmoke.ps1 -UnityZip C:/path/to/unity-re
 pwsh tools/release-consumers/Invoke-UnitySmoke.ps1 -UnityZip C:/path/to/unity-release.zip -UnityEditor C:/path/to/Unity.exe -Backend IL2CPP -Version 0.2.0
 ```
 
-The .NET and Godot runners use an isolated NuGet cache and compare SHA-256 of
-the restored `ShortKedr.SKECS` package with the supplied `.nupkg`. They use
-NuGet.org only for external dependencies. The `net48` runner requires Windows
+The .NET and Godot runners copy their fixtures under `artifacts/release-consumers/`,
+use an isolated NuGet cache and compare SHA-256 of the restored `ShortKedr.SKECS`
+package with the supplied `.nupkg`. The `net48` runner requires Windows
 and can use `-Offline` when its package directory also contains all dependency
 `.nupkg` files. The Godot runner requires the 4.5 .NET editor executable and
-runs import and the scene, checking `SKECS_GODOT_OK`.
+runs import and the scene, checking `SKECS_GODOT_OK`. On Windows, pass the
+`_console.exe` executable to capture output. The runner uses the editor's
+bundled NuGet packages when they include the fixture's pinned Godot SDK and
+uses NuGet.org for Godot dependencies otherwise.
 
 The Unity runner imports DLLs from the supplied ZIP into a temporary copy of
 the fixture project, checks the SKECS assembly version, runs the Editor check,

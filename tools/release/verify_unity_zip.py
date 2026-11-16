@@ -1,4 +1,4 @@
-"""Verify a provisional Unity ZIP against the exact NuGet package and source."""
+"""Verify a Unity ZIP against the exact NuGet package, source and runtime evidence."""
 
 import argparse
 import hashlib
@@ -7,7 +7,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-from unity_evidence import load_unity_evidence, render_unity_matrix
+from unity_evidence import render_unity_matrix, verification_for
 
 
 def sha(data: bytes) -> str:
@@ -16,11 +16,10 @@ def sha(data: bytes) -> str:
 
 def verify(package: Path, unity_zip: Path, license_file: Path, guide: Path,
            version: str, commit: str, finalized: bool = False,
-           evidence_dir: Path | None = None, run_id: str | None = None) -> None:
+           evidence_dir: Path | None = None, run_id: str | None = None, *,
+           local_report: dict | None = None, repo: Path | None = None) -> None:
     expected = {"lib/netstandard2.1/SKECS.dll", "LICENSE", "INSTALL.md", "manifest.json"}
     if finalized:
-        if evidence_dir is None or run_id is None:
-            raise ValueError("Finalized ZIP needs the release evidence directory and run ID")
         expected.add("VERIFIED_UNITY.md")
     with zipfile.ZipFile(package) as source, zipfile.ZipFile(unity_zip) as archive:
         if source.testzip() or archive.testzip():
@@ -44,12 +43,11 @@ def verify(package: Path, unity_zip: Path, license_file: Path, guide: Path,
         if manifest.get("assemblyReferences") != ["netstandard"]:
             raise ValueError(f"Unexpected Unity DLL assembly references: {manifest.get('assemblyReferences')}")
         if finalized:
-            records = load_unity_evidence(evidence_dir, version, commit, run_id, package)
-            package_sha = sha(package.read_bytes())
-            if manifest.get("verification") != {"runId": run_id, "packageSha256": package_sha,
-                                                   "unityChecks": records}:
+            verification = verification_for(package, version, commit, evidence_dir, run_id, local_report, repo)
+            if manifest.get("verification") != verification:
                 raise ValueError("Finalized Unity manifest verification differs from release evidence")
-            if archive.read("VERIFIED_UNITY.md") != render_unity_matrix(version, commit, run_id, records):
+            expected_matrix = render_unity_matrix(version, commit, run_id, verification["unityChecks"])
+            if archive.read("VERIFIED_UNITY.md") != expected_matrix:
                 raise ValueError("Verified Unity matrix differs from release evidence")
         elif "verification" in manifest:
             raise ValueError("Provisional Unity ZIP cannot claim runtime verification")
@@ -67,10 +65,18 @@ def main() -> int:
     parser.add_argument("--final", action="store_true")
     parser.add_argument("--evidence-dir", type=Path)
     parser.add_argument("--run-id")
+    parser.add_argument("--local-report", type=Path, help="Local verification JSON containing Unity check logs")
+    parser.add_argument("--repo-root", type=Path, default=Path.cwd(), help="Checkout that contains the local Unity fixtures")
     args = parser.parse_args()
     try:
+        local_report = None
+        if args.local_report:
+            local_report = json.loads(args.local_report.read_text(encoding="utf-8-sig"))
+            if not args.final or not isinstance(local_report, dict):
+                raise ValueError("--local-report requires --final and a JSON object")
         verify(args.package, args.unity_zip, args.license, args.guide,
-               args.version, args.commit, args.final, args.evidence_dir, args.run_id)
+               args.version, args.commit, args.final, args.evidence_dir, args.run_id,
+               local_report=local_report, repo=args.repo_root)
     except (OSError, KeyError, ValueError, zipfile.BadZipFile, json.JSONDecodeError) as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1

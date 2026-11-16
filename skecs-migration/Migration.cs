@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -15,7 +17,9 @@ public static class Migration
     private static readonly HashSet<string> Excluded = new(StringComparer.OrdinalIgnoreCase)
     { ".git", ".godot", ".vs", "bin", "obj", "node_modules", "Library", "Temp", "Logs", "artifacts", "__pycache__" };
 
-    public static string RewriteCSharp(string text)
+    public static string RewriteCSharp(string text) => RewriteCSharp(text, null);
+
+    private static string RewriteCSharp(string text, Action<SyntaxNode, string>? review)
     {
         var tree = CSharpSyntaxTree.ParseText(text, new CSharpParseOptions(LanguageVersion.Preview));
         var error = tree.GetDiagnostics().FirstOrDefault(d => d.Severity == DiagnosticSeverity.Error);
@@ -35,6 +39,7 @@ public static class Migration
         }
         if (root.DescendantTrivia().Any(t => t.IsKind(SyntaxKind.DisabledTextTrivia) && Regex.IsMatch(t.ToFullString(), @"\bSECS\b")))
             throw new InvalidOperationException("SECS appears in an inactive preprocessor branch; review that branch manually");
+        if (review is not null) EntityMigration.ReviewUnverified(root, review);
         return new NamespaceRewriter().Visit(root)!.ToFullString();
     }
 
@@ -69,7 +74,7 @@ public static class Migration
         foreach (var package in document.Descendants().Where(e => e.Name.Namespace == document.Root?.Name.Namespace && e.Name.LocalName is "PackageReference" or "PackageVersion"))
         {
             var identity = new[] { package.Attribute("Include"), package.Attribute("Update") }
-                .FirstOrDefault(a => a?.Value == "ShortKedr.SECS");
+                .FirstOrDefault(a => string.Equals(a?.Value, "ShortKedr.SECS", StringComparison.OrdinalIgnoreCase));
             if (identity is null) continue;
             EditAttribute(identity, "ShortKedr.SKECS");
             var count = 0;
@@ -116,14 +121,97 @@ public static class Migration
         }
     }
 
-    public static IReadOnlyList<FileChange> Plan(string root)
+    public static string RewriteUnityAssemblyDefinition(string text)
+    {
+        // Work at JSON token boundaries so other fields and formatting stay intact.
+        // Assembly definitions use a separate field for references to DLLs.
+        var original = Encoding.UTF8.GetBytes(text);
+        var reader = new Utf8JsonReader(original);
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+            throw new InvalidOperationException("An assembly definition must be a JSON object");
+
+        ArrayBufferWriter<byte>? updated = null;
+        var copied = 0;
+        var foundReferences = false;
+        while (reader.Read())
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1 ||
+                !reader.ValueTextEquals("precompiledReferences")) continue;
+            if (foundReferences || !reader.Read() || reader.TokenType != JsonTokenType.StartArray)
+                throw new InvalidOperationException("precompiledReferences must be a single array of DLL names");
+            foundReferences = true;
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+            {
+                if (reader.TokenType != JsonTokenType.String)
+                    throw new InvalidOperationException("precompiledReferences must contain only DLL names");
+                if (!reader.ValueTextEquals("SECS.dll")) continue;
+                updated ??= new ArrayBufferWriter<byte>(original.Length);
+                updated.Write(original.AsSpan(copied, (int)reader.TokenStartIndex - copied));
+                updated.Write("\"SKECS.dll\""u8);
+                copied = (int)reader.BytesConsumed;
+            }
+        }
+
+        if (updated is null) return text;
+        updated.Write(original.AsSpan(copied));
+        return Encoding.UTF8.GetString(updated.WrittenSpan);
+    }
+
+    public static IReadOnlyList<FileChange> Plan(string root, string? oldPackage = null, TextWriter? review = null)
     {
         root = Path.GetFullPath(root);
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException("Consumer project directory does not exist");
         if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0)
             throw new InvalidOperationException("Select a real consumer directory, not a symbolic link");
-        var changes = new List<FileChange>();
+        var paths = new List<string>();
         Scan(root);
+        var sources = new Dictionary<string, (byte[] Bytes, SyntaxTree Tree)>(StringComparer.Ordinal);
+        EntityMigration? entities = null;
+        if (oldPackage is not null)
+        {
+            foreach (var path in paths.Where(path => Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase)))
+            {
+                var bytes = File.ReadAllBytes(path);
+                sources.Add(path, (bytes, CSharpSyntaxTree.ParseText(Decode(bytes).Text, new CSharpParseOptions(LanguageVersion.Preview))));
+            }
+            var projects = paths.Where(path => Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase)).ToArray();
+            var implicitUsings = projects.Length == 1 && XDocument.Load(projects[0]).Root?.Elements("PropertyGroup")
+                .Elements("ImplicitUsings").Any(element => element.Value.Trim().ToLowerInvariant() is "enable" or "true") == true;
+            entities = new EntityMigration(oldPackage, sources.Values.Select(source => source.Tree).ToArray(), implicitUsings);
+        }
+
+        var changes = new List<FileChange>();
+        foreach (var path in paths)
+        {
+            var extension = Path.GetExtension(path).ToLowerInvariant();
+            var relativePath = Path.GetRelativePath(root, path);
+            try
+            {
+                var original = sources.TryGetValue(path, out var source) ? source.Bytes : File.ReadAllBytes(path);
+                var (text, encoding, bomLength) = Decode(original);
+                var updated = extension switch
+                {
+                    ".cs" => entities is not null
+                        ? RewriteCSharp(entities.Review(source.Tree, Report))
+                        : RewriteCSharp(text, review is null ? null : Report),
+                    ".asmdef" => RewriteUnityAssemblyDefinition(text),
+                    _ => RewriteProject(text)
+                };
+                if (updated == text) continue;
+                changes.Add(new FileChange(path, original,
+                    original[..bomLength].Concat(encoding.GetBytes(updated)).ToArray()));
+            }
+            catch (Exception error) when (error is InvalidOperationException or XmlException or JsonException or DecoderFallbackException)
+            {
+                throw new InvalidOperationException($"{relativePath}: {error.Message}", error);
+            }
+
+            void Report(SyntaxNode node, string message)
+            {
+                var position = node.GetLocation().GetLineSpan().StartLinePosition;
+                review?.WriteLine($"{relativePath}({position.Line + 1},{position.Character + 1}): {message}");
+            }
+        }
         return changes.AsReadOnly();
 
         void Scan(string directory)
@@ -138,20 +226,7 @@ public static class Migration
                     continue;
                 }
                 var extension = Path.GetExtension(path).ToLowerInvariant();
-                if (extension is not (".cs" or ".csproj" or ".props" or ".targets")) continue;
-                try
-                {
-                    var original = File.ReadAllBytes(path);
-                    var (text, encoding, bomLength) = Decode(original);
-                    var updated = extension == ".cs" ? RewriteCSharp(text) : RewriteProject(text);
-                    if (updated == text) continue;
-                    changes.Add(new FileChange(path, original,
-                        original[..bomLength].Concat(encoding.GetBytes(updated)).ToArray()));
-                }
-                catch (Exception error) when (error is InvalidOperationException or System.Xml.XmlException or DecoderFallbackException)
-                {
-                    throw new InvalidOperationException($"{Path.GetRelativePath(root, path)}: {error.Message}", error);
-                }
+                if (extension is ".cs" or ".csproj" or ".props" or ".targets" or ".asmdef") paths.Add(path);
             }
         }
     }

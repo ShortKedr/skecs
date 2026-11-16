@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using SKECS;
 
 internal static class Program
@@ -18,6 +19,7 @@ internal static class Program
             }
         }
 
+        Console.WriteLine($"Runtime: {RuntimeInformation.FrameworkDescription}");
         Console.WriteLine("SKECS_CONSUMER_OK");
         return 0;
     }

@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "skecs-v*"
+      # Branch is published manually after validation of its local report.
+      - "!skecs-v0.2.0"
 
 permissions:
   contents: read

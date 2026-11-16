@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from prepare_release import name_for
+from verify_unity_zip import verify as verify_unity_zip
 
 
 CHECK_MARKERS = {
@@ -27,6 +28,7 @@ CHECK_MARKERS = {
     "package-content": "SKECS_PACKAGE_CONTENT_OK",
     "unity-zip-content": "SKECS_UNITY_ZIP_CONTENT_OK",
     "documentation": "SKECS_DOCUMENTATION_OK",
+    "migration-0.1.0-to-0.2.0": "SKECS_MIGRATION_OK",
     "dotnet8-consumer": "SKECS_CONSUMER_OK",
     "dotnet10-consumer": "SKECS_CONSUMER_OK",
     "net48-consumer": "SKECS_CONSUMER_OK",
@@ -43,6 +45,13 @@ PLAYER_BACKENDS = {
     "unity-2022.3-il2cpp": "IL2CPP",
     "unity-6-mono": "Mono",
     "unity-6-il2cpp": "IL2CPP",
+}
+PACKAGE_DIGEST_PREFIXES = {
+    "dotnet8-consumer": "SKECS_PACKAGE_SHA256",
+    "dotnet10-consumer": "SKECS_PACKAGE_SHA256",
+    "net48-consumer": "SKECS_PACKAGE_SHA256",
+    "godot45-consumer": "SKECS_PACKAGE_SHA256",
+    "migration-0.1.0-to-0.2.0": "candidate package ShortKedr.SKECS {version} SHA-256",
 }
 SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -99,7 +108,7 @@ def project_version(repo: Path) -> str:
     return values[0]
 
 
-def validate_artifacts(report: dict, repo: Path, report_path: Path, version: str, head: str) -> None:
+def validate_artifacts(report: dict, repo: Path, report_path: Path, version: str, head: str) -> str:
     artifacts = report.get("artifacts")
     require(isinstance(artifacts, list), "artifacts must be an array")
     cover = f"{name_for(version).lower()}.png"
@@ -138,24 +147,8 @@ def validate_artifacts(report: dict, repo: Path, report_path: Path, version: str
             repository = metadata.find("{*}repository")
             require(repository is not None and repository.get("commit") == head,
                     "package repository commit differs from HEAD")
-            dll = archive.read("lib/netstandard2.1/SKECS.dll")
-        with zipfile.ZipFile(unity_zip) as archive:
-            manifest = json.loads(archive.read("manifest.json"))
-            require(manifest.get("package") == "ShortKedr.SKECS", "Unity manifest package mismatch")
-            require(manifest.get("version") == version, "Unity manifest version mismatch")
-            require(manifest.get("sourceCommit") == head, "Unity manifest commit differs from HEAD")
-            files = manifest.get("files")
-            require(isinstance(files, dict), "Unity manifest lacks file hashes")
-            for name in ("INSTALL.md", "LICENSE", "lib/netstandard2.1/SKECS.dll"):
-                require(isinstance(files.get(name), str) and SHA256.fullmatch(files[name]) is not None,
-                        f"Unity manifest lacks SHA-256 for {name}")
-                require(sha256(archive.read(name)) == files[name], f"Unity ZIP hash mismatch: {name}")
-            require(archive.read("lib/netstandard2.1/SKECS.dll") == dll,
-                    "Unity DLL differs from package netstandard2.1 DLL")
-            require(archive.read("INSTALL.md") == read_nonempty(repo / "docs" / "skecs" / "INSTALL.md"),
-                    "Unity guide differs from checked-out INSTALL.md")
-            require(archive.read("LICENSE") == read_nonempty(repo / "LICENSE"),
-                    "Unity LICENSE differs from checked-out LICENSE")
+        verify_unity_zip(package, unity_zip, repo / "LICENSE", repo / "docs/skecs/INSTALL.md",
+                         version, head, finalized=True, local_report=report, repo=repo)
     except (KeyError, ValueError, ET.ParseError, zipfile.BadZipFile) as error:
         raise InvalidReport(f"invalid package or Unity ZIP: {error}") from error
 
@@ -172,9 +165,10 @@ def validate_artifacts(report: dict, repo: Path, report_path: Path, version: str
         for name in expected:
             require(listed.get(name) == sha256(read_nonempty(paths[name])),
                     f"SHA256SUMS mismatch or missing entry: {name}")
+    return sha256(read_nonempty(package))
 
 
-def validate_checks(report: dict, repo: Path) -> None:
+def validate_checks(report: dict, repo: Path, version: str, package_digest: str) -> None:
     checks = report.get("checks")
     require(isinstance(checks, list), "checks must be an array")
     seen: set[str] = set()
@@ -192,8 +186,14 @@ def validate_checks(report: dict, repo: Path) -> None:
                 f"missing successful exitCode: {check_id}")
         log = relative_file(repo, entry.get("log"), f"{check_id}.log")
         content = read_nonempty(log).decode("utf-8", errors="replace")
-        require(CHECK_MARKERS[check_id] in content,
+        require(CHECK_MARKERS[check_id] in content.splitlines(),
                 f"missing {CHECK_MARKERS[check_id]} marker: {check_id}")
+        if check_id in PACKAGE_DIGEST_PREFIXES:
+            prefix = PACKAGE_DIGEST_PREFIXES[check_id].format(version=version)
+            recorded = re.findall(rf"^{re.escape(prefix)} ([0-9a-f]{{64}})\r?$", content,
+                                  re.IGNORECASE | re.MULTILINE)
+            require([digest.lower() for digest in recorded] == [package_digest],
+                    f"consumer package SHA-256 missing or mismatched: {check_id}")
         if check_id in PLAYER_BACKENDS:
             build_log = relative_file(repo, entry.get("buildLog"), f"{check_id}.buildLog")
             build_content = read_nonempty(build_log).decode("utf-8", errors="replace")
@@ -237,8 +237,8 @@ def validate(report_path: Path, repo: Path) -> None:
             "checkedAt must include a timezone offset")
     require(isinstance(report.get("blockers"), list) and not report["blockers"],
             "releaseReady report cannot have blockers")
-    validate_artifacts(report, repo, report_path, version, head)
-    validate_checks(report, repo)
+    package_digest = validate_artifacts(report, repo, report_path, version, head)
+    validate_checks(report, repo, version, package_digest)
 
 
 def main() -> int:
