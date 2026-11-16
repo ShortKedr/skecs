@@ -185,7 +185,8 @@ export async function dispatchKernel(handle, groups, input, outputLength, faultL
 
     kernel.busy = true;
     try {
-        const buffers = await withErrorScopes(device, () => {
+        let submittedBuffers;
+        const submission = withErrorScopes(device, () => {
             const current = ensureBuffers(kernel, [input.byteLength, outputLength * wordBytes, faultLength * wordBytes]);
             const [inputBuffer, output, faults] = current.storage;
             device.queue.writeBuffer(inputBuffer, 0, input);
@@ -200,9 +201,17 @@ export async function dispatchKernel(handle, groups, input, outputLength, faultL
             encoder.copyBufferToBuffer(output, 0, current.readback[0], 0, current.sizes[1]);
             encoder.copyBufferToBuffer(faults, 0, current.readback[1], 0, current.sizes[2]);
             device.queue.submit([encoder.finish()]);
+            submittedBuffers = current;
             return current;
         });
-        await Promise.all(buffers.readback.map(buffer => buffer.mapAsync(GPUMapMode.READ)));
+        const mappings = submittedBuffers?.readback.map(async buffer => buffer.mapAsync(GPUMapMode.READ)) ?? [];
+        // Drain both mappings before releasing buffers, including after a scoped error.
+        const [submitted, ...mapped] = await Promise.allSettled([submission, ...mappings]);
+        if (submitted.status === 'rejected') throw submitted.reason;
+        for (const mapping of mapped) {
+            if (mapping.status === 'rejected') throw mapping.reason;
+        }
+        const buffers = submitted.value;
         requireDevice(owner);
         const result = new Int32Array(outputLength + faultLength);
         try {
