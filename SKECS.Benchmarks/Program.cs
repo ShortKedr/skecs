@@ -22,7 +22,7 @@ public static class EcsBenchmarkCli
                     run [all|comparison|supplement]       Build, validate, measure and report.
                     validate [all|comparison|supplement]  Build and check without timing.
                     report|verify [all|comparison|supplement]  Analyze saved raw artifacts.
-                    bdn --suite standard|extended|all <BenchmarkDotNet options>
+                    bdn --suite standard|extended|all|numerics <BenchmarkDotNet options>
                     check comparison|stress|extended     Isolated correctness validation.
                     measure comparison|stress|api|storage <artifacts/...json>
                     --output <artifacts/directory>  Raw measurement destination.
@@ -139,6 +139,7 @@ public static class EcsBenchmarkSuites
         {
             "standard" => ["SKECS.Benchmarks"],
             "extended" => ["SKECS.Benchmarks.Extended"],
+            "numerics" => ["SKECS.Benchmarks.Numerics"],
             "all" => ["SKECS.Benchmarks", "SKECS.Benchmarks.Extended"],
             _ => throw new ArgumentException("Unknown BDN suite: " + suite)
         };
