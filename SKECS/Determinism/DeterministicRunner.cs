@@ -24,6 +24,7 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     private readonly World _world;
     private readonly PreparedSystem<TInput>[] _systems;
     private readonly PreparedReductions _definitions;
+    private readonly int _workerCount;
     private World.RunnerLease? _lease;
     private RunnerSystemPlan<TInput>? _plan;
     private object? _ticketScope;
@@ -38,9 +39,19 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     private bool _disposed;
 
     public DeterministicRunner(World world, DeterministicWorkload<TInput> workload)
+        : this(world, workload, workerCount: 1)
+    {
+    }
+
+    /// <summary>Uses up to the given positive number of workers for a batch of logical jobs.</summary>
+    /// <remarks>Jobs can execute in any order. The runner waits for the full parallel batch and
+    /// reports the fault of the lowest failing logical job before publishing any results.</remarks>
+    public DeterministicRunner(World world, DeterministicWorkload<TInput> workload, int workerCount)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         if (workload is null) throw new ArgumentNullException(nameof(workload));
+        if (workerCount <= 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
+        _workerCount = workerCount;
         _world.ThrowIfDisposed();
         _systems = workload.Prepare(world);
         _definitions = workload.PrepareReductions();
@@ -106,9 +117,9 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
                 if (batch != 0)
                 {
                     var started = trace == null ? 0 : Stopwatch.GetTimestamp();
-                    var end = _nextJob + batch;
-                    for (; _nextJob < end; _nextJob++)
-                        _plan.ExecuteJob(_nextJob, _world.Id, _tickIndex, _input, _step, _ticketScope!, _definitions);
+                    ParallelJobExecutor.Execute(_plan, _nextJob, batch, _workerCount, _world.Id, _tickIndex,
+                        _input, _step, _ticketScope!, _definitions);
+                    _nextJob += batch;
                     trace?.Finish("jobs", started);
                     logicalJobBudget -= batch;
                 }
