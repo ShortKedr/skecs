@@ -30,6 +30,8 @@ internal readonly struct CommandTarget
             if (!ReferenceEquals(_ticket.Scope, buffer.TicketScope) || !_ticket.Key.SameSource(key)
                 || _ticket.Key.LocalOrdinal >= key.LocalOrdinal)
                 throw new InvalidOperationException("A ticket can only be used by a later command from its creating source.");
+            if (key.DomainKey.HasValue && _ticket.Key.CompareTo(key) >= 0)
+                throw new InvalidOperationException("The command's domain key sorts before its ticket's Create command.");
         }
         else if (_entity.WorldId != buffer.WorldId)
         {

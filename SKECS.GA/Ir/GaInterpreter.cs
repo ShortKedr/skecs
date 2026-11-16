@@ -3,7 +3,7 @@ using SKECS.Numerics;
 
 namespace SKECS.GA;
 
-public enum GaFaultKind : uint { Overflow = 1, DivideByZero, IterationLimit }
+public enum GaFaultKind : uint { Overflow = 1, DivideByZero, IterationLimit, IndexOutOfRange, MissingOwnComponent }
 
 public readonly record struct GaKernelFault(GaFaultKind Kind, ulong EvaluationOrdinal, GaSourceSpan Source);
 
@@ -12,6 +12,7 @@ public static class GaInterpreter
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row)
     {
         ArgumentNullException.ThrowIfNull(program);
+        RequireUnpackedSupport(program);
         if (program.UsesCommands)
             throw new InvalidOperationException("Use the Execute overload with ordered output storage for this program.");
         if (program.EventCapacity != 0)
@@ -29,39 +30,125 @@ public static class GaInterpreter
 
     /// <summary>Executes one row against the provided immutable snapshot binding.</summary>
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row, Span<int> events, out int eventCount,
-        GaSnapshotPacket? snapshot) => ExecuteCore(program, row, events, out eventCount, snapshot, outputs: null);
+        GaSnapshotPacket? snapshot) => ExecuteCore(program, row, events, out eventCount, snapshot, null, default, packed: false);
+
+    /// <summary>Executes one row against the immutable snapshot and packed tick input.</summary>
+    public static GaKernelFault? Execute(GaProgram program, Span<uint> row, Span<int> events, out int eventCount,
+        GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources) =>
+        ExecuteCore(program, row, events, out eventCount, snapshot, null, default, packed: false, tickResources);
+
+    /// <summary>Executes one row with its frozen tick input, snapshot and read buffer.</summary>
+    public static GaKernelFault? Execute(GaProgram program, Span<uint> row, Span<int> events, out int eventCount,
+        GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources, GaBufferPacket? buffer) =>
+        ExecuteCore(program, row, events, out eventCount, snapshot, null, default, packed: false, tickResources, buffer);
 
     /// <summary>Executes one row and appends its ordered events and commands only on success.</summary>
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row, ICollection<GaOutputRecord> outputs,
         GaSnapshotPacket? snapshot = null)
+        => Execute(program, row, outputs, snapshot, default);
+
+    public static GaKernelFault? Execute(GaProgram program, Span<uint> row, ICollection<GaOutputRecord> outputs,
+        GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources)
+        => Execute(program, row, outputs, snapshot, tickResources, null);
+
+    public static GaKernelFault? Execute(GaProgram program, Span<uint> row, ICollection<GaOutputRecord> outputs,
+        GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources, GaBufferPacket? buffer)
     {
         ArgumentNullException.ThrowIfNull(outputs);
-        return ExecuteCore(program, row, Span<int>.Empty, out _, snapshot, outputs);
+        return ExecuteCore(program, row, Span<int>.Empty, out _, snapshot, outputs, default, packed: false, tickResources, buffer);
+    }
+
+    /// <summary>Executes one row and publishes packed records on success.</summary>
+    /// <remarks>Each record contains three header words, the program's addition payload words,
+    /// and three domain-key words when the program uses domain order.</remarks>
+    public static GaKernelFault? ExecutePackedOutputs(GaProgram program, Span<uint> row, Span<uint> records, out int count,
+        GaSnapshotPacket? snapshot = null) => ExecuteCore(program, row, default, out count, snapshot, null, records, packed: true);
+
+    public static GaKernelFault? ExecutePackedOutputs(GaProgram program, Span<uint> row, Span<uint> records, out int count,
+        GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources) =>
+        ExecuteCore(program, row, default, out count, snapshot, null, records, packed: true, tickResources);
+
+    public static GaKernelFault? ExecutePackedOutputs(GaProgram program, Span<uint> row, Span<uint> records, out int count,
+        GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources, GaBufferPacket? buffer) =>
+        ExecuteCore(program, row, default, out count, snapshot, null, records, packed: true, tickResources, buffer);
+
+    private static void RequireUnpackedSupport(GaProgram program)
+    {
+        if (program.AdditionComponents.Count != 0)
+            throw new InvalidOperationException("Use ExecutePackedOutputs for programs that add components.");
+        if (program.UsesDomainOrder)
+            throw new InvalidOperationException("Use ExecutePackedOutputs for programs that set domain order.");
     }
 
     private static GaKernelFault? ExecuteCore(GaProgram program, Span<uint> row, Span<int> events, out int eventCount,
-        GaSnapshotPacket? snapshot, ICollection<GaOutputRecord>? outputs)
+        GaSnapshotPacket? snapshot, ICollection<GaOutputRecord>? outputs, Span<uint> records, bool packed,
+        ReadOnlySpan<uint> tickResources = default, GaBufferPacket? buffer = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         eventCount = 0;
-        if (program.UsesCommands && outputs is null)
-            throw new InvalidOperationException("Use the Execute overload with ordered output storage for this program.");
-        if (program.UsesSnapshot && snapshot is null)
-            throw new InvalidOperationException("The GA program requires an Int32 snapshot binding.");
-        if (program.UsesSnapshot && (snapshot!.Layout.Fields.Length != 1 || snapshot.Layout.Fields[0] != GaScalar.Int32))
-            throw new ArgumentException("The GA snapshot binding must contain one Int32 field.", nameof(snapshot));
+        if (!packed)
+        {
+            RequireUnpackedSupport(program);
+            if (program.UsesCommands && outputs is null)
+                throw new InvalidOperationException("Use the Execute overload with ordered output storage for this program.");
+        }
+        if (program.UsesSnapshot)
+        {
+            if (snapshot is null)
+                throw new InvalidOperationException("The GA program requires a snapshot binding.");
+            snapshot.RequireSchema(program.SnapshotLayout?.Schema);
+        }
+        if (program.BufferSchema is { } schema)
+        {
+            if (buffer is null)
+                throw new InvalidOperationException("The GA program requires an immutable read buffer.");
+            buffer.RequireSchema(schema, program.BufferRowWords);
+        }
+        else if (buffer is not null)
+            throw new ArgumentException("The GA program does not declare a read buffer.", nameof(buffer));
         if (row.Length != program.WordCount)
             throw new ArgumentException("The row length must match the packed GA schema.", nameof(row));
-        if (outputs is null)
+        if (tickResources.Length != program.TickResourceWords)
+            throw new ArgumentException("The tick resource length must match the packed GA schema.", nameof(tickResources));
+        if (tickResources.Overlaps(row))
+            throw new ArgumentException("Tick resource storage must not overlap the component row.", nameof(tickResources));
+        for (int i = 0; i < program.TickResourceFields.Count; i++)
+            if (program.TickResourceFields[i].Type == GaScalar.Bool && tickResources[program.TickResourceOffsets[i]] > 1)
+                throw new ArgumentException("Tick resource booleans must be encoded as 0 or 1.", nameof(tickResources));
+        int stride = packed
+            ? GaOutputRecord.Words + program.AdditionPayloadWords + (program.UsesDomainOrder ? GaOutputRecord.DomainWordCount : 0)
+            : 0;
+        int packedWordCount = checked(stride * program.EventCapacity);
+        if (packed)
+        {
+            if (records.Length < packedWordCount)
+                throw new ArgumentException("The destination must hold the verified packed output capacity.", nameof(records));
+            if (row.Overlaps(records[..packedWordCount]))
+                throw new ArgumentException("Output storage must not overlap the component row.", nameof(records));
+            if (tickResources.Overlaps(records[..packedWordCount]))
+                throw new ArgumentException("Output storage must not overlap tick resources.", nameof(records));
+        }
+        else if (outputs is null)
         {
             if (events.Length < program.EventCapacity)
                 throw new ArgumentException("The destination must hold the verified event capacity.", nameof(events));
             if (MemoryMarshal.Cast<uint, int>(row).Overlaps(events[..program.EventCapacity]))
                 throw new ArgumentException("Event storage must not overlap the component row.", nameof(events));
+            if (tickResources.Overlaps(MemoryMarshal.Cast<int, uint>(events[..program.EventCapacity])))
+                throw new ArgumentException("Event storage must not overlap tick resources.", nameof(events));
         }
         for (int i = 0; i < program.Fields.Count; i++)
             if (program.Fields[i].Type == GaScalar.Bool && row[program.Offsets[i]] > 1)
                 throw new ArgumentException($"Field {i} is not a canonical boolean.", nameof(row));
+        foreach (int offset in program.PresenceOffsets)
+            if (offset >= 0 && row[offset] > 1)
+                throw new ArgumentException("Component presence must be encoded as 0 or 1.", nameof(row));
+        for (int i = 0; i < program.Components.Count; i++)
+        {
+            var component = program.Components[i];
+            if (component.Origin == GaComponentOrigin.Own && row[program.PresenceOffsets[i]] == 0)
+                return new GaKernelFault(GaFaultKind.MissingOwnComponent, 0, component.OwnSource);
+        }
 
         Span<uint> next = row.Length <= 128 ? stackalloc uint[row.Length] : new uint[row.Length];
         Span<ulong> locals = program.Locals.Count <= 64
@@ -70,18 +157,23 @@ public static class GaInterpreter
         Span<int> tickets = program.TicketLocalCount <= 64
             ? stackalloc int[program.TicketLocalCount]
             : new int[program.TicketLocalCount];
-        int eventCapacity = outputs is null ? program.EventCapacity : 0;
+        int eventCapacity = !packed && outputs is null ? program.EventCapacity : 0;
         int outputCapacity = outputs is null ? 0 : program.EventCapacity;
         Span<int> nextEvents = eventCapacity <= 128 ? stackalloc int[eventCapacity] : new int[eventCapacity];
         Span<GaOutputRecord> nextOutputs = outputCapacity <= 128
             ? stackalloc GaOutputRecord[outputCapacity]
             : new GaOutputRecord[outputCapacity];
+        Span<uint> nextRecords = packedWordCount <= 384
+            ? stackalloc uint[packedWordCount]
+            : new uint[packedWordCount];
         row.CopyTo(next);
-        var executor = new Executor(next, locals, tickets, nextEvents, nextOutputs, program.Offsets, snapshot);
+        var executor = new Executor(next, locals, tickets, nextEvents, nextOutputs, nextRecords, stride, program, snapshot, tickResources, buffer);
         executor.Run(program.Body);
         if (executor.Fault == null)
         {
-            if (outputs is null)
+            if (packed)
+                nextRecords[..(stride * executor.OutputCount)].CopyTo(records);
+            else if (outputs is null)
                 nextEvents[..executor.OutputCount].CopyTo(events);
             else
                 foreach (var output in nextOutputs[..executor.OutputCount])
@@ -99,33 +191,55 @@ public static class GaInterpreter
         private readonly Span<int> _tickets;
         private readonly Span<int> _events;
         private readonly Span<GaOutputRecord> _outputs;
+        private readonly Span<uint> _records;
+        private readonly int _stride;
         private readonly int[] _offsets;
+        private readonly int[] _presenceOffsets;
+        private readonly int[] _tickResourceOffsets;
+        private readonly ReadOnlySpan<uint> _tickResources;
+        private readonly int[] _bufferOffsets;
+        private readonly GaBufferPacket? _buffer;
+        private readonly IReadOnlyList<GaAdditionComponent> _additions;
         private readonly GaSnapshotPacket? _snapshot;
+        private readonly bool _usesDomainOrder;
+        private bool _hasDomainKey;
+        private int _domainPrimary;
+        private int _domainSecondary;
         private ulong _evaluationOrdinal;
         internal GaKernelFault? Fault { get; private set; }
         internal int OutputCount { get; private set; }
 
         internal Executor(Span<uint> row, Span<ulong> locals, Span<int> tickets, Span<int> events, Span<GaOutputRecord> outputs,
-            int[] offsets, GaSnapshotPacket? snapshot)
+            Span<uint> records, int stride, GaProgram program, GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources,
+            GaBufferPacket? buffer)
         {
             _row = row;
             _locals = locals;
             _tickets = tickets;
             _events = events;
             _outputs = outputs;
-            _offsets = offsets;
+            _records = records;
+            _stride = stride;
+            _offsets = program.Offsets;
+            _presenceOffsets = program.PresenceOffsets;
+            _tickResourceOffsets = program.TickResourceOffsets;
+            _tickResources = tickResources;
+            _bufferOffsets = program.BufferOffsets;
+            _buffer = buffer;
+            _additions = program.AdditionComponents;
             _snapshot = snapshot;
+            _usesDomainOrder = program.UsesDomainOrder;
         }
 
         private ulong Load(GaSlot slot)
         {
             if (!slot.IsField)
                 return _locals[slot.Index];
-            int offset = _offsets[slot.Index];
-            return slot.Type == GaScalar.Fixed
-                ? _row[offset] | (ulong)_row[offset + 1] << 32
-                : _row[offset];
+            return ReadWords(_row, _offsets[slot.Index], slot.Type);
         }
+
+        private static ulong ReadWords(ReadOnlySpan<uint> words, int offset, GaScalar type) =>
+            type == GaScalar.Fixed ? words[offset] | (ulong)words[offset + 1] << 32 : words[offset];
 
         private void Store(GaSlot slot, ulong value)
         {
@@ -138,6 +252,22 @@ public static class GaInterpreter
             _row[offset] = unchecked((uint)value);
             if (slot.Type == GaScalar.Fixed)
                 _row[offset + 1] = unchecked((uint)(value >> 32));
+        }
+
+        private bool TryIndex(GaArrayField field, GaValue index, GaSourceSpan source, out GaSlot slot)
+        {
+            slot = default;
+            uint element = unchecked((uint)Read(index));
+            if (Fault != null)
+                return false;
+            ulong ordinal = _evaluationOrdinal++;
+            if (element >= (uint)field.Length)
+            {
+                Fault = new GaKernelFault(GaFaultKind.IndexOutOfRange, ordinal, source);
+                return false;
+            }
+            slot = new GaSlot(true, field.FirstField + (int)element, field.Type);
+            return true;
         }
 
         internal void Run(GaStatement statement)
@@ -153,29 +283,67 @@ public static class GaInterpreter
                 case GaStore store:
                     Store(store.Slot, Read(store.Value));
                     break;
+                case GaArrayStore indexed:
+                    if (TryIndex(indexed.Field, indexed.Index, indexed.Source, out var target))
+                    {
+                        if (indexed.Previous is { } previous)
+                            Store(previous, Load(target));
+                        ulong updated = Read(indexed.Value);
+                        if (Fault == null)
+                            Store(target, updated);
+                    }
+                    break;
                 case GaEmit emit:
                     int value = unchecked((int)Read(emit.Value));
                     if (Fault == null)
                     {
-                        if (_outputs.IsEmpty)
+                        if (_outputs.IsEmpty && _stride == 0)
                             _events[OutputCount++] = value;
                         else
-                            _outputs[OutputCount++] = GaOutputRecord.EmitInt32(value);
+                            Append(GaOutputRecord.EmitInt32(value));
+                    }
+                    break;
+                case GaSetDomainOrder order:
+                    int primary = unchecked((int)Read(order.Primary));
+                    int secondary = unchecked((int)Read(order.Secondary));
+                    if (Fault == null)
+                    {
+                        _domainPrimary = primary;
+                        _domainSecondary = secondary;
+                        _hasDomainKey = true;
                     }
                     break;
                 case GaDestroy destroy:
                     int entityId = unchecked((int)Read(destroy.EntityId));
                     int generation = unchecked((int)Read(destroy.Generation));
                     if (Fault == null)
-                        _outputs[OutputCount++] = GaOutputRecord.DestroyEntity(entityId, generation);
+                        Append(GaOutputRecord.DestroyEntity(entityId, generation));
                     break;
                 case GaCreate create:
                     if (create.TicketSlot >= 0)
                         _tickets[create.TicketSlot] = OutputCount;
-                    _outputs[OutputCount++] = GaOutputRecord.CreateEntity();
+                    Append(GaOutputRecord.CreateEntity());
                     break;
                 case GaDestroyTicket destroy:
-                    _outputs[OutputCount++] = GaOutputRecord.DestroyTicket(_tickets[destroy.TicketSlot]);
+                    Append(GaOutputRecord.DestroyTicket(_tickets[destroy.TicketSlot]));
+                    break;
+                case GaRemove remove:
+                    int removeId = unchecked((int)Read(remove.EntityId));
+                    int removeGeneration = unchecked((int)Read(remove.Generation));
+                    if (Fault == null)
+                        Append(GaOutputRecord.RemoveEntity(remove.ComponentIndex, removeId, removeGeneration));
+                    break;
+                case GaRemoveTicket remove:
+                    Append(GaOutputRecord.RemoveTicket(remove.ComponentIndex, _tickets[remove.TicketSlot]));
+                    break;
+                case GaAdd add:
+                    int addId = unchecked((int)Read(add.EntityId));
+                    int addGeneration = unchecked((int)Read(add.Generation));
+                    if (Fault == null)
+                        AppendAddition(GaOutputRecord.AddEntity(add.ComponentIndex, addId, addGeneration), add.ComponentIndex, add.Values);
+                    break;
+                case GaAddTicket add:
+                    AppendAddition(GaOutputRecord.AddTicket(add.ComponentIndex, _tickets[add.TicketSlot]), add.ComponentIndex, add.Values);
                     break;
                 case GaIf branch:
                     if (Read(branch.Condition) != 0)
@@ -200,6 +368,41 @@ public static class GaInterpreter
             }
         }
 
+        private void Append(GaOutputRecord record)
+        {
+            if (_stride == 0)
+                _outputs[OutputCount] = record;
+            else
+                StageRecord(record);
+            OutputCount++;
+        }
+
+        private void AppendAddition(GaOutputRecord record, int componentIndex, IReadOnlyList<GaAdditionValue> values)
+        {
+            var destination = StageRecord(record);
+            var component = _additions[componentIndex];
+            foreach (var value in values)
+            {
+                ulong bits = Read(value.Value);
+                if (Fault != null)
+                    return;
+                int offset = GaOutputRecord.Words + component.Offsets[value.FieldIndex];
+                destination[offset] = unchecked((uint)bits);
+                if (value.Value.Type == GaScalar.Fixed)
+                    destination[offset + 1] = unchecked((uint)(bits >> 32));
+            }
+            OutputCount++;
+        }
+
+        private Span<uint> StageRecord(GaOutputRecord record)
+        {
+            var destination = _records.Slice(OutputCount * _stride, _stride);
+            record.Write(destination);
+            if (_usesDomainOrder)
+                GaOutputRecord.WriteDomainOrder(destination, _hasDomainKey, _domainPrimary, _domainSecondary);
+            return destination;
+        }
+
         private ulong Read(GaValue value)
         {
             if (Fault != null)
@@ -210,13 +413,30 @@ public static class GaInterpreter
                     return constant.Bits;
                 case GaLoad load:
                     return Load(load.Slot);
+                case GaHasOwn present:
+                    return _row[_presenceOffsets[present.ComponentIndex]];
+                case GaResourceRead resource:
+                    return ReadWords(_tickResources, _tickResourceOffsets[resource.FieldIndex], resource.Type);
+                case GaBufferCount:
+                    return (uint)_buffer!.Count;
+                case GaBufferRead buffer:
+                    return ReadBuffer(buffer);
+                case GaTryRead optional:
+                    uint found = _row[_presenceOffsets[optional.ComponentIndex]];
+                    foreach (var copy in optional.Copies)
+                        Store(copy.Local, found != 0 ? Load(copy.Field) : 0);
+                    return found;
+                case GaArrayRead indexed:
+                    return TryIndex(indexed.Field, indexed.Index, indexed.Source, out var element) ? Load(element) : 0;
                 case GaSelect select:
                     return Read(Read(select.Condition) != 0 ? select.True : select.False);
                 case GaSnapshotRead lookup:
                     int entityId = unchecked((int)Read(lookup.EntityId));
                     int generation = unchecked((int)Read(lookup.Generation));
-                    int fallback = unchecked((int)Read(lookup.Fallback));
-                    return Fault == null ? unchecked((uint)_snapshot!.ReadInt32(entityId, generation, fallback)) : 0;
+                    ulong fallback = Read(lookup.Fallback);
+                    return Fault == null
+                        ? _snapshot!.ReadFieldBits(entityId, generation, Math.Max(0, lookup.FieldIndex), lookup.Type, fallback)
+                        : 0;
                 case GaCast cast:
                     ulong source = Read(cast.Operand);
                     if (cast.Type == GaScalar.Fixed)
@@ -272,6 +492,27 @@ public static class GaInterpreter
                 default:
                     throw new InvalidOperationException();
             }
+        }
+
+        private ulong ReadBuffer(GaBufferRead read)
+        {
+            int index = unchecked((int)Read(read.Index));
+            if (Fault is not null)
+                return 0;
+            var buffer = _buffer!;
+            ulong ordinal = _evaluationOrdinal++;
+            if ((uint)index >= (uint)buffer.Count)
+            {
+                Fault = new GaKernelFault(GaFaultKind.IndexOutOfRange, ordinal, read.Source);
+                return 0;
+            }
+            int offset = _bufferOffsets[read.FieldIndex];
+            return read.Type switch
+            {
+                GaScalar.Fixed => buffer.ReadWide(index, offset),
+                GaScalar.Bool => Bit(buffer.ReadWord(index, offset) != 0),
+                _ => buffer.ReadWord(index, offset)
+            };
         }
 
         private ulong ReadFixedBinary(GaBinary binary, Fixed left, Fixed right)

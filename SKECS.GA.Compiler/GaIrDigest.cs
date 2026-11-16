@@ -30,13 +30,42 @@ internal static class GaIrDigest
     private static void WriteSchema(BinaryWriter writer, GaProgram program)
     {
         writer.Write(program.UsesSnapshot);
+        writer.Write(program.SnapshotLayout?.Schema ?? "");
+        writer.Write(program.TickResourceType ?? "");
+        writer.Write(program.BufferSchema ?? "");
+        writer.Write(program.BufferRowWords);
+        writer.Write(program.TickResourceFields.Count);
+        foreach (var field in program.TickResourceFields)
+        {
+            writer.Write(field.Path);
+            writer.Write((byte)field.Type);
+            writer.Write(field.ClrEnumType ?? "");
+        }
         writer.Write(program.UsesCommands);
+        writer.Write(program.UsesDomainOrder);
         writer.Write(program.EventCapacity);
+        writer.Write(program.RemovalComponents.Count);
+        foreach (var component in program.RemovalComponents)
+            writer.Write(component);
+        writer.Write(program.AdditionPayloadWords);
+        writer.Write(program.AdditionComponents.Count);
+        foreach (var component in program.AdditionComponents)
+        {
+            writer.Write(component.Id);
+            writer.Write(component.Fields.Count);
+            foreach (var field in component.Fields)
+            {
+                writer.Write(field.Path);
+                writer.Write((byte)field.Type);
+                writer.Write(field.ClrEnumType ?? "");
+            }
+        }
         writer.Write(program.Components.Count);
         foreach (var component in program.Components)
         {
             writer.Write(component.Id);
             writer.Write((byte)component.Access);
+            writer.Write((byte)component.Origin);
         }
         writer.Write(program.Fields.Count);
         foreach (var field in program.Fields)
@@ -96,8 +125,56 @@ internal static class GaIrDigest
                 writer.Write((byte)7);
                 writer.Write(destroy.TicketSlot);
                 break;
+            case GaRemove remove:
+                writer.Write((byte)8);
+                writer.Write(remove.ComponentIndex);
+                WriteValue(writer, remove.EntityId);
+                WriteValue(writer, remove.Generation);
+                break;
+            case GaRemoveTicket remove:
+                writer.Write((byte)9);
+                writer.Write(remove.ComponentIndex);
+                writer.Write(remove.TicketSlot);
+                break;
+            case GaAdd add:
+                writer.Write((byte)10);
+                writer.Write(add.ComponentIndex);
+                WriteValue(writer, add.EntityId);
+                WriteValue(writer, add.Generation);
+                WriteAdditionValues(writer, add.Values);
+                break;
+            case GaAddTicket add:
+                writer.Write((byte)11);
+                writer.Write(add.ComponentIndex);
+                writer.Write(add.TicketSlot);
+                WriteAdditionValues(writer, add.Values);
+                break;
+            case GaSetDomainOrder order:
+                writer.Write((byte)12);
+                WriteValue(writer, order.Primary);
+                WriteValue(writer, order.Secondary);
+                break;
+            case GaArrayStore store:
+                writer.Write((byte)13);
+                WriteArrayField(writer, store.Field);
+                WriteValue(writer, store.Index);
+                writer.Write(store.Previous.HasValue);
+                if (store.Previous is { } previous)
+                    WriteSlot(writer, previous);
+                WriteValue(writer, store.Value);
+                break;
             default:
                 throw new InvalidOperationException("Unknown GA IR statement.");
+        }
+    }
+
+    private static void WriteAdditionValues(BinaryWriter writer, IReadOnlyList<GaAdditionValue> values)
+    {
+        writer.Write(values.Count);
+        foreach (var value in values)
+        {
+            writer.Write(value.FieldIndex);
+            WriteValue(writer, value.Value);
         }
     }
 
@@ -140,9 +217,41 @@ internal static class GaIrDigest
                 break;
             case GaSnapshotRead lookup:
                 writer.Write((byte)6);
+                writer.Write(lookup.FieldIndex);
                 WriteValue(writer, lookup.EntityId);
                 WriteValue(writer, lookup.Generation);
                 WriteValue(writer, lookup.Fallback);
+                break;
+            case GaArrayRead array:
+                writer.Write((byte)7);
+                WriteArrayField(writer, array.Field);
+                WriteValue(writer, array.Index);
+                break;
+            case GaHasOwn has:
+                writer.Write((byte)8);
+                writer.Write(has.ComponentIndex);
+                break;
+            case GaTryRead read:
+                writer.Write((byte)9);
+                writer.Write(read.ComponentIndex);
+                writer.Write(read.Copies.Count);
+                foreach (var copy in read.Copies)
+                {
+                    WriteSlot(writer, copy.Local);
+                    WriteSlot(writer, copy.Field);
+                }
+                break;
+            case GaResourceRead read:
+                writer.Write((byte)10);
+                writer.Write(read.FieldIndex);
+                break;
+            case GaBufferCount:
+                writer.Write((byte)11);
+                break;
+            case GaBufferRead read:
+                writer.Write((byte)12);
+                writer.Write(read.FieldIndex);
+                WriteValue(writer, read.Index);
                 break;
             default:
                 throw new InvalidOperationException("Unknown GA IR value.");
@@ -154,5 +263,12 @@ internal static class GaIrDigest
         writer.Write(slot.IsField);
         writer.Write(slot.Index);
         writer.Write((byte)slot.Type);
+    }
+
+    private static void WriteArrayField(BinaryWriter writer, GaArrayField field)
+    {
+        writer.Write(field.FirstField);
+        writer.Write(field.Length);
+        writer.Write((byte)field.Type);
     }
 }

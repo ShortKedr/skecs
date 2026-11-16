@@ -87,26 +87,45 @@ public abstract class GaPackedKernel : IGaPreparedKernel
     private readonly uint _workgroupSize;
     private readonly uint _maxGroups;
     private readonly uint _maxBufferBytes;
+    private readonly int _tickResourceWords;
+    private readonly int? _bufferRowWords;
     private readonly IReadOnlyList<GaSourceSpan> _sourceMap;
     private Task<GaPackedDispatchResult>? _active;
     private bool _disposed;
 
     protected GaPackedKernel(uint workgroupSize, uint maxGroups, uint maxBufferBytes,
         IReadOnlyList<GaSourceSpan> sourceMap)
+        : this(workgroupSize, maxGroups, maxBufferBytes, sourceMap, 0)
+    {
+    }
+
+    protected GaPackedKernel(uint workgroupSize, uint maxGroups, uint maxBufferBytes,
+        IReadOnlyList<GaSourceSpan> sourceMap, int tickResourceWords)
+        : this(workgroupSize, maxGroups, maxBufferBytes, sourceMap, tickResourceWords, null)
+    {
+    }
+
+    protected GaPackedKernel(uint workgroupSize, uint maxGroups, uint maxBufferBytes,
+        IReadOnlyList<GaSourceSpan> sourceMap, int tickResourceWords, int? bufferRowWords)
     {
         ArgumentOutOfRangeException.ThrowIfZero(workgroupSize);
+        ArgumentOutOfRangeException.ThrowIfNegative(tickResourceWords);
+        if (bufferRowWords < 0)
+            throw new ArgumentOutOfRangeException(nameof(bufferRowWords));
         ArgumentNullException.ThrowIfNull(sourceMap);
         _workgroupSize = workgroupSize;
         _maxGroups = maxGroups;
         _maxBufferBytes = maxBufferBytes;
         _sourceMap = sourceMap;
+        _tickResourceWords = tickResourceWords;
+        _bufferRowWords = bufferRowWords;
     }
 
     public GaPackedSubmission BeginDispatch(
         ReadOnlySpan<uint> input, int rowWidthWords, CancellationToken cancellationToken = default) =>
         BeginDispatchWithOutput(input, rowWidthWords, additionalOutputWords: 0, cancellationToken);
 
-    /// <summary>Submits canonical rows and reserves a checked output section after the row results.</summary>
+    /// <summary>Submits canonical rows and declared inputs, reserving an optional output section.</summary>
     public GaPackedSubmission BeginDispatchWithOutput(
         ReadOnlySpan<uint> input, int rowWidthWords, int additionalOutputWords, CancellationToken cancellationToken = default) =>
         BeginDispatchWithOutput(input, rowWidthWords, additionalOutputWords, cancellationToken, measureDevice: false);
@@ -130,8 +149,16 @@ public abstract class GaPackedKernel : IGaPreparedKernel
             long count = input[0];
             long rowWords = count * rowWidthWords;
             long faultLength = count * GaPackedDispatchResult.FaultStride;
-            if (rowWords + 1 != input.Length)
-                throw new ArgumentException("The row count and width do not match the input payload.", nameof(input));
+            int tickResourceWords = count == 0 ? 0 : _tickResourceWords;
+            long payloadWords = rowWords + 1 + tickResourceWords;
+            if (count != 0 && _bufferRowWords is { } bufferStride)
+            {
+                if (payloadWords >= input.Length || input[(int)payloadWords] > int.MaxValue)
+                    throw new ArgumentException("The input is missing a valid read buffer header.", nameof(input));
+                payloadWords += 1L + (long)input[(int)payloadWords] * bufferStride;
+            }
+            if (payloadWords != input.Length)
+                throw new ArgumentException("The row count, width and declared inputs do not match the input payload.", nameof(input));
             long outputLength = rowWords + additionalOutputWords;
             long inputLength = (long)input.Length + snapshot.Length;
             var groups = (count + _workgroupSize - 1) / _workgroupSize;

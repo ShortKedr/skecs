@@ -16,9 +16,23 @@ internal struct GaVelocity
     internal int TargetGeneration;
     internal int DestroyId;
     internal int DestroyGeneration;
+    internal int RemoveId;
+    internal int RemoveGeneration;
 }
 
 internal struct GaSignal { internal int Value; }
+internal struct GaRemovalMarker { internal int Value; }
+internal struct GaAddedData
+{
+    internal int Count;
+    internal bool Flag;
+}
+
+internal struct GaAdded
+{
+    internal Fixed Amount;
+    internal GaAddedData Data;
+}
 
 [SecsSystem(SystemId = "demo.fixed-movement")]
 internal partial struct GaMovement
@@ -29,10 +43,31 @@ internal partial struct GaMovement
             context.Emit(position.Cell);
         if (velocity.DestroyGeneration != 0)
         {
+            context.Remove<GaRemovalMarker>(velocity.RemoveId, velocity.RemoveGeneration);
+            context.Remove<GaRemovalMarker>(velocity.RemoveId, velocity.RemoveGeneration);
+            context.Add(velocity.RemoveId, velocity.RemoveGeneration, new GaAdded
+            {
+                Amount = Fixed.FromRaw(-0x1_0000_0007L),
+                Data = new GaAddedData { Count = position.Cell - 37, Flag = velocity.Divide }
+            });
+            context.Add(velocity.RemoveId, velocity.RemoveGeneration, new GaAdded
+            {
+                Amount = Fixed.FromRaw(7L),
+                Data = new GaAddedData { Count = 772, Flag = false }
+            });
             context.Destroy(velocity.DestroyId, velocity.DestroyGeneration);
             context.Destroy(velocity.DestroyId, velocity.DestroyGeneration);
             context.Create();
+            var kept = context.Create();
+            context.Add(kept, new GaAdded { Amount = Fixed.FromRaw(17L) });
+            context.Remove<GaAdded>(kept);
+            context.Add(kept, new GaAdded
+            {
+                Amount = Fixed.FromRaw(0x2000_0000_0000_0021L),
+                Data = new GaAddedData { Count = ~position.Cell, Flag = velocity.Divide }
+            });
             var ticket = context.Create();
+            context.Remove<GaRemovalMarker>(ticket);
             context.Destroy(ticket);
         }
         int signal = context.ReadSnapshotInt32(velocity.TargetId, velocity.TargetGeneration, -777);

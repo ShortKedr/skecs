@@ -60,29 +60,26 @@ public readonly ref struct GaEventPacket
         Apply(source, job.ForJob(), decode);
     }
 
-    internal void ValidateMixedRecords(int successfulSources)
+    internal void ValidateMixedRecords(int successfulSources, ReadOnlySpan<GaComponentRemoval> removals,
+        ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
     {
         for (int source = 0; source < successfulSources; source++)
-        {
-            int offset = source * _sourceWords;
-            int count = (int)_slots[offset++];
-            var records = _slots.Slice(offset, count * EventWords);
-            for (int item = 0; item < count; item++)
-                GaOutputRecord.Read(records.Slice(item * EventWords, EventWords)).ValidateTicket(records, item);
-        }
+            GaOutputRecord.ValidatePackedSource(Records(source), EventWords, removals, additions, usesDomainOrder);
     }
 
-    internal void ApplyMixedEntityRows<TInput>(DeterministicJob<TInput> job, int firstSource, int successfulRows)
+    internal void ApplyMixedEntityRows<TInput>(DeterministicJob<TInput> job, int firstSource, int successfulRows,
+        ReadOnlySpan<GaComponentRemoval> removals, ReadOnlySpan<GaComponentAddition> additions, bool usesDomainOrder)
         where TInput : unmanaged
     {
         for (int row = 0; row < successfulRows; row++)
-        {
-            int offset = (firstSource + row) * _sourceWords;
-            int count = (int)_slots[offset++];
-            var replay = new GaOutputRecord.Replay(job.ForEntity(row), count);
-            for (int item = 0; item < count; item++, offset += EventWords)
-                replay.Apply(GaOutputRecord.Read(_slots.Slice(offset, EventWords)), item);
-        }
+            GaOutputRecord.ReplayPackedSource(job.ForEntity(row), Records(firstSource + row), EventWords, removals, additions,
+                usesDomainOrder);
+    }
+
+    private ReadOnlySpan<uint> Records(int source)
+    {
+        int offset = source * _sourceWords;
+        return _slots.Slice(offset + 1, (int)_slots[offset] * EventWords);
     }
 
     private void Apply<TEvent>(int source, DeterministicSource target, GaEventDecoder<TEvent> decode)

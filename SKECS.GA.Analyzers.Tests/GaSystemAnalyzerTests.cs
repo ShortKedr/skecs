@@ -451,6 +451,50 @@ public sealed class GaSystemAnalyzerTests
             diagnostic.Id == "GA0006" && Text(diagnostic) == "ticket");
     }
 
+    [Fact]
+    public async Task AdmitsRemovalOfClosedNestedMarkerByEntityAndTicket()
+    {
+        const string source = """
+            using SKECS.GA;
+            public struct Outer<T> where T : unmanaged { public struct Marker { } }
+            [SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(in SystemContext context)
+                {
+                    context.Remove<Outer<int>.Marker>(entityId: 3, generation: 2);
+                    var ticket = context.Create();
+                    context.Remove<Outer<int>.Marker>(ticket: ticket);
+                }
+            }
+            """;
+        Assert.Empty(await Analyze(source, useRuntime: true));
+    }
+
+    [Fact]
+    public async Task RejectsRemovalOfComponentsInaccessibleFromGeneratedCode()
+    {
+        const string source = """
+            using SKECS.GA;
+            file struct FileMarker { }
+            [SecsSystem]
+            partial struct Motion
+            {
+                private struct PrivateMarker { }
+                public void Execute(in SystemContext context)
+                {
+                    context.Remove<PrivateMarker>(3, 2);
+                    context.Remove<FileMarker>(3, 2);
+                }
+            }
+            """;
+        var diagnostics = await Analyze(source, useRuntime: true);
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "GA0006" && Text(diagnostic) == "context.Remove<PrivateMarker>(3, 2)");
+        Assert.Contains(diagnostics, diagnostic =>
+            diagnostic.Id == "GA0006" && Text(diagnostic) == "context.Remove<FileMarker>(3, 2)");
+    }
+
     private static string Text(Diagnostic diagnostic) =>
         diagnostic.Location.SourceTree!.GetText().ToString(diagnostic.Location.SourceSpan);
 

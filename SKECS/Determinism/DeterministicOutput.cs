@@ -12,29 +12,37 @@ public enum DeterministicSourceKind
 /// <summary>The canonical, lexicographically ordered key of a command, event or reduction leaf.</summary>
 public readonly struct DeterministicOrderKey : IComparable<DeterministicOrderKey>, IEquatable<DeterministicOrderKey>
 {
-    internal DeterministicOrderKey(long tickIndex, SystemStage stage, int systemOrder,
-        DeterministicSourceKind sourceKind, int sourceId, int sourceGeneration, int localOrdinal)
+    internal DeterministicOrderKey(long tickIndex, SystemStage stage, int systemOrder, int producerOrder,
+        DeterministicSourceKind sourceKind, int sourceId, int sourceGeneration, int localOrdinal,
+        DeterministicDomainKey? domainKey)
     {
         TickIndex = tickIndex;
         Stage = stage;
         SystemOrder = systemOrder;
+        ProducerOrder = producerOrder;
         SourceKind = sourceKind;
         SourceId = sourceId;
         SourceGeneration = sourceGeneration;
         LocalOrdinal = localOrdinal;
+        DomainKey = domainKey;
     }
 
     public long TickIndex { get; }
     public SystemStage Stage { get; }
     public int SystemOrder { get; }
+    /// <summary>Registration order within a commit group, or zero for a standalone system.</summary>
+    public int ProducerOrder { get; }
     public DeterministicSourceKind SourceKind { get; }
     public int SourceId { get; }
     public int SourceGeneration { get; }
     public int LocalOrdinal { get; }
+    /// <summary>Sorts ahead of the producer and source keys when a group declares domain ordering.</summary>
+    public DeterministicDomainKey? DomainKey { get; }
 
     internal bool SameSource(DeterministicOrderKey other) =>
         TickIndex == other.TickIndex && Stage == other.Stage && SystemOrder == other.SystemOrder
-        && SourceKind == other.SourceKind && SourceId == other.SourceId && SourceGeneration == other.SourceGeneration;
+        && ProducerOrder == other.ProducerOrder && SourceKind == other.SourceKind && SourceId == other.SourceId
+        && SourceGeneration == other.SourceGeneration;
 
     public int CompareTo(DeterministicOrderKey other)
     {
@@ -44,6 +52,10 @@ public readonly struct DeterministicOrderKey : IComparable<DeterministicOrderKey
         if (order != 0) return order;
         order = SystemOrder.CompareTo(other.SystemOrder);
         if (order != 0) return order;
+        order = Nullable.Compare(DomainKey, other.DomainKey);
+        if (order != 0) return order;
+        order = ProducerOrder.CompareTo(other.ProducerOrder);
+        if (order != 0) return order;
         order = SourceKind.CompareTo(other.SourceKind);
         if (order != 0) return order;
         order = SourceId.CompareTo(other.SourceId);
@@ -52,7 +64,8 @@ public readonly struct DeterministicOrderKey : IComparable<DeterministicOrderKey
         return order != 0 ? order : LocalOrdinal.CompareTo(other.LocalOrdinal);
     }
 
-    public bool Equals(DeterministicOrderKey other) => SameSource(other) && LocalOrdinal == other.LocalOrdinal;
+    public bool Equals(DeterministicOrderKey other) =>
+        SameSource(other) && LocalOrdinal == other.LocalOrdinal && Nullable.Equals(DomainKey, other.DomainKey);
 
     public override bool Equals(object? obj) => obj is DeterministicOrderKey other && Equals(other);
 
@@ -63,6 +76,12 @@ public readonly struct DeterministicOrderKey : IComparable<DeterministicOrderKey
             var hash = TickIndex.GetHashCode();
             hash = hash * 31 + (int)Stage;
             hash = hash * 31 + SystemOrder;
+            if (DomainKey is { } domain)
+            {
+                hash = hash * 31 + domain.Primary;
+                hash = hash * 31 + domain.Secondary;
+            }
+            if (ProducerOrder != 0) hash = hash * 31 + ProducerOrder;
             hash = hash * 31 + (int)SourceKind;
             hash = hash * 31 + SourceId;
             hash = hash * 31 + SourceGeneration;

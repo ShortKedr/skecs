@@ -65,7 +65,16 @@ internal static class GaArtifactPackager
             {
                 EventCapacity = program.EventCapacity,
                 UsesSnapshot = program.UsesSnapshot,
-                UsesCommands = program.UsesCommands
+                SnapshotSchema = program.SnapshotLayout?.Schema,
+                TickResourceType = program.TickResourceType,
+                TickResourceWords = program.TickResourceWords,
+                BufferSchema = program.BufferSchema,
+                BufferRowWords = program.BufferRowWords,
+                UsesCommands = program.UsesCommands,
+                ComponentRemovalCount = program.RemovalComponents.Count,
+                ComponentAdditionCount = program.AdditionComponents.Count,
+                AdditionPayloadWords = program.AdditionPayloadWords,
+                UsesDomainOrder = program.UsesDomainOrder
             },
             toolchain, GaSlangModule.EntryPoint, bindings, usage,
             new GaKernelRequirements(program.UsesFixed ? GaComputeProfiles.WideFixedEmulated : GaComputeProfiles.Portable32,

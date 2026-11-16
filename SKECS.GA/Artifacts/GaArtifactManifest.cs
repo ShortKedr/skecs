@@ -16,8 +16,26 @@ public sealed record GaContractIdentity(
     public int EventCapacity { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool UsesSnapshot { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SnapshotSchema { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TickResourceType { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int TickResourceWords { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BufferSchema { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int BufferRowWords { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool UsesCommands { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ComponentRemovalCount { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int ComponentAdditionCount { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int AdditionPayloadWords { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UsesDomainOrder { get; init; }
 }
 
 public enum GaArtifactFormat { SpirV, Dxil, Dxbc, MetalLibrary, Wgsl }
@@ -94,8 +112,38 @@ public sealed record GaArtifactManifest(
             throw Invalid("Invalid contract event capacity.");
         if (Contract.UsesSnapshot && (Contract.SubsetVersion < 3 || Contract.IrVersion < 3))
             throw Invalid("Invalid contract version for scalar snapshot lookup.");
+        if (Contract.SnapshotSchema is { } snapshotSchema &&
+            (!Contract.UsesSnapshot || Contract.SubsetVersion < 9 || Contract.IrVersion < 9 ||
+                !GaSnapshotLayout.IsValidSchema(snapshotSchema)))
+            throw Invalid("Invalid contract schema for typed snapshot lookup.");
+        if (Contract.TickResourceWords < 0 || Contract.TickResourceWords != 0 && Contract.TickResourceType is null)
+            throw Invalid("Invalid contract word count for the tick resource.");
+        if (Contract.TickResourceType is { } tickResourceType)
+        {
+            if (Contract.SubsetVersion < 12 || Contract.IrVersion < 12)
+                throw Invalid("Invalid contract version for the tick resource.");
+            ValidateText(tickResourceType, "tick resource type");
+        }
+        if (Contract.BufferRowWords < 0 || Contract.BufferRowWords != 0 && Contract.BufferSchema is null)
+            throw Invalid("Invalid contract row width for the read buffer.");
+        if (Contract.BufferSchema is { } bufferSchema)
+        {
+            if (Contract.SubsetVersion < 13 || Contract.IrVersion < 13)
+                throw Invalid("Invalid contract version for the read buffer.");
+            ValidateDigest(bufferSchema, "read buffer schema");
+        }
         if (Contract.UsesCommands && (Contract.SubsetVersion < 4 || Contract.IrVersion < 4))
             throw Invalid("Invalid contract version for structural commands.");
+        if (Contract.ComponentRemovalCount is < 0 or > GaOutputRecord.MaximumComponentRemovals ||
+            Contract.ComponentRemovalCount != 0 && (!Contract.UsesCommands || Contract.SubsetVersion < 6 || Contract.IrVersion < 6))
+            throw Invalid("Invalid contract component removal table.");
+        if (Contract.ComponentAdditionCount is < 0 or > GaOutputRecord.MaximumComponentCommands ||
+            Contract.AdditionPayloadWords is < 0 or > GaOutputRecord.MaximumAdditionPayloadWords ||
+            Contract.ComponentAdditionCount == 0 && Contract.AdditionPayloadWords != 0 ||
+            Contract.ComponentAdditionCount != 0 && (!Contract.UsesCommands || Contract.SubsetVersion < 7 || Contract.IrVersion < 7))
+            throw Invalid("Invalid contract component addition table.");
+        if (Contract.UsesDomainOrder && (Contract.SubsetVersion < 8 || Contract.IrVersion < 8))
+            throw Invalid("Invalid contract version for domain-ordered outputs.");
         ValidateText(Contract.SystemId, "system ID");
         ValidateText(Contract.SimulationContractId, "simulation contract ID");
         ValidateDigest(Contract.SourceDigest, "source");

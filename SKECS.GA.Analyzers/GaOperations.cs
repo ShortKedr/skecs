@@ -11,6 +11,14 @@ public static partial class GaSemanticAnalysis
 {
     private sealed partial class Verifier
     {
+        private enum OwnMode { Read, ReadWrite, OptionalRead }
+
+        private readonly Dictionary<ITypeSymbol, OwnMode> ownAccesses = new(SymbolEqualityComparer.Default);
+        private readonly Dictionary<ILocalSymbol, ITypeSymbol> ownAliases = new(SymbolEqualityComparer.Default);
+        private readonly HashSet<ILocalSymbol> resourceAliases = new(SymbolEqualityComparer.Default);
+        private ITypeSymbol? resourceType;
+        private ITypeSymbol? bufferType;
+
         public override void Visit(IOperation? operation)
         {
             if (operation == null)
@@ -28,8 +36,22 @@ public static partial class GaSemanticAnalysis
                     Report(Managed, location, "Remove unsafe code from the GA call graph.");
                     return;
                 case IVariableDeclaratorOperation local when local.Symbol.RefKind != RefKind.None:
-                    Report(Write, location, "Use a value local instead of a ref alias.");
-                    return;
+                    if (local.Symbol.RefKind == RefKind.RefReadOnly &&
+                        StripParentheses(local.Initializer?.Value) is IInvocationOperation resource &&
+                        IsTickResourceCall(resource) && Equal(resourceType, local.Symbol.Type))
+                    {
+                        resourceAliases.Add(local.Symbol);
+                        break;
+                    }
+                    if (local.Symbol.RefKind != RefKind.Ref ||
+                        StripParentheses(local.Initializer?.Value) is not IInvocationOperation own ||
+                        !TryOwnType(own, out var ownType) || !Equal(ownType, local.Symbol.Type))
+                    {
+                        Report(Write, location, "Use a direct ref local for Own<T>() or ref readonly local for Resource<T>().");
+                        return;
+                    }
+                    ownAliases.Add(local.Symbol, ownType);
+                    break;
                 case IVariableDeclaratorOperation local when IsEntityTicket(local.Symbol.Type):
                     if (local.Initializer?.Value is IInvocationOperation createCall && IsTicketCreation(createCall))
                         ticketLocals.Add(local.Symbol);
@@ -42,6 +64,10 @@ public static partial class GaSemanticAnalysis
                 case ISimpleAssignmentOperation { IsRef: true }:
                     Report(Write, location, "Write the component value directly instead of reassigning its reference.");
                     return;
+                case ISimpleAssignmentOperation fieldInitializer when IsAdditionInitializer(fieldInitializer.Parent):
+                    if (fieldInitializer.Target is not IFieldReferenceOperation { Field.IsStatic: false })
+                        Report(Stream, location, "Initialize only instance fields in an Add<T> payload.");
+                    break;
                 case ISimpleAssignmentOperation assignment:
                     RequireWritable(assignment.Target, location);
                     break;
@@ -60,6 +86,15 @@ public static partial class GaSemanticAnalysis
                 case IFieldReferenceOperation field when field.Field.IsStatic && !field.Field.IsConst && !IsFixedConstant(field.Field):
                     Report(Managed, location, $"Pass '{field.Field.ToDisplayString()}' as a frozen value instead of reading shared state.");
                     return;
+                case IFieldReferenceOperation field when IsInlineArrayBackingField(field.Field):
+                    Report(Unknown, location, "Access an inline array backing field through index 0.");
+                    return;
+                case ILocalReferenceOperation local when ownAliases.ContainsKey(local.Local) && !IsComponentReceiver(local):
+                    Report(Write, location, "Keep a ref to an own component local and access its fields directly.");
+                    return;
+                case ILocalReferenceOperation local when resourceAliases.Contains(local.Local):
+                    CheckResourceUse(local, location);
+                    break;
                 case IPropertyReferenceOperation property:
                     AnalyzeProperty(property);
                     break;
@@ -82,6 +117,15 @@ public static partial class GaSemanticAnalysis
                     if (!HasFiniteBound(loop))
                         Report(Unknown, location, "Use a bounded loop with a stable integer limit and a unit step toward that limit.");
                     break;
+                case IInlineArrayAccessOperation access:
+                    AnalyzeInlineArrayAccess(access, location);
+                    break;
+                case IObjectCreationOperation addition when IsAdditionValue(addition):
+                    if (addition.Arguments.Length != 0 || addition.Constructor is { IsImplicitlyDeclared: false })
+                        Report(Stream, location, "Use a plain field initializer with no user-defined constructor in an Add<T> payload.");
+                    break;
+                case IObjectOrCollectionInitializerOperation initializer when IsAdditionInitializer(initializer):
+                    break;
                 case IObjectCreationOperation creation when creation.Type?.IsValueType == true && creation.Initializer == null:
                     if (creation.Constructor is { IsImplicitlyDeclared: false } constructor)
                         VisitMethod(constructor, location);
@@ -93,7 +137,8 @@ public static partial class GaSemanticAnalysis
                     or IInstanceReferenceOperation or IFieldReferenceOperation or ILiteralOperation or IConversionOperation
                     or IBinaryOperation or IUnaryOperation or IConditionalOperation or IArgumentOperation
                     or IDefaultValueOperation or IParenthesizedOperation or IEmptyOperation or IDeclarationExpressionOperation
-                    or IInlineArrayAccessOperation or ISwitchOperation or ISwitchCaseOperation or ISingleValueCaseClauseOperation
+                    or IDiscardOperation
+                    or ISwitchOperation or ISwitchCaseOperation or ISingleValueCaseClauseOperation
                     or IDefaultCaseClauseOperation:
                     break;
                 default:
@@ -106,7 +151,7 @@ public static partial class GaSemanticAnalysis
                 if (IsEntityTicket(type))
                 {
                     if (!IsTicketUse(operation))
-                        Report(Stream, location, "Keep GA tickets in their initial local and pass them directly to Destroy.");
+                        Report(Stream, location, "Keep GA tickets in their initial local and pass them directly to Destroy, Remove or Add.");
                 }
                 else if (!(operation is IInstanceReferenceOperation && Equal(type, entry.ContainingType)))
                     CheckType(type, location, operation is IParameterReferenceOperation);
@@ -114,16 +159,93 @@ public static partial class GaSemanticAnalysis
             base.Visit(operation);
         }
 
+        private void AnalyzeInlineArrayAccess(IInlineArrayAccessOperation access, Location location)
+        {
+            if (access.Argument.Type?.SpecialType != SpecialType.System_Int32)
+                Report(Unknown, location, "Index an inline array element with Int32.");
+            var root = StorageRoot(access.Instance);
+            bool query = root is IParameterSymbol parameter && Equal(parameter.ContainingSymbol, entry) &&
+                parameter.RefKind is (RefKind.In or RefKind.Ref);
+            bool own = root is ITypeSymbol component && ownAccesses.ContainsKey(component);
+            if (!query && !own)
+                Report(Unknown, location, "Use an inline array stored in a query component or a declared own component.");
+        }
+
+        private bool IsInlineArrayBackingField(IFieldSymbol field) => !field.IsStatic &&
+            field.ContainingType.GetAttributes().Any(attribute =>
+                attribute.AttributeClass is { } type &&
+                type.MetadataName == "InlineArrayAttribute" &&
+                Equal(type, compilation.GetTypeByMetadataName("System.Runtime.CompilerServices.InlineArrayAttribute")));
+
         private void AnalyzeInvocation(IInvocationOperation invocation)
         {
             var method = invocation.TargetMethod;
             var location = invocation.Syntax.GetLocation();
-            if (IsTicketDestruction(method))
+            if (Equal(method.ContainingType, context) && method.Name == "Resource" && IsRuntimeSystemContext())
             {
-                if (!IsEntryContext(invocation.Instance) ||
-                    invocation.Arguments.Length != 1 ||
-                    invocation.Arguments[0] is not { Parameter.Ordinal: 0, Value: ILocalReferenceOperation local } ||
-                    !ticketLocals.Contains(local.Local))
+                if (!IsTickResourceCall(invocation))
+                    Report(Unknown, location, "Call Resource<T>() directly on the entry context with the declared runner tick input type.");
+                else if (ParentOutsideParentheses(invocation) is not IVariableInitializerOperation
+                    { Parent: IVariableDeclaratorOperation { Symbol.RefKind: RefKind.RefReadOnly } })
+                    CheckResourceUse(invocation, location);
+                return;
+            }
+            if (Equal(method.ContainingType, context) && method.Name is ("ReadBuffer" or "BufferLength") &&
+                IsRuntimeSystemContext())
+            {
+                AnalyzeBufferAccess(invocation, location);
+                return;
+            }
+            if (Equal(method.ContainingType, context) && method.Name is ("Own" or "Has" or "TryRead") && IsRuntimeSystemContext())
+            {
+                AnalyzeOwnAccess(invocation, location);
+                return;
+            }
+            if (IsAdditionCommand(method))
+            {
+                var component = method.TypeArguments[0];
+                if (!IsEntryContext(invocation.Instance) || !IsRemovalComponent(component) ||
+                    !CanPackAddition(component))
+                {
+                    Report(Stream, location, "Call Add<T> directly on the entry context with an accessible, portable component struct.");
+                }
+                else if (invocation.Arguments.Length != method.Parameters.Length ||
+                    invocation.Arguments.Where((argument, index) => argument.Parameter?.Ordinal != index).Any())
+                {
+                    Report(Stream, location, "Call Add<T> with arguments in declaration order.");
+                }
+                else if (IsTicketCommand(method) && !HasCreatedTicket(invocation))
+                {
+                    Report(Stream, location, "Pass a ticket local initialized by this invocation's Create().");
+                }
+                return;
+            }
+            if (Equal(method.ContainingType, context) && method.Name == "Remove" && IsRuntimeSystemContext())
+            {
+                if (method is not { IsStatic: false, Arity: 1, ReturnsVoid: true } || !IsEntryContext(invocation.Instance) ||
+                    !IsRemovalComponent(method.TypeArguments[0]))
+                {
+                    Report(Stream, location, "Call Remove<T> directly on the entry context with an accessible, closed unmanaged component struct.");
+                }
+                else if (IsTicketCommand(method))
+                {
+                    if (!HasCreatedTicket(invocation))
+                        Report(Stream, location, "Pass a ticket local initialized by this invocation's Create().");
+                }
+                else if (method.Parameters.Length != 2 ||
+                    method.Parameters.Any(parameter => parameter.RefKind != RefKind.None ||
+                        parameter.Type.SpecialType != SpecialType.System_Int32) ||
+                    invocation.Arguments.Length != 2 ||
+                    invocation.Arguments[0].Parameter?.Ordinal != 0 ||
+                    invocation.Arguments[1].Parameter?.Ordinal != 1)
+                {
+                    Report(Stream, location, "Call Remove<T>(int, int) with arguments in declaration order.");
+                }
+                return;
+            }
+            if (IsTicketCommand(method))
+            {
+                if (!IsEntryContext(invocation.Instance) || !HasCreatedTicket(invocation))
                     Report(Stream, location, "Call Destroy(ticket) directly on the entry context with a local initialized by Create().");
                 return;
             }
@@ -139,7 +261,7 @@ public static partial class GaSemanticAnalysis
                     Report(Stream, location, "Call Emit(int) directly on the entry point's in SystemContext parameter.");
                 return;
             }
-            if (Equal(method.ContainingType, context) && method.Name == "Destroy" && IsRuntimeSystemContext())
+            if (Equal(method.ContainingType, context) && method.Name is ("Destroy" or "SetDomainOrder") && IsRuntimeSystemContext())
             {
                 if (method is not { IsStatic: false, Arity: 0, ReturnsVoid: true } ||
                     method.Parameters.Length != 2 ||
@@ -149,7 +271,7 @@ public static partial class GaSemanticAnalysis
                     invocation.Arguments[0].Parameter?.Ordinal != 0 ||
                     invocation.Arguments[1].Parameter?.Ordinal != 1 ||
                     !IsEntryContext(invocation.Instance))
-                    Report(Stream, location, "Call Destroy(int, int) directly on the entry point's in SystemContext parameter, with arguments in declaration order.");
+                    Report(Stream, location, $"Call {method.Name}(int, int) directly on the entry point's in SystemContext parameter, with arguments in declaration order.");
                 return;
             }
             if (Equal(method.ContainingType, context) && method.Name == "ReadSnapshotInt32" && IsRuntimeSystemContext())
@@ -165,6 +287,32 @@ public static partial class GaSemanticAnalysis
                     invocation.Arguments[2].Parameter?.Ordinal != 2 ||
                     !IsEntryContext(invocation.Instance))
                     Report(Unknown, location, "Call ReadSnapshotInt32 directly on the entry point's in SystemContext parameter, with arguments in declaration order.");
+                else if (!snapshotFields.IsDefault && (snapshotFields.Length != 1 || !IsSnapshotScalar(snapshotFields[0], "Int32")))
+                    Report(Unknown, location, "ReadSnapshotInt32 requires the single Int32 snapshot layout.");
+                return;
+            }
+            if (Equal(method.ContainingType, context) && method.Name == "ReadSnapshot" && IsRuntimeSystemContext())
+            {
+                if (method is not { IsStatic: false, Arity: 1 } || !IsEntryContext(invocation.Instance) ||
+                    invocation.Arguments.Length != 4 ||
+                    invocation.Arguments.Where((argument, index) => argument.Parameter?.Ordinal != index).Any() ||
+                    invocation.Arguments[2].Value.ConstantValue is not { HasValue: true, Value: int field })
+                {
+                    Report(Unknown, location, "Call ReadSnapshot<T> directly on the entry point's in SystemContext parameter, with arguments in declaration order and a constant field index.");
+                    return;
+                }
+                var type = method.TypeArguments[0];
+                string? scalar = type.SpecialType switch
+                {
+                    SpecialType.System_Boolean => "Bool",
+                    SpecialType.System_Int32 => "Int32",
+                    SpecialType.System_UInt32 => "UInt32",
+                    _ when Equal(type, fixedType) => "Fixed",
+                    _ => null
+                };
+                if (scalar is null || snapshotFields.IsDefault || (uint)field >= (uint)snapshotFields.Length ||
+                    !IsSnapshotScalar(snapshotFields[field], scalar))
+                    Report(Unknown, location, "ReadSnapshot<T> requires a supported scalar type matching the declared snapshot field.");
                 return;
             }
             if (AnalyzeIntrinsic(method, location))
@@ -188,6 +336,200 @@ public static partial class GaSemanticAnalysis
             VisitMethod(method, location);
         }
 
+        private ITypeSymbol? ReadDeclaredInputType(string attributeName, string description)
+        {
+            ITypeSymbol? declared = null;
+            foreach (var attribute in entry.GetAttributes())
+            {
+                if (attribute.AttributeClass is not { } type || type.Name != attributeName + "Attribute" ||
+                    type.ContainingNamespace.ToDisplayString() != "SKECS.GA")
+                    continue;
+                var location = attribute.ApplicationSyntaxReference?.GetSyntax(cancellationToken).GetLocation() ?? Source(entry);
+                if (declared != null || !IsRuntimeSystemContext() || !Equal(type.ContainingAssembly, context?.ContainingAssembly) ||
+                    type.DeclaringSyntaxReferences.Length != 0 || !entry.Parameters.Any(parameter => Equal(parameter.Type, context)) ||
+                    attribute.ConstructorArguments.Length != 1 ||
+                    attribute.ConstructorArguments[0] is not { Kind: TypedConstantKind.Type, Value: INamedTypeSymbol input } ||
+                    !(IsRemovalComponent(input) || IsScalarResource(input) && CanNameComponentType(input)) ||
+                    !IsSchema(input, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)))
+                {
+                    Report(Unknown, location, $"Declare one portable {description} with the runtime {attributeName} attribute.");
+                    continue;
+                }
+                declared = input;
+            }
+            return declared;
+        }
+
+        private void AnalyzeBufferAccess(IInvocationOperation invocation, Location location)
+        {
+            var method = invocation.TargetMethod;
+            bool readsElement = method.Name == "ReadBuffer";
+            bool valid = method is { IsStatic: false, Arity: 1 } &&
+                IsEntryContext(invocation.Instance) && bufferType != null &&
+                Equal(method.TypeArguments[0], bufferType);
+            valid = valid && (readsElement
+                ? method.ReturnsByRefReadonly && Equal(method.ReturnType, bufferType) &&
+                    method.Parameters.Length == 1 && invocation.Arguments.Length == 1 &&
+                    method.Parameters[0].RefKind == RefKind.None &&
+                    method.Parameters[0].Type.SpecialType == SpecialType.System_Int32
+                : !method.ReturnsByRef && !method.ReturnsByRefReadonly &&
+                    method.Parameters.Length == 0 && invocation.Arguments.Length == 0 &&
+                    method.ReturnType.SpecialType == SpecialType.System_Int32);
+            if (!valid)
+            {
+                Report(Unknown, location,
+                    "Call ReadBuffer<T>(int) or BufferLength<T>() directly on the entry context with the declared buffer element type.");
+                return;
+            }
+            if (!readsElement)
+                return;
+
+            IOperation value = invocation;
+            while (ParentOutsideParentheses(value) is IFieldReferenceOperation field)
+                value = field;
+            if (value.Type is null || !IsScalarResource(value.Type))
+                Report(Unknown, location, "Read a portable scalar field from the declared buffer.");
+            if (ParentOutsideParentheses(value) is IArgumentOperation { Parameter.RefKind: not RefKind.None } or
+                IVariableInitializerOperation { Parent: IVariableDeclaratorOperation { Symbol.RefKind: not RefKind.None } })
+                Report(Write, location, "Copy the buffer field into a scalar local before using it by reference.");
+        }
+
+        private bool IsTickResourceCall(IInvocationOperation invocation)
+        {
+            var method = invocation.TargetMethod;
+            return method is { Name: "Resource", IsStatic: false, Arity: 1, ReturnsByRefReadonly: true } &&
+                Equal(method.ContainingType, context) && IsRuntimeSystemContext() && IsEntryContext(invocation.Instance) &&
+                invocation.Arguments.Length == 0 && resourceType != null &&
+                Equal(method.TypeArguments[0], resourceType) && Equal(method.ReturnType, resourceType);
+        }
+
+        private bool IsScalarResource(ITypeSymbol type) => Equal(type, fixedType) ||
+            type.SpecialType is SpecialType.System_Boolean or SpecialType.System_Int32 or SpecialType.System_UInt32 ||
+            type is INamedTypeSymbol
+            {
+                IsFileLocal: false,
+                EnumUnderlyingType.SpecialType: SpecialType.System_Int32 or SpecialType.System_UInt32
+            };
+
+        private void CheckResourceUse(IOperation operation, Location location)
+        {
+            if (ParentOutsideParentheses(operation) is not IFieldReferenceOperation &&
+                (operation.Type == null || !IsScalarResource(operation.Type)))
+                Report(Unknown, location, "Read scalar fields of the declared tick resource.");
+        }
+
+        private bool IsResourcePath(IOperation? operation)
+        {
+            var root = StripParentheses(operation);
+            while (root is IFieldReferenceOperation field)
+                root = StripParentheses(field.Instance);
+            return root is IInvocationOperation invocation && IsTickResourceCall(invocation) ||
+                root is ILocalReferenceOperation local && resourceAliases.Contains(local.Local);
+        }
+
+        private void ValidateOwnAccesses(HashSet<ITypeSymbol> components)
+        {
+            foreach (var attribute in entry.GetAttributes())
+            {
+                if (attribute.AttributeClass is not { Name: "GaAccessAttribute" } type ||
+                    type.ContainingNamespace.ToDisplayString() != "SKECS.GA")
+                    continue;
+                var location = attribute.ApplicationSyntaxReference?.GetSyntax(cancellationToken).GetLocation() ?? Source(entry);
+                if (!IsRuntimeSystemContext() || !Equal(type.ContainingAssembly, context?.ContainingAssembly) ||
+                    type.DeclaringSyntaxReferences.Length != 0 || !entry.Parameters.Any(parameter => Equal(parameter.Type, context)) ||
+                    attribute.ConstructorArguments.Length != 2 ||
+                    attribute.ConstructorArguments[0] is not { Kind: TypedConstantKind.Type, Value: ITypeSymbol component } ||
+                    !IsRemovalComponent(component) || !IsSchema(component, new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default)) ||
+                    ReadOwnMode(attribute.ConstructorArguments[1]) is not { } mode)
+                {
+                    Report(Unknown, location, "Declare a portable own component and access mode with the runtime GaAccess attribute.");
+                    continue;
+                }
+                if (!components.Add(component))
+                    Report(Unknown, location, "Declare each component once, either as a query parameter or with GaAccess.");
+                else
+                    ownAccesses.Add(component, mode);
+            }
+        }
+
+        private static OwnMode? ReadOwnMode(TypedConstant value)
+        {
+            if (IsSnapshotScalar(value, "Read")) return OwnMode.Read;
+            if (IsSnapshotScalar(value, "ReadWrite")) return OwnMode.ReadWrite;
+            if (IsSnapshotScalar(value, "OptionalRead")) return OwnMode.OptionalRead;
+            return null;
+        }
+
+        private void AnalyzeOwnAccess(IInvocationOperation invocation, Location location)
+        {
+            var method = invocation.TargetMethod;
+            if (method.Name == "Own")
+            {
+                if (!TryOwnType(invocation, out _))
+                {
+                    Report(Unknown, location, "Call Own<T> directly on the entry context for a declared required own component.");
+                    return;
+                }
+                if (!IsComponentReceiver(invocation) &&
+                    ParentOutsideParentheses(invocation) is not IVariableInitializerOperation
+                    { Parent: IVariableDeclaratorOperation { Symbol.RefKind: RefKind.Ref } })
+                    Report(Write, location, "Access fields of Own<T> directly or through a ref local.");
+                return;
+            }
+            if (!IsEntryContext(invocation.Instance) || method is not { IsStatic: false, Arity: 1 } ||
+                method.ReturnType.SpecialType != SpecialType.System_Boolean ||
+                !ownAccesses.TryGetValue(method.TypeArguments[0], out var access) || access != OwnMode.OptionalRead)
+            {
+                Report(Unknown, location, "Call Has<T> or TryRead<T> directly on the entry context for a declared OptionalRead component.");
+                return;
+            }
+            if (method.Name == "Has")
+            {
+                if (invocation.Arguments.Length != 0)
+                    Report(Unknown, location, "Call Has<T> without arguments.");
+                return;
+            }
+            var argument = invocation.Arguments.Length == 1 ? invocation.Arguments[0] : null;
+            var target = StripParentheses(argument?.Value);
+            if (target is IDeclarationExpressionOperation declaration)
+                target = declaration.Expression;
+            if (argument?.Parameter?.RefKind != RefKind.Out ||
+                target is not (ILocalReferenceOperation { Local.RefKind: RefKind.None } or IDiscardOperation))
+                Report(Unknown, location, "Pass a value local or discard as the out argument to TryRead<T>.");
+        }
+
+        private bool TryOwnType(IInvocationOperation invocation, out ITypeSymbol type)
+        {
+            var method = invocation.TargetMethod;
+            if (method is { Name: "Own", IsStatic: false, Arity: 1, ReturnsByRef: true } &&
+                Equal(method.ContainingType, context) && IsRuntimeSystemContext() && IsEntryContext(invocation.Instance) &&
+                invocation.Arguments.Length == 0 && ownAccesses.TryGetValue(method.TypeArguments[0], out var mode) &&
+                mode != OwnMode.OptionalRead)
+            {
+                type = method.TypeArguments[0];
+                return true;
+            }
+            type = null!;
+            return false;
+        }
+
+        private static bool IsComponentReceiver(IOperation operation) =>
+            ParentOutsideParentheses(operation) is IFieldReferenceOperation or IInlineArrayAccessOperation;
+
+        private static IOperation? ParentOutsideParentheses(IOperation operation)
+        {
+            while (operation.Parent is IParenthesizedOperation parenthesized)
+                operation = parenthesized;
+            return operation.Parent;
+        }
+
+        private static IOperation? StripParentheses(IOperation? operation)
+        {
+            while (operation is IParenthesizedOperation parenthesized)
+                operation = parenthesized.Operand;
+            return operation;
+        }
+
         private bool IsEntryContext(IOperation? receiver) =>
             receiver is IParameterReferenceOperation reference &&
             reference.Parameter.RefKind == RefKind.In &&
@@ -201,11 +543,76 @@ public static partial class GaSemanticAnalysis
             invocation.TargetMethod is { Name: "Create", IsStatic: false, Arity: 0, Parameters.Length: 0 } method &&
             Equal(method.ContainingType, context) && IsEntityTicket(method.ReturnType) && IsEntryContext(invocation.Instance);
 
-        private bool IsTicketDestruction(IMethodSymbol method) =>
-            method is { Name: "Destroy", IsStatic: false, Arity: 0, ReturnsVoid: true } &&
+        private bool IsTicketCommand(IMethodSymbol method) =>
+            method is { IsStatic: false, ReturnsVoid: true } &&
             Equal(method.ContainingType, context) &&
-            method.Parameters.Length == 1 && method.Parameters[0].RefKind == RefKind.None &&
+            ((method.Name, method.Arity, method.Parameters.Length) is ("Destroy", 0, 1) or ("Remove", 1, 1) ||
+                IsAdditionCommand(method) && method.Parameters.Length == 2) &&
+            method.Parameters[0].RefKind == RefKind.None &&
             IsEntityTicket(method.Parameters[0].Type);
+
+        private bool IsAdditionCommand(IMethodSymbol method) =>
+            method is { Name: "Add", IsStatic: false, Arity: 1, ReturnsVoid: true } &&
+            Equal(method.ContainingType, context) && IsRuntimeSystemContext();
+
+        private bool HasCreatedTicket(IInvocationOperation invocation) =>
+            invocation.Arguments.Length != 0 &&
+            invocation.Arguments[0] is { Parameter.Ordinal: 0, Value: ILocalReferenceOperation local } &&
+            ticketLocals.Contains(local.Local);
+
+        private bool IsAdditionInitializer(IOperation? operation) =>
+            operation is IObjectOrCollectionInitializerOperation { Parent: IObjectCreationOperation creation } && IsAdditionValue(creation);
+
+        private bool IsAdditionValue(IOperation operation) => operation.Parent switch
+        {
+            IArgumentOperation { Parent: IInvocationOperation invocation, Parameter: { } parameter } =>
+                IsAdditionCommand(invocation.TargetMethod) && parameter.Ordinal == invocation.TargetMethod.Parameters.Length - 1,
+            ISimpleAssignmentOperation assignment =>
+                ReferenceEquals(operation, assignment.Value) && IsAdditionInitializer(assignment.Parent),
+            IConversionOperation { Conversion.IsIdentity: true } conversion => IsAdditionValue(conversion),
+            _ => false
+        };
+
+        private bool CanPackAddition(ITypeSymbol type)
+        {
+            if (type.SpecialType is SpecialType.System_Boolean or SpecialType.System_Int32 or SpecialType.System_UInt32 ||
+                Equal(type, fixedType))
+                return true;
+            if (type is INamedTypeSymbol { EnumUnderlyingType: { } underlying })
+                return (underlying.SpecialType is SpecialType.System_Int32 or SpecialType.System_UInt32) && CanNameComponentType(type);
+            return type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None,
+                IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false } component &&
+                !component.GetAttributes().Any(attribute => attribute.AttributeClass?.ToDisplayString() switch
+                {
+                    "System.Runtime.CompilerServices.InlineArrayAttribute" => true,
+                    "System.Runtime.InteropServices.StructLayoutAttribute" =>
+                        attribute.ConstructorArguments[0].Value is int layout && layout != 0,
+                    _ => false
+                }) &&
+                component.GetMembers().OfType<IFieldSymbol>().Where(field => !field.IsStatic).All(field =>
+                    !field.IsReadOnly && !field.IsImplicitlyDeclared && !field.IsFixedSizeBuffer && field.RefKind == RefKind.None &&
+                    compilation.IsSymbolAccessibleWithin(field, compilation.Assembly) && CanPackAddition(field.Type));
+        }
+
+        private bool IsRemovalComponent(ITypeSymbol type) =>
+            type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None,
+                IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false } && CanNameComponentType(type);
+
+        private bool CanNameComponentType(ITypeSymbol type) => type switch
+        {
+            IArrayTypeSymbol array => CanNameComponentType(array.ElementType),
+            INamedTypeSymbol named => !named.IsFileLocal && !named.IsUnboundGenericType &&
+                compilation.IsSymbolAccessibleWithin(named, compilation.Assembly) &&
+                Equal(named.OriginalDefinition, compilation.GetTypeByMetadataName(MetadataName(named.OriginalDefinition))) &&
+                (named.ContainingType == null || CanNameComponentType(named.ContainingType)) &&
+                named.TypeArguments.All(CanNameComponentType),
+            _ => false
+        };
+
+        private static string MetadataName(ISymbol symbol) =>
+            symbol.ContainingType is { } parent ? MetadataName(parent) + "+" + symbol.MetadataName :
+            symbol.ContainingNamespace is { IsGlobalNamespace: false } ns ? MetadataName(ns) + "." + symbol.MetadataName :
+            symbol.MetadataName;
 
         private bool IsTicketUse(IOperation operation) => operation switch
         {
@@ -215,7 +622,7 @@ public static partial class GaSemanticAnalysis
                     ticketLocals.Contains(initializer.Symbol)),
             ILocalReferenceOperation local => ticketLocals.Contains(local.Local) &&
                 local.Parent is IArgumentOperation { Parameter.Ordinal: 0, Parent: IInvocationOperation invocation } &&
-                IsTicketDestruction(invocation.TargetMethod),
+                IsTicketCommand(invocation.TargetMethod),
             _ => false
         };
 
@@ -223,6 +630,36 @@ public static partial class GaSemanticAnalysis
             context is { IsRefLikeType: true } && context.ContainingAssembly.Identity.Name == "SKECS.GA" &&
             context.DeclaringSyntaxReferences.Length == 0 &&
             Equal(context.ContainingAssembly, compilation.GetTypeByMetadataName("SKECS.GA.SecsSystemAttribute")?.ContainingAssembly);
+
+        private void ValidateSnapshotDeclaration()
+        {
+            foreach (var attribute in entry.GetAttributes())
+            {
+                if (attribute.AttributeClass is not { Name: "GaSnapshotAttribute" } type ||
+                    type.ContainingNamespace.ToDisplayString() != "SKECS.GA")
+                    continue;
+
+                if (IsRuntimeSystemContext() && Equal(type.ContainingAssembly, context?.ContainingAssembly) &&
+                    type.DeclaringSyntaxReferences.Length == 0 &&
+                    attribute.ConstructorArguments.Length == 1 &&
+                    attribute.ConstructorArguments[0] is { Kind: TypedConstantKind.Array, IsNull: false } fields &&
+                    fields.Values.Length > 0 &&
+                    fields.Values.All(field => IsSnapshotScalar(field, "Bool") || IsSnapshotScalar(field, "Int32") ||
+                        IsSnapshotScalar(field, "UInt32") || IsSnapshotScalar(field, "Fixed")))
+                {
+                    snapshotFields = fields.Values;
+                }
+                else
+                {
+                    var location = attribute.ApplicationSyntaxReference?.GetSyntax(cancellationToken).GetLocation() ?? Source(entry);
+                    Report(Unknown, location, "Declare a nonempty snapshot layout with the runtime GaSnapshot attribute and Bool, Int32, UInt32 or Fixed fields.");
+                }
+            }
+        }
+
+        private static bool IsSnapshotScalar(TypedConstant field, string name) =>
+            field is { Kind: TypedConstantKind.Enum, Type: { } type } &&
+            type.GetMembers(name).OfType<IFieldSymbol>().Any(member => member.HasConstantValue && object.Equals(member.ConstantValue, field.Value));
 
         private void AnalyzeProperty(IPropertyReferenceOperation property)
         {
@@ -260,7 +697,7 @@ public static partial class GaSemanticAnalysis
             if (!Equal(method.ContainingType, context))
                 return false;
 
-            var descriptor = method.Name is "Emit" or "Create" or "Destroy" or "get_Commands" ? Stream : Unknown;
+            var descriptor = method.Name is "Emit" or "Create" or "Destroy" or "Remove" or "Add" or "SetDomainOrder" or "get_Commands" ? Stream : Unknown;
             Report(descriptor, location, $"Register and lower scoped context operation '{method.Name}' before using it in a GA kernel.");
             return true;
         }
@@ -336,6 +773,11 @@ public static partial class GaSemanticAnalysis
                 var refKind = argument.Parameter?.RefKind;
                 if (refKind is null or RefKind.None)
                     continue;
+                if (IsResourcePath(argument.Value))
+                {
+                    Report(Write, argument.Syntax.GetLocation(), "Copy the tick resource value into a scalar local before passing it by reference.");
+                    continue;
+                }
                 bool writable = refKind is RefKind.Ref or RefKind.Out;
                 if (writable)
                     RequireWritable(argument.Value, argument.Syntax.GetLocation());
@@ -363,6 +805,7 @@ public static partial class GaSemanticAnalysis
                 IParameterSymbol parameter when parameter.RefKind is RefKind.None or RefKind.Ref or RefKind.Out &&
                     !Equal(parameter.Type, context) && !Equal(parameter.Type, entity) => parameter,
                 ILocalSymbol { RefKind: RefKind.None } local => local,
+                ITypeSymbol type when ownAccesses.TryGetValue(type, out var access) && access == OwnMode.ReadWrite => type,
                 IMethodSymbol method when !Equal(method, entry) && !Equal(method.ContainingType, entry.ContainingType) &&
                     !method.IsReadOnly => method,
                 _ => null
@@ -371,7 +814,9 @@ public static partial class GaSemanticAnalysis
 
         private ISymbol? StorageRoot(IOperation? operation) => operation switch
         {
+            ILocalReferenceOperation local when ownAliases.TryGetValue(local.Local, out var type) => type,
             ILocalReferenceOperation local => local.Local,
+            IInvocationOperation own when TryOwnType(own, out var type) => type,
             IParameterReferenceOperation parameter => parameter.Parameter,
             IDeclarationExpressionOperation declaration => StorageRoot(declaration.Expression),
             IFieldReferenceOperation field => StorageRoot(field.Instance),

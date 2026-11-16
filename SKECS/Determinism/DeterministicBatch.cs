@@ -56,6 +56,8 @@ public readonly ref struct DeterministicBatch<TInput> where TInput : unmanaged
     public Fixed Step { get; }
     public SystemStage Stage => _plan.Stage;
     public int SystemOrder => _plan.SystemOrder;
+    public int KernelOrder => _plan.KernelOrder;
+    public DeterministicDomainOrder? DomainOrder => _plan.DomainOrder;
 
     public DeterministicBatchReadJob<TInput> GetReadJob(int jobId) => new(CreateJob(jobId));
 
@@ -82,11 +84,17 @@ public readonly ref struct DeterministicBatchReadJob<TInput> where TInput : unma
     public DeterministicBatchReadJob(DeterministicJob<TInput> job) => _job = job;
 
     public long TickIndex => _job.TickIndex;
+    public SystemStage Stage => _job.Stage;
+    public int SystemOrder => _job.SystemOrder;
+    public int KernelOrder => _job.KernelOrder;
+    public DeterministicDomainOrder? DomainOrder => _job.DomainOrder;
     public TInput Input => _job.Input;
     public Fixed Step => _job.Step;
     public int JobId => _job.JobId;
     public int Count => _job.Count;
     public Entity GetEntity(int index) => _job.GetEntity(index);
+    public DeterministicDomainKey? GetSourceOrderKey(int row) => _job.GetSourceOrderKey(row);
+    public long GetSourceOrderOrdinal(int row) => _job.GetSourceOrderOrdinal(row);
     public T Read<T>(int index) where T : unmanaged => _job.Read<T>(index);
     public bool TryRead<T>(int index, out T value) where T : unmanaged => _job.TryRead(index, out value);
 }

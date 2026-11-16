@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 
@@ -6,16 +7,34 @@ namespace SKECS.GA;
 internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol entry)
 {
     private readonly Dictionary<IParameterSymbol, GaComponent> _components = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<ITypeSymbol, (GaComponent Component, int Index)> _declaredAccesses = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<ILocalSymbol, GaComponent> _ownAliases = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<ILocalSymbol, OptionalCopy> _optionalLocals = new(SymbolEqualityComparer.Default);
+    private readonly List<GaStatement> _optionalDefaults = new();
     private readonly Dictionary<(string Component, string Path), GaSlot> _fields = new();
+    private readonly Dictionary<(string Component, string Path), GaArrayField> _arrayFields = new();
     private readonly Dictionary<ILocalSymbol, GaSlot> _locals = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<ILocalSymbol, int> _ticketLocals = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<string, int> _removalComponentIndices = new(StringComparer.Ordinal);
+    private readonly List<string> _removalComponents = new();
+    private readonly Dictionary<string, int> _additionComponentIndices = new(StringComparer.Ordinal);
+    private readonly List<GaAdditionComponent> _additionComponents = new();
     private readonly List<GaField> _schema = new();
+    private readonly List<GaTickResourceField> _resourceFields = new();
+    private readonly Dictionary<string, int> _resourceFieldIndices = new(StringComparer.Ordinal);
+    private readonly HashSet<ILocalSymbol> _resourceAliases = new(SymbolEqualityComparer.Default);
+    private readonly List<GaBufferField> _bufferFields = new();
+    private readonly Dictionary<string, int> _bufferFieldIndices = new(StringComparer.Ordinal);
     private readonly List<GaScalar> _localTypes = new();
     private IParameterSymbol? _context;
+    private GaSnapshotLayout? _snapshotLayout;
+    private INamedTypeSymbol? _resourceType;
+    private INamedTypeSymbol? _bufferType;
     private bool _insideLoop;
 
     internal GaProgram Lower(string systemId, string sourceDigest, IOperation body)
     {
+        _snapshotLayout = ReadSnapshotLayout();
         var componentIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var parameter in entry.Parameters)
         {
@@ -39,17 +58,139 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             _components.Add(parameter, new GaComponent(id,
                 parameter.RefKind == RefKind.Ref ? GaFieldAccess.ReadWrite : GaFieldAccess.Read));
         }
-        var root = new GaBlock(new[] { LowerStatement(body) });
-        var components = entry.Parameters.Where(_components.ContainsKey).Select(parameter => _components[parameter]).ToArray();
+        var components = entry.Parameters.Where(_components.ContainsKey).Select(parameter => _components[parameter]).ToList();
+        ReadDeclaredAccesses(componentIds, components);
+        _resourceType = ReadDeclaredInput("GaTickResource", "runner tick input");
+        _bufferType = ReadDeclaredInput("GaReadBuffer", "read buffer element type");
+        FindOptionalLocals(body);
+        var lowered = LowerStatement(body);
+        var root = new GaBlock([.. _optionalDefaults, lowered]);
         try
         {
-            return new GaProgram(systemId, sourceDigest, components, _schema.ToArray(), _localTypes.ToArray(),
-                root, _ticketLocals.Count);
+            return new GaProgram(systemId, sourceDigest, components.ToArray(), _schema.ToArray(), _localTypes.ToArray(),
+                root, _ticketLocals.Count, _removalComponents.ToArray(), _additionComponents.ToArray(), _snapshotLayout,
+                _resourceType == null ? null : QualifiedName(_resourceType), _resourceFields.ToArray(),
+                _bufferType == null ? null : QualifiedName(_bufferType), _bufferFields.ToArray());
         }
         catch (GaEventCapacityException error)
         {
             throw Unsupported(body, error.Message);
         }
+    }
+
+    private INamedTypeSymbol? ReadDeclaredInput(string attribute, string description)
+    {
+        INamedTypeSymbol? element = null;
+        foreach (var declaration in entry.GetAttributes())
+        {
+            if (declaration.AttributeClass is not { } type || QualifiedName(type) != $"global::SKECS.GA.{attribute}Attribute")
+                continue;
+
+            var location = declaration.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? entry.Locations[0];
+            if (element != null || _context == null || type.DeclaringSyntaxReferences.Length != 0 ||
+                !SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, _context.Type.ContainingAssembly) ||
+                declaration.ConstructorArguments is not [{ Kind: TypedConstantKind.Type, Value: INamedTypeSymbol input }] ||
+                !(IsOwnComponent(input) || IsScalarResource(input)))
+                throw new GaLoweringException(location, $"Declare one portable {description} with the runtime {attribute} attribute.");
+            element = input;
+        }
+        return element;
+    }
+
+    private static bool IsScalarResource(ITypeSymbol type) => IsFixed(type) ||
+        type.SpecialType is SpecialType.System_Boolean or SpecialType.System_Int32 or SpecialType.System_UInt32 ||
+        type is INamedTypeSymbol
+        {
+            IsFileLocal: false,
+            EnumUnderlyingType.SpecialType: SpecialType.System_Int32 or SpecialType.System_UInt32
+        };
+
+    private void ReadDeclaredAccesses(HashSet<string> componentIds, List<GaComponent> components)
+    {
+        foreach (var declaration in entry.GetAttributes())
+        {
+            if (declaration.AttributeClass is not { } type || QualifiedName(type) != "global::SKECS.GA.GaAccessAttribute")
+                continue;
+
+            var syntax = declaration.ApplicationSyntaxReference?.GetSyntax();
+            var location = syntax?.GetLocation() ?? entry.Locations[0];
+            if (_context == null || type.DeclaringSyntaxReferences.Length != 0 ||
+                !SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, _context.Type.ContainingAssembly) ||
+                declaration.ConstructorArguments is not [
+                    { Kind: TypedConstantKind.Type, Value: INamedTypeSymbol component },
+                    { Kind: TypedConstantKind.Enum, Value: int mode }] ||
+                !IsOwnComponent(component) || !Enum.IsDefined((GaOwnAccess)mode))
+                throw new GaLoweringException(location, "Declare a portable own component and access mode with the runtime GaAccess attribute.");
+
+            string id = QualifiedName(component);
+            if (!componentIds.Add(id))
+                throw new GaLoweringException(location, "Declare each component once, either as a query parameter or with GaAccess.");
+
+            var access = (GaOwnAccess)mode;
+            var binding = new GaComponent(id, access == GaOwnAccess.ReadWrite ? GaFieldAccess.ReadWrite : GaFieldAccess.Read)
+            {
+                Origin = access == GaOwnAccess.OptionalRead ? GaComponentOrigin.Optional : GaComponentOrigin.Own,
+                OwnSource = syntax is null ? default : Source(syntax)
+            };
+            _declaredAccesses.Add(component, (binding, components.Count));
+            components.Add(binding);
+        }
+    }
+
+    private void FindOptionalLocals(IOperation body)
+    {
+        foreach (var operation in body.Descendants().OfType<IInvocationOperation>())
+        {
+            if (operation.TargetMethod.Name != "TryRead" || !IsSystemContext(operation.TargetMethod.ContainingType) ||
+                !ValidContextCall(operation, argumentCount: 1) ||
+                !_declaredAccesses.TryGetValue(operation.TargetMethod.TypeArguments[0], out var binding) ||
+                binding.Component.Origin != GaComponentOrigin.Optional ||
+                OptionalOutTarget(operation) is not ILocalReferenceOperation { Local.RefKind: RefKind.None } target)
+                continue;
+
+            _optionalLocals.TryAdd(target.Local, new OptionalCopy(binding.Component));
+        }
+    }
+
+    private sealed class OptionalCopy(GaComponent component)
+    {
+        internal GaComponent Component { get; } = component;
+        internal Dictionary<string, GaSlot> Locals { get; } = new(StringComparer.Ordinal);
+        internal List<GaOptionalFieldCopy> Copies { get; } = new();
+        internal List<GaStatement> Defaults { get; } = new();
+    }
+
+    private GaSnapshotLayout? ReadSnapshotLayout()
+    {
+        var declarations = entry.GetAttributes()
+            .Where(attribute => attribute.AttributeClass is { } type &&
+                QualifiedName(type) == "global::SKECS.GA.GaSnapshotAttribute")
+            .ToArray();
+        if (declarations.Length == 0)
+            return null;
+
+        var declaration = declarations[0];
+        var type = declaration.AttributeClass!;
+        var marker = entry.ContainingType.GetAttributes()
+            .Select(attribute => attribute.AttributeClass)
+            .FirstOrDefault(attribute => attribute is not null &&
+                QualifiedName(attribute) == "global::SKECS.GA.SecsSystemAttribute");
+        var location = declaration.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? entry.Locations[0];
+        if (declarations.Length != 1 || type.DeclaringSyntaxReferences.Length != 0 ||
+            type.ContainingAssembly.Identity.Name != "SKECS.GA" ||
+            !SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, marker?.ContainingAssembly) ||
+            declaration.ConstructorArguments is not [{ Kind: TypedConstantKind.Array, IsNull: false } layout] ||
+            layout.Values.Length == 0)
+            throw new GaLoweringException(location, "Declare one nonempty snapshot layout with the runtime GaSnapshot attribute.");
+
+        var fields = new GaScalar[layout.Values.Length];
+        for (int index = 0; index < fields.Length; index++)
+        {
+            if (layout.Values[index] is not { Kind: TypedConstantKind.Enum, Value: int value } || !Enum.IsDefined((GaScalar)value))
+                throw new GaLoweringException(location, "A snapshot layout field must be Bool, Int32, UInt32 or Fixed.");
+            fields[index] = (GaScalar)value;
+        }
+        return new GaSnapshotLayout(fields);
     }
 
     private GaStatement LowerStatement(IOperation operation)
@@ -60,6 +201,13 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 return new GaBlock(block.Operations.Select(LowerStatement).ToArray());
             case IExpressionStatementOperation expression:
                 return LowerStatement(expression.Operation);
+            case IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
+                invocation.TargetMethod.Name is ("Has" or "TryRead"):
+                return new GaStore(AddLocal(GaScalar.Bool), LowerOptionalAccess(invocation));
+            case IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
+                invocation.TargetMethod.Name is ("ReadBuffer" or "BufferLength"):
+                var bufferValue = LowerValue(invocation);
+                return new GaStore(AddLocal(bufferValue.Type), bufferValue);
             case IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType):
                 return LowerContextStatement(invocation);
             case IEmptyOperation:
@@ -70,7 +218,27 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 return new GaBlock(declaration.Declarators.Select(LowerStatement).ToArray());
             case IVariableDeclaratorOperation declarator:
                 if (declarator.Symbol.RefKind != RefKind.None)
-                    throw Unsupported(declarator, "GA locals cannot alias storage.");
+                {
+                    if (declarator.Symbol.RefKind == RefKind.RefReadOnly &&
+                        Unwrap(declarator.Initializer?.Value) is IInvocationOperation resource && IsResourceCall(resource) &&
+                        SymbolEqualityComparer.Default.Equals(declarator.Symbol.Type, _resourceType))
+                    {
+                        _resourceAliases.Add(declarator.Symbol);
+                        return new GaBlock([]);
+                    }
+                    if (declarator.Symbol.RefKind != RefKind.Ref ||
+                        Unwrap(declarator.Initializer?.Value) is not IInvocationOperation own ||
+                        !SymbolEqualityComparer.Default.Equals(declarator.Symbol.Type, own.Type))
+                        throw Unsupported(declarator, "Use a direct ref local for Own<T>() or ref readonly local for Resource<T>().");
+                    _ownAliases.Add(declarator.Symbol, ResolveOwn(own));
+                    return new GaBlock([]);
+                }
+                if (_optionalLocals.TryGetValue(declarator.Symbol, out var optional))
+                {
+                    if (declarator.Initializer != null && Unwrap(declarator.Initializer.Value) is not IDefaultValueOperation)
+                        throw Unsupported(declarator, "Initialize a TryRead<T> destination with default or leave it uninitialized.");
+                    return new GaBlock(declarator.Initializer is null ? [] : optional.Defaults.AsReadOnly());
+                }
                 if (IsEntityTicket(declarator.Symbol.Type))
                 {
                     if (declarator.Initializer?.Value is not IInvocationOperation creation || !IsCreateCall(creation))
@@ -86,20 +254,31 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                     ? new GaBlock(Array.Empty<GaStatement>())
                     : new GaStore(local, LowerValue(declarator.Initializer.Value));
             case ISimpleAssignmentOperation assignment when !assignment.IsRef:
+                if (FindInlineAccess(assignment.Target) is { } assignmentAccess)
+                {
+                    var array = LowerArrayAccess(assignment.Target, assignmentAccess, writable: true);
+                    return new GaArrayStore(array.Field, array.Index, null, LowerValue(assignment.Value), array.Source);
+                }
                 return new GaStore(WritableSlot(assignment.Target), LowerValue(assignment.Value));
             case ICompoundAssignmentOperation compound when IsBuiltinOrFixed(compound.OperatorMethod) &&
                 !compound.IsLifted && compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
+                if (FindInlineAccess(compound.Target) is { } compoundAccess)
+                {
+                    var array = LowerArrayAccess(compound.Target, compoundAccess, writable: true);
+                    var previous = AddLocal(array.Type);
+                    return new GaArrayStore(array.Field, array.Index, previous, LowerCompound(compound, previous), array.Source);
+                }
                 var slot = WritableSlot(compound.Target);
-                return new GaStore(slot, Binary(slot.Type, compound.OperatorKind,
-                    new GaLoad(slot, Source(compound.Target)), LowerValue(compound.Value), compound.IsChecked, compound));
+                return new GaStore(slot, LowerCompound(compound, slot));
             case IIncrementOrDecrementOperation change when change.OperatorMethod == null && !change.IsLifted:
+                if (FindInlineAccess(change.Target) is { } incrementAccess)
+                {
+                    var array = LowerArrayAccess(change.Target, incrementAccess, writable: true);
+                    var previous = AddLocal(array.Type);
+                    return new GaArrayStore(array.Field, array.Index, previous, LowerIncrement(change, previous), array.Source);
+                }
                 var counter = WritableSlot(change.Target);
-                if (counter.Type == GaScalar.Bool || change.Target.Type?.TypeKind == TypeKind.Enum)
-                    throw Unsupported(change);
-                return new GaStore(counter, new GaBinary(counter.Type,
-                    change.Kind == OperationKind.Increment ? GaBinaryOperator.Add : GaBinaryOperator.Subtract,
-                    new GaLoad(counter, Source(change.Target)), new GaConstant(counter.Type, 1, Source(change)),
-                    change.IsChecked, Source(change)));
+                return new GaStore(counter, LowerIncrement(change, counter));
             case IConditionalOperation branch when branch.Type == null:
                 return new GaIf(LowerValue(branch.Condition), LowerStatement(branch.WhenTrue),
                     branch.WhenFalse == null ? null : LowerStatement(branch.WhenFalse));
@@ -112,34 +291,198 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         }
     }
 
+    private GaValue LowerCompound(ICompoundAssignmentOperation compound, GaSlot previous) =>
+        Binary(previous.Type, compound.OperatorKind, new GaLoad(previous, Source(compound.Target)),
+            LowerValue(compound.Value), compound.IsChecked, compound);
+
+    private GaValue LowerIncrement(IIncrementOrDecrementOperation change, GaSlot previous)
+    {
+        if (previous.Type == GaScalar.Bool || change.Target.Type?.TypeKind == TypeKind.Enum)
+            throw Unsupported(change);
+        var source = Source(change);
+        return new GaBinary(previous.Type,
+            change.Kind == OperationKind.Increment ? GaBinaryOperator.Add : GaBinaryOperator.Subtract,
+            new GaLoad(previous, Source(change.Target)), new GaConstant(previous.Type, 1, source), change.IsChecked, source);
+    }
+
     private GaStatement LowerContextStatement(IInvocationOperation invocation)
     {
         if (IsCreateCall(invocation))
             return new GaCreate(-1);
 
         var method = invocation.TargetMethod;
-        if (!IsContextReceiver(invocation) || method is not { IsStatic: false, Arity: 0, ReturnsVoid: true })
+        if (!IsContextReceiver(invocation) || method is not { IsStatic: false, ReturnsVoid: true })
             throw Unsupported(invocation);
-        if (method.Name == "Destroy" && method.Parameters is [{ RefKind: RefKind.None, Type: var type }] &&
-            IsEntityTicket(type))
-        {
-            if (invocation.Arguments is [{ Parameter.Ordinal: 0, Value: ILocalReferenceOperation reference }] &&
-                _ticketLocals.TryGetValue(reference.Local, out int ticketSlot))
-                return new GaDestroyTicket(ticketSlot);
-            throw Unsupported(invocation, "Pass a ticket local initialized by this invocation's Create().");
-        }
+        if (method is { Name: "Remove", Arity: 1 })
+            return LowerRemove(invocation);
+        if (method is { Name: "Add", Arity: 1 })
+            return LowerAdd(invocation);
+        if (method.Arity != 0)
+            throw Unsupported(invocation);
+        if (method.Name == "Destroy" && HasTicketParameter(method))
+            return new GaDestroyTicket(TicketSlot(invocation));
         if (!HasInt32Parameters(method))
             throw Unsupported(invocation);
 
         return (method.Name, method.Parameters.Length, invocation.Arguments) switch
         {
             ("Emit", 1, [{ Parameter.Ordinal: 0 } value]) => new GaEmit(LowerValue(value.Value)),
+            ("SetDomainOrder", 2, [{ Parameter.Ordinal: 0 } primary, { Parameter.Ordinal: 1 } secondary]) =>
+                new GaSetDomainOrder(LowerValue(primary.Value), LowerValue(secondary.Value)),
             ("Destroy", 2, [{ Parameter.Ordinal: 0 } entityId, { Parameter.Ordinal: 1 } generation]) =>
                 new GaDestroy(LowerValue(entityId.Value), LowerValue(generation.Value)),
             _ => throw Unsupported(invocation,
                 "Call context operations directly on the in SystemContext parameter, with arguments in declaration order.")
         };
     }
+
+    private GaStatement LowerAdd(IInvocationOperation invocation)
+    {
+        var method = invocation.TargetMethod;
+        if (method.TypeArguments[0] is not INamedTypeSymbol
+            { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None, IsUnmanagedType: true,
+                IsRefLikeType: false, IsTupleType: false } component)
+            throw Unsupported(invocation, "Supply a closed unmanaged component struct to Add<T>.");
+
+        string id = QualifiedName(component);
+        if (!_additionComponentIndices.TryGetValue(id, out int componentIndex))
+        {
+            componentIndex = _additionComponents.Count;
+            if (componentIndex == GaOutputRecord.MaximumComponentRemovals)
+                throw Unsupported(invocation, "The system references too many distinct addition components.");
+            var fields = new List<GaAdditionField>();
+            CollectAdditionFields(component, "", fields, invocation);
+            var schema = new GaAdditionComponent(id, fields.ToArray());
+            if (schema.WordCount > GaOutputRecord.MaximumAdditionPayloadWords)
+                throw Unsupported(invocation, "The component addition exceeds the supported payload size.");
+            _additionComponentIndices.Add(id, componentIndex);
+            _additionComponents.Add(schema);
+        }
+
+        if (method.Parameters.Length == 2 && IsTicketParameter(method.Parameters[0]) &&
+            IsComponentParameter(method.Parameters[1], component) &&
+            invocation.Arguments is [{ Parameter.Ordinal: 0 } ticket, { Parameter.Ordinal: 1 } ticketValue])
+            return new GaAddTicket(componentIndex, TicketSlot(ticket, invocation), LowerPayload(ticketValue.Value));
+        if (method.Parameters.Length == 3 && IsInt32Parameter(method.Parameters[0]) && IsInt32Parameter(method.Parameters[1]) &&
+            IsComponentParameter(method.Parameters[2], component) &&
+            invocation.Arguments is [{ Parameter.Ordinal: 0 } entityId, { Parameter.Ordinal: 1 } generation, { Parameter.Ordinal: 2 } value])
+            return new GaAdd(componentIndex, LowerValue(entityId.Value), LowerValue(generation.Value), LowerPayload(value.Value));
+        throw Unsupported(invocation, "Call Add<T> directly on the in SystemContext parameter, with arguments in declaration order.");
+
+        GaAdditionValue[] LowerPayload(IOperation value)
+        {
+            var fields = _additionComponents[componentIndex].Fields;
+            value = UnwrapIdentity(value);
+            if (value is IParameterReferenceOperation parameter && _components.TryGetValue(parameter.Parameter, out var source))
+            {
+                return fields.Select((field, index) => new GaAdditionValue(index,
+                    new GaLoad(FieldSlot(source, field.Path, field.Type, field.ClrEnumType), Source(value)))).ToArray();
+            }
+
+            var fieldIndices = fields.Select((field, index) => (field.Path, index))
+                .ToDictionary(item => item.Path, item => item.index, StringComparer.Ordinal);
+            var values = new List<GaAdditionValue>();
+            LowerInitializer(value, "", fieldIndices, values);
+            return values.ToArray();
+        }
+    }
+
+    private static void CollectAdditionFields(INamedTypeSymbol component, string prefix, List<GaAdditionField> fields, IOperation site)
+    {
+        if (component.GetAttributes().Any(attribute => attribute.AttributeClass?.ToDisplayString() switch
+        {
+            "System.Runtime.CompilerServices.InlineArrayAttribute" => true,
+            "System.Runtime.InteropServices.StructLayoutAttribute" => attribute.ConstructorArguments[0].Value is int layout && layout != 0,
+            _ => false
+        }))
+            throw Unsupported(site, "Use plain sequential fields in component addition payloads.");
+
+        foreach (var field in component.GetMembers().OfType<IFieldSymbol>().Where(field => !field.IsStatic)
+            .OrderBy(field => field.MetadataName, StringComparer.Ordinal))
+        {
+            if (field.IsReadOnly || field.IsImplicitlyDeclared || field.IsFixedSizeBuffer || field.RefKind != RefKind.None)
+                throw Unsupported(site, "Use writable, explicit instance fields in component addition payloads.");
+            string path = prefix + field.MetadataName;
+            if (field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None,
+                IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false } nested && !IsFixed(nested))
+            {
+                CollectAdditionFields(nested, path + ".", fields, site);
+                continue;
+            }
+            fields.Add(new GaAdditionField(path, Scalar(field.Type, site),
+                field.Type.TypeKind == TypeKind.Enum ? QualifiedName(field.Type) : null));
+        }
+    }
+
+    private void LowerInitializer(IOperation value, string prefix, IReadOnlyDictionary<string, int> fields,
+        List<GaAdditionValue> values)
+    {
+        value = UnwrapIdentity(value);
+        if (value is IDefaultValueOperation)
+            return;
+        if (value is not IObjectCreationOperation { Arguments.Length: 0 } creation ||
+            creation.Constructor is { IsImplicitlyDeclared: false })
+            throw Unsupported(value, "Use default, a plain field initializer, or an entry component as an Add<T> value.");
+        if (creation.Initializer is null)
+            return;
+
+        foreach (var operation in creation.Initializer.Initializers)
+        {
+            if (operation is not ISimpleAssignmentOperation
+                { IsRef: false, Target: IFieldReferenceOperation { Field.IsStatic: false } target } initializer)
+                throw Unsupported(operation, "Initialize only instance fields in an Add<T> payload.");
+            string path = prefix + target.Field.MetadataName;
+            if (fields.TryGetValue(path, out int fieldIndex))
+                values.Add(new GaAdditionValue(fieldIndex, LowerValue(initializer.Value)));
+            else
+                LowerInitializer(initializer.Value, path + ".", fields, values);
+        }
+    }
+
+    private static IOperation UnwrapIdentity(IOperation operation)
+    {
+        while (operation is IConversionOperation { Conversion.IsIdentity: true } conversion)
+            operation = conversion.Operand;
+        return operation;
+    }
+
+    private GaStatement LowerRemove(IInvocationOperation invocation)
+    {
+        var method = invocation.TargetMethod;
+        if (method.TypeArguments[0] is not INamedTypeSymbol
+            { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None, IsUnmanagedType: true,
+                IsRefLikeType: false, IsTupleType: false } component)
+            throw Unsupported(invocation, "Supply a closed unmanaged component struct to Remove<T>.");
+
+        string id = QualifiedName(component);
+        if (!_removalComponentIndices.TryGetValue(id, out int componentIndex))
+        {
+            componentIndex = _removalComponents.Count;
+            if (componentIndex == GaOutputRecord.MaximumComponentRemovals)
+                throw Unsupported(invocation, "The system references too many distinct removal components.");
+            _removalComponentIndices.Add(id, componentIndex);
+            _removalComponents.Add(id);
+        }
+
+        if (HasTicketParameter(method))
+            return new GaRemoveTicket(componentIndex, TicketSlot(invocation));
+        if (method.Parameters.Length == 2 && HasInt32Parameters(method) &&
+            invocation.Arguments is [{ Parameter.Ordinal: 0 } entityId, { Parameter.Ordinal: 1 } generation])
+            return new GaRemove(componentIndex, LowerValue(entityId.Value), LowerValue(generation.Value));
+        throw Unsupported(invocation, "Call Remove<T> directly on the in SystemContext parameter, with arguments in declaration order.");
+    }
+
+    private int TicketSlot(IInvocationOperation invocation)
+    {
+        if (invocation.Arguments is [{ Parameter.Ordinal: 0 } argument])
+            return TicketSlot(argument, invocation);
+        throw Unsupported(invocation, "Pass a ticket local initialized by this invocation's Create().");
+    }
+
+    private int TicketSlot(IArgumentOperation argument, IOperation location) =>
+        argument.Value is ILocalReferenceOperation reference && _ticketLocals.TryGetValue(reference.Local, out int slot)
+            ? slot
+            : throw Unsupported(location, "Pass a ticket local initialized by this invocation's Create().");
 
     private bool IsCreateCall(IInvocationOperation invocation) =>
         invocation.TargetMethod is { Name: "Create", IsStatic: false, Arity: 0, Parameters.Length: 0 } method &&
@@ -271,6 +614,13 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 _ => throw Unsupported(operation, "Only canonical 32-bit scalar constants are supported.")
             }, source);
 
+        if (FindInlineAccess(operation) is { } access)
+            return LowerArrayAccess(operation, access, writable: false);
+        if (IsResourcePath(operation))
+            return LowerResourceRead(operation, type, source);
+        if (FindBufferRead(operation) is { } buffer)
+            return LowerBufferRead(operation, buffer, type);
+
         return operation switch
         {
             IFieldReferenceOperation field when field.Field.IsStatic && IsFixed(field.Field.ContainingType) =>
@@ -293,6 +643,10 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             IUnaryOperation { IsLifted: false } unary when IsBuiltinOrFixed(unary.OperatorMethod) => LowerUnary(type, unary),
             IBinaryOperation { IsLifted: false } binary when IsBuiltinOrFixed(binary.OperatorMethod) => Binary(type, binary.OperatorKind,
                 LowerValue(binary.LeftOperand), LowerValue(binary.RightOperand), binary.IsChecked, binary),
+            IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
+                invocation.TargetMethod.Name is ("Has" or "TryRead") => LowerOptionalAccess(invocation),
+            IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
+                invocation.TargetMethod.Name == "BufferLength" => LowerBufferLength(invocation),
             IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) =>
                 LowerSnapshotRead(invocation),
             IInvocationOperation invocation when IsFixed(invocation.TargetMethod.ContainingType) => LowerFixedCall(invocation),
@@ -304,9 +658,138 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         };
     }
 
+    private bool IsResourcePath(IOperation operation)
+    {
+        var root = Unwrap(operation);
+        while (root is IFieldReferenceOperation field)
+            root = Unwrap(field.Instance);
+        return root is IInvocationOperation invocation && IsResourceCall(invocation) ||
+            root is ILocalReferenceOperation local && _resourceAliases.Contains(local.Local);
+    }
+
+    private bool IsResourceCall(IInvocationOperation invocation)
+    {
+        var method = invocation.TargetMethod;
+        return method.Name == "Resource" && method.ReturnsByRefReadonly && IsSystemContext(method.ContainingType) &&
+            ValidContextCall(invocation, argumentCount: 0) &&
+            SymbolEqualityComparer.Default.Equals(method.TypeArguments[0], _resourceType) &&
+            SymbolEqualityComparer.Default.Equals(method.ReturnType, _resourceType);
+    }
+
+    private GaResourceRead LowerResourceRead(IOperation operation, GaScalar type, GaSourceSpan source)
+    {
+        var path = new Stack<string>();
+        bool readOnly = true;
+        ReadArrayFieldPath(operation, path, ref readOnly);
+        string name = string.Join(".", path);
+        if (!_resourceFieldIndices.TryGetValue(name, out int index))
+        {
+            index = _resourceFields.Count;
+            string? enumType = operation.Type is { TypeKind: TypeKind.Enum } symbol ? QualifiedName(symbol) : null;
+            _resourceFields.Add(new GaTickResourceField(name, type, enumType));
+            _resourceFieldIndices.Add(name, index);
+        }
+        return new GaResourceRead(index, type, source);
+    }
+
+    private IInvocationOperation? FindBufferRead(IOperation operation)
+    {
+        var root = Unwrap(operation);
+        while (root is IFieldReferenceOperation field)
+            root = Unwrap(field.Instance);
+        return root is IInvocationOperation invocation && IsBufferCall(invocation, argumentCount: 1) &&
+            invocation.TargetMethod is { Name: "ReadBuffer", ReturnsByRefReadonly: true } method &&
+            method.Parameters[0].Type.SpecialType == SpecialType.System_Int32 &&
+            method.Parameters[0].RefKind == RefKind.None &&
+            SymbolEqualityComparer.Default.Equals(method.ReturnType, _bufferType) ? invocation : null;
+    }
+
+    private bool IsBufferCall(IInvocationOperation invocation, int argumentCount) =>
+        _bufferType != null && IsSystemContext(invocation.TargetMethod.ContainingType) &&
+        ValidContextCall(invocation, argumentCount) &&
+        SymbolEqualityComparer.Default.Equals(invocation.TargetMethod.TypeArguments[0], _bufferType);
+
+    private GaBufferRead LowerBufferRead(IOperation operation, IInvocationOperation invocation, GaScalar type)
+    {
+        var path = new Stack<string>();
+        bool readOnly = true;
+        ReadArrayFieldPath(operation, path, ref readOnly);
+        string name = string.Join(".", path);
+        if (!_bufferFieldIndices.TryGetValue(name, out int index))
+        {
+            index = _bufferFields.Count;
+            string? enumType = operation.Type is { TypeKind: TypeKind.Enum } symbol ? QualifiedName(symbol) : null;
+            _bufferFields.Add(new GaBufferField(name, type, enumType));
+            _bufferFieldIndices.Add(name, index);
+        }
+        return new GaBufferRead(index, LowerValue(invocation.Arguments[0].Value), type, Source(invocation));
+    }
+
+    private GaBufferCount LowerBufferLength(IInvocationOperation invocation)
+    {
+        if (!IsBufferCall(invocation, argumentCount: 0) ||
+            invocation.TargetMethod.ReturnType.SpecialType != SpecialType.System_Int32 ||
+            invocation.TargetMethod.ReturnsByRef || invocation.TargetMethod.ReturnsByRefReadonly)
+            throw Unsupported(invocation, "Call BufferLength<T>() directly on the entry context with the declared read buffer element type.");
+        return new GaBufferCount(Source(invocation));
+    }
+
+    private GaValue LowerOptionalAccess(IInvocationOperation invocation)
+    {
+        bool copy = invocation.TargetMethod.Name == "TryRead";
+        if (!ValidContextCall(invocation, argumentCount: copy ? 1 : 0) ||
+            invocation.TargetMethod.ReturnType.SpecialType != SpecialType.System_Boolean ||
+            !_declaredAccesses.TryGetValue(invocation.TargetMethod.TypeArguments[0], out var binding) ||
+            binding.Component.Origin != GaComponentOrigin.Optional)
+            throw Unsupported(invocation, "Call Has<T> or TryRead<T> directly on the entry context for a declared OptionalRead component.");
+
+        var source = Source(invocation);
+        if (!copy)
+            return new GaHasOwn(binding.Index, source);
+        if (invocation.Arguments[0].Parameter?.RefKind != RefKind.Out)
+            throw Unsupported(invocation, "Pass a value local or discard as the out argument to TryRead<T>.");
+        return OptionalOutTarget(invocation) switch
+        {
+            IDiscardOperation => new GaTryRead(binding.Index, [], source),
+            ILocalReferenceOperation { Local.RefKind: RefKind.None } local
+                when _optionalLocals.TryGetValue(local.Local, out var optional) =>
+                    new GaTryRead(binding.Index, optional.Copies.AsReadOnly(), source),
+            _ => throw Unsupported(invocation, "Pass a value local or discard as the out argument to TryRead<T>.")
+        };
+    }
+
+    private static IOperation? OptionalOutTarget(IInvocationOperation invocation)
+    {
+        var value = Unwrap(invocation.Arguments[0].Value);
+        return value is IDeclarationExpressionOperation declaration ? declaration.Expression : value;
+    }
+
+    private GaComponent ResolveOwn(IInvocationOperation invocation)
+    {
+        var method = invocation.TargetMethod;
+        if (method.Name != "Own" || !IsSystemContext(method.ContainingType) ||
+            !ValidContextCall(invocation, argumentCount: 0) || !method.ReturnsByRef ||
+            !_declaredAccesses.TryGetValue(method.TypeArguments[0], out var binding) ||
+            binding.Component.Origin != GaComponentOrigin.Own)
+            throw Unsupported(invocation, "Call Own<T> directly on the entry context for a declared required own component.");
+        return binding.Component;
+    }
+
+    private bool ValidContextCall(IInvocationOperation invocation, int argumentCount) =>
+        invocation.TargetMethod is { IsStatic: false, Arity: 1 } method &&
+        method.Parameters.Length == argumentCount && invocation.Arguments.Length == argumentCount &&
+        IsContextReceiver(invocation);
+
+    private static bool IsOwnComponent(INamedTypeSymbol type) =>
+        type is { IsUnmanagedType: true, TypeKind: TypeKind.Struct, SpecialType: SpecialType.None,
+            IsRefLikeType: false, IsTupleType: false, IsFileLocal: false, IsUnboundGenericType: false } &&
+        !HasExplicitLayout(type);
+
     private GaSnapshotRead LowerSnapshotRead(IInvocationOperation invocation)
     {
         var method = invocation.TargetMethod;
+        if (method.Name == "ReadSnapshot")
+            return LowerTypedSnapshotRead(invocation);
         if (method is not { Name: "ReadSnapshotInt32", IsStatic: false, Arity: 0 } ||
             method.ReturnType.SpecialType != SpecialType.System_Int32 ||
             method.Parameters.Length != 3 ||
@@ -315,8 +798,37 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 { Parameter.Ordinal: 1 } generation, { Parameter.Ordinal: 2 } fallback] ||
             !IsContextReceiver(invocation))
             throw Unsupported(invocation, "Call ReadSnapshotInt32 directly on the in SystemContext parameter, with arguments in declaration order.");
+        if (_snapshotLayout is { } layout && layout.Fields is not [GaScalar.Int32])
+            throw Unsupported(invocation, "ReadSnapshotInt32 requires exactly one Int32 snapshot field.");
         return new GaSnapshotRead(LowerValue(entityId.Value), LowerValue(generation.Value),
             LowerValue(fallback.Value), Source(invocation));
+    }
+
+    private GaSnapshotRead LowerTypedSnapshotRead(IInvocationOperation invocation)
+    {
+        var method = invocation.TargetMethod;
+        if (method is not { IsStatic: false, Arity: 1 } ||
+            method.Parameters.Length != 4 || !method.Parameters.Take(3).All(IsInt32Parameter) ||
+            !IsComponentParameter(method.Parameters[3], method.ReturnType) ||
+            invocation.Arguments is not [{ Parameter.Ordinal: 0 } entityId, { Parameter.Ordinal: 1 } generation,
+                { Parameter.Ordinal: 2 } field, { Parameter.Ordinal: 3 } fallback] ||
+            !IsContextReceiver(invocation))
+            throw Unsupported(invocation, "Call ReadSnapshot<T> directly on the in SystemContext parameter, with arguments in declaration order.");
+
+        var type = method.ReturnType.SpecialType switch
+        {
+            SpecialType.System_Boolean => GaScalar.Bool,
+            SpecialType.System_Int32 => GaScalar.Int32,
+            SpecialType.System_UInt32 => GaScalar.UInt32,
+            _ when IsFixed(method.ReturnType) => GaScalar.Fixed,
+            _ => throw Unsupported(invocation, "ReadSnapshot<T> supports bool, int, uint and Fixed.")
+        };
+        if (field.Value.ConstantValue is not { HasValue: true, Value: int index } ||
+            _snapshotLayout is not { } layout || (uint)index >= (uint)layout.Fields.Length || layout.Fields[index] != type)
+            throw Unsupported(invocation, "ReadSnapshot<T> requires a constant field index matching the declared snapshot layout.");
+
+        return new GaSnapshotRead(LowerValue(entityId.Value), LowerValue(generation.Value),
+            LowerValue(fallback.Value), Source(invocation)) { FieldIndex = index };
     }
 
     private bool IsContextReceiver(IInvocationOperation invocation) =>
@@ -324,8 +836,19 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         SymbolEqualityComparer.Default.Equals(receiver.Parameter, _context);
 
     private static bool HasInt32Parameters(IMethodSymbol method) =>
-        method.Parameters.All(parameter => parameter.RefKind == RefKind.None &&
-            parameter.Type.SpecialType == SpecialType.System_Int32);
+        method.Parameters.All(IsInt32Parameter);
+
+    private static bool IsInt32Parameter(IParameterSymbol parameter) =>
+        parameter.RefKind == RefKind.None && parameter.Type.SpecialType == SpecialType.System_Int32;
+
+    private static bool IsComponentParameter(IParameterSymbol parameter, ITypeSymbol type) =>
+        parameter.RefKind == RefKind.None && SymbolEqualityComparer.Default.Equals(parameter.Type, type);
+
+    private static bool IsTicketParameter(IParameterSymbol parameter) =>
+        parameter.RefKind == RefKind.None && IsEntityTicket(parameter.Type);
+
+    private static bool HasTicketParameter(IMethodSymbol method) =>
+        method.Parameters.Length == 1 && IsTicketParameter(method.Parameters[0]);
 
     private GaValue ConvertValue(GaScalar type, IConversionOperation conversion)
     {
@@ -411,29 +934,136 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         if (operation is not IFieldReferenceOperation leaf)
             throw Unsupported(operation, "The target must be an owned component field or a scalar local.");
 
+        bool readOnly = false;
         var path = new Stack<string>();
-        IOperation? receiver = leaf;
-        while (receiver is IFieldReferenceOperation field && !field.Field.IsStatic
-            && !HasExplicitLayout(field.Field.ContainingType))
-        {
-            path.Push(field.Field.MetadataName);
-            receiver = field.Instance;
-        }
-        if (receiver is not IParameterReferenceOperation parameter || !_components.TryGetValue(parameter.Parameter, out var component))
-            throw Unsupported(operation, "Fields must come from a non-overlaid component parameter.");
-
+        var receiver = ReadArrayFieldPath(leaf, path, ref readOnly);
         string pathName = string.Join(".", path);
+        var type = Scalar(leaf.Type, leaf);
+        string? enumType = leaf.Type is { TypeKind: TypeKind.Enum } symbol ? QualifiedName(symbol) : null;
+        if (receiver is ILocalReferenceOperation copy && _optionalLocals.TryGetValue(copy.Local, out var optional))
+            return OptionalFieldSlot(optional, pathName, type, enumType, leaf);
+
+        var component = ResolveStorage(receiver, operation);
+        return FieldSlot(component, pathName, type, enumType, readOnly ? GaFieldAccess.Read : component.Access);
+    }
+
+    private GaSlot OptionalFieldSlot(OptionalCopy copy, string path, GaScalar type, string? enumType, IOperation operation)
+    {
+        if (copy.Locals.TryGetValue(path, out var local))
+            return local;
+        local = AddLocal(type);
+        copy.Locals.Add(path, local);
+        copy.Copies.Add(new GaOptionalFieldCopy(local, FieldSlot(copy.Component, path, type, enumType)));
+        var clear = new GaStore(local, new GaConstant(type, 0, Source(operation)));
+        copy.Defaults.Add(clear);
+        _optionalDefaults.Add(clear);
+        return local;
+    }
+
+    private GaComponent ResolveStorage(IOperation? receiver, IOperation operation)
+    {
+        if (receiver is IParameterReferenceOperation parameter && _components.TryGetValue(parameter.Parameter, out var component))
+            return component;
+        if (receiver is ILocalReferenceOperation local && _ownAliases.TryGetValue(local.Local, out var own))
+            return own;
+        if (receiver is IInvocationOperation invocation && invocation.TargetMethod.Name == "Own")
+            return ResolveOwn(invocation);
+        throw Unsupported(operation, "Fields must come from a non-overlaid query component or declared own component.");
+    }
+
+    private GaSlot FieldSlot(GaComponent component, string pathName, GaScalar type, string? enumType,
+        GaFieldAccess? access = null)
+    {
         var key = (component.Id, pathName);
         if (_fields.TryGetValue(key, out var fieldSlot))
             return fieldSlot;
-        var type = Scalar(leaf.Type, leaf);
         fieldSlot = new GaSlot(true, _schema.Count, type);
         _fields.Add(key, fieldSlot);
-        _schema.Add(new GaField(component.Id, pathName, type, component.Access)
+        _schema.Add(new GaField(component.Id, pathName, type, access ?? component.Access)
         {
-            ClrEnumType = leaf.Type is { TypeKind: TypeKind.Enum } enumType ? QualifiedName(enumType) : null
+            ClrEnumType = enumType
         });
         return fieldSlot;
+    }
+
+    private static IInlineArrayAccessOperation? FindInlineAccess(IOperation operation)
+    {
+        IOperation? receiver = Unwrap(operation);
+        while (receiver is IFieldReferenceOperation field)
+            receiver = Unwrap(field.Instance);
+        return receiver as IInlineArrayAccessOperation;
+    }
+
+    private GaArrayRead LowerArrayAccess(IOperation operation, IInlineArrayAccessOperation access, bool writable)
+    {
+        if (access.Argument.Type?.SpecialType != SpecialType.System_Int32 ||
+            access.Instance.Type is not INamedTypeSymbol { IsUnmanagedType: true } buffer ||
+            HasExplicitLayout(buffer))
+            throw Unsupported(access, "Use an Int32 element index on a portable inline array.");
+
+        var declaration = GetInlineArrayDeclaration(buffer);
+        if (declaration?.ConstructorArguments is not [{ Value: int length }] || length <= 0)
+            throw Unsupported(access, "The inline array must declare a constant positive length with the runtime InlineArray attribute.");
+
+        bool readOnly = false;
+        var path = new Stack<string>();
+        ReadArrayFieldPath(operation, path, ref readOnly);
+        string suffix = path.Count == 0 ? "" : "." + string.Join(".", path);
+        path.Clear();
+        var root = ReadArrayFieldPath(access.Instance, path, ref readOnly);
+        if (root is IInlineArrayAccessOperation)
+            throw Unsupported(access, "Use one inline array element index per component field path.");
+        var component = ResolveStorage(root, access);
+
+        var fieldAccess = readOnly ? GaFieldAccess.Read : component.Access;
+        if (writable && fieldAccess != GaFieldAccess.ReadWrite)
+            throw Unsupported(operation, "The target inline array field was declared read-only.");
+        var type = Scalar(operation.Type, operation);
+        string prefix = string.Join(".", path);
+        var key = (component.Id, prefix + "[]" + suffix);
+        if (!_arrayFields.TryGetValue(key, out var group))
+        {
+            group = new GaArrayField(_schema.Count, length, type);
+            string? enumType = operation.Type is { TypeKind: TypeKind.Enum } scalarEnum ? QualifiedName(scalarEnum) : null;
+            for (int index = 0; index < length; index++)
+            {
+                string element = index.ToString(CultureInfo.InvariantCulture);
+                FieldSlot(component, $"{prefix}[{element}]{suffix}", type, enumType, fieldAccess);
+            }
+            _arrayFields.Add(key, group);
+        }
+        return new GaArrayRead(group, LowerValue(access.Argument), Source(access));
+    }
+
+    private static IOperation? ReadArrayFieldPath(IOperation operation, Stack<string> path, ref bool readOnly)
+    {
+        IOperation? receiver = Unwrap(operation);
+        while (receiver is IFieldReferenceOperation field)
+        {
+            if (GetInlineArrayDeclaration(field.Field.ContainingType) != null)
+                throw Unsupported(field, "Access an inline array backing field through index 0.");
+            if (field.Field.IsStatic || HasExplicitLayout(field.Field.ContainingType) ||
+                field.Field.IsFixedSizeBuffer || field.Field.RefKind != RefKind.None ||
+                field.Field.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
+                throw Unsupported(field, "Component paths must use accessible fields of non-overlaid value types.");
+            path.Push(field.Field.MetadataName);
+            readOnly |= field.Field.IsReadOnly;
+            receiver = Unwrap(field.Instance);
+        }
+        return receiver;
+    }
+
+    private static AttributeData? GetInlineArrayDeclaration(INamedTypeSymbol type) =>
+        type.GetAttributes().FirstOrDefault(attribute =>
+            attribute.AttributeClass is { } attributeType && attributeType.DeclaringSyntaxReferences.Length == 0 &&
+            attributeType.ContainingAssembly.Identity.Name is "System.Runtime" or "System.Private.CoreLib" &&
+            QualifiedName(attributeType) == "global::System.Runtime.CompilerServices.InlineArrayAttribute");
+
+    private static IOperation? Unwrap(IOperation? operation)
+    {
+        while (operation is IParenthesizedOperation parentheses)
+            operation = parentheses.Operand;
+        return operation;
     }
 
     private static bool HasExplicitLayout(ITypeSymbol type) => type.GetAttributes().Any(attribute =>
@@ -468,9 +1098,10 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         type.IsRefLikeType && type.ContainingAssembly?.Identity.Name == "SKECS.GA" &&
         type.DeclaringSyntaxReferences.Length == 0 && QualifiedName(type) == "global::SKECS.GA.GaEntityTicket";
 
-    private GaSourceSpan Source(IOperation operation)
+    private GaSourceSpan Source(IOperation operation) => Source(operation.Syntax);
+
+    private GaSourceSpan Source(SyntaxNode syntax)
     {
-        var syntax = operation.Syntax;
         var path = syntax.SyntaxTree.FilePath;
         return new GaSourceSpan(resolver?.NormalizePath(path, null) ?? path, syntax.SpanStart, syntax.Span.Length);
     }

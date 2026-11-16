@@ -13,14 +13,20 @@ using SKECS.Serialization;
 internal static class GaDemo
 {
     private const string Artifact = "ga-movement";
+    private const int RemovalTargetMarker = 21;
+    private const int RecycledTargetMarker = -44;
     private static readonly CodecRegistry CheckpointSchema = new CodecRegistry()
         .Register(new ComponentSchema(1001, 1, new FieldSchema(1, FieldKind.Int64),
             new FieldSchema(2, FieldKind.Int32)), new PositionCodec())
-        .Register(new ComponentSchema(1002, 2, new FieldSchema(1, FieldKind.Int64),
+        .Register(new ComponentSchema(1002, 3, new FieldSchema(1, FieldKind.Int64),
             new FieldSchema(2, FieldKind.Int64), new FieldSchema(3, FieldKind.Boolean),
             new FieldSchema(4, FieldKind.Int32), new FieldSchema(5, FieldKind.Int32),
-            new FieldSchema(6, FieldKind.Int32), new FieldSchema(7, FieldKind.Int32)), new VelocityCodec())
-        .Register(new ComponentSchema(1003, 1, new FieldSchema(1, FieldKind.Int32)), new SignalCodec());
+            new FieldSchema(6, FieldKind.Int32), new FieldSchema(7, FieldKind.Int32),
+            new FieldSchema(8, FieldKind.Int32), new FieldSchema(9, FieldKind.Int32)), new VelocityCodec())
+        .Register(new ComponentSchema(1003, 1, new FieldSchema(1, FieldKind.Int32)), new SignalCodec())
+        .Register(new ComponentSchema(1004, 1, new FieldSchema(1, FieldKind.Int32)), new RemovalMarkerCodec())
+        .Register(new ComponentSchema(1005, 1, new FieldSchema(1, FieldKind.Int64),
+            new FieldSchema(2, FieldKind.Int32), new FieldSchema(3, FieldKind.Boolean)), new AddedCodec());
     private static readonly GaSnapshotLayout SnapshotLayout = new([GaScalar.Int32]);
 
     internal static int Run(string[] args)
@@ -77,7 +83,10 @@ internal static class GaDemo
             {
                 EventCapacity = GaCpuAdapterRowCodec.EventCapacity,
                 UsesSnapshot = GaCpuAdapterRowCodec.UsesSnapshot,
-                UsesCommands = GaCpuAdapterRowCodec.UsesCommands
+                UsesCommands = GaCpuAdapterRowCodec.UsesCommands,
+                ComponentRemovalCount = GaCpuAdapterRowCodec.ComponentRemovals.Length,
+                ComponentAdditionCount = GaCpuAdapterRowCodec.ComponentAdditions.Length,
+                AdditionPayloadWords = GaCpuAdapterRowCodec.AdditionPayloadWords
             };
             var request = new GaSystemRequest(contract, candidates);
             using var startup = GaStartup.Select(policy.Value, [request], devices, allowExperimental: true);
@@ -92,7 +101,9 @@ internal static class GaDemo
                         GaCpuAdapterRowCodec.SourceDigest, GaCpuAdapterRowCodec.IrDigest, GaCpuAdapterRowCodec.ComponentSchemaDigest,
                         GaCpuAdapterRowCodec.WordsPerRow, GaCpuAdapterRowCodec.Pack<byte>, GaCpuAdapterRowCodec.Apply<byte>,
                         GaCpuAdapterRowCodec.EventCapacity, phases is null ? null : phases.Record, snapshot,
-                        usesCommands: GaCpuAdapterRowCodec.UsesCommands))
+                        usesCommands: GaCpuAdapterRowCodec.UsesCommands,
+                        componentRemovals: GaCpuAdapterRowCodec.ComponentRemovals,
+                        componentAdditions: GaCpuAdapterRowCodec.ComponentAdditions))
                 : CpuWorkload(snapshot);
             VerifyTicks(Workload, count, ticks, chunkCapacity, budget, warmup, phases, startupTicks, decision);
             if (decision.Route == GaRoute.Gpu)
@@ -154,12 +165,12 @@ internal static class GaDemo
     {
         using var cpuWorld = new World(new WorldOptions(phases == null ? 32 : chunkCapacity));
         using var selectedWorld = new World(new WorldOptions(chunkCapacity));
-        bool destroy = phases is null;
-        var cpuEntities = Seed(cpuWorld, count, fault: false, destroy, out var cpuTarget, out var cpuSurvivor);
-        var selectedEntities = Seed(selectedWorld, count, fault: false, destroy, out var selectedTarget, out var selectedSurvivor);
-        using var allocatorOracle = destroy ? new World(new WorldOptions(32)) : null;
+        bool structural = phases is null;
+        var cpuEntities = Seed(cpuWorld, count, fault: false, structural, out var cpuTargets);
+        var selectedEntities = Seed(selectedWorld, count, fault: false, structural, out var selectedTargets);
+        using var allocatorOracle = structural ? new World(new WorldOptions(32)) : null;
         if (allocatorOracle is not null)
-            Seed(allocatorOracle, count, fault: false, destroy: true, out _, out _);
+            Seed(allocatorOracle, count, fault: false, structural: true, out _);
         var cpuSnapshot = new GaTickSnapshot();
         var selectedSnapshot = new GaTickSnapshot();
         long runnerSetupStarted = phases is null ? 0 : Stopwatch.GetTimestamp();
@@ -170,8 +181,8 @@ internal static class GaDemo
         long selectedRunnerSetupTicks = phases is null ? 0 : Stopwatch.GetTimestamp() - runnerSetupStarted;
         using var cpuCheckpoint = new MemoryStream();
         using var selectedCheckpoint = new MemoryStream();
-        Compare(0);
         var previousCells = new int[count];
+        Compare(0);
         long pending = 0;
         long eventCount = 0;
         var samples = phases is null ? null : new TickSample[ticks];
@@ -233,8 +244,11 @@ internal static class GaDemo
         }
         var hash = Convert.ToHexString(SHA256.HashData(cpuCheckpoint.GetBuffer().AsSpan(0, (int)cpuCheckpoint.Length)));
         Console.WriteLine($"GA runner parity verifiedStates={completedTicks + 1} entities={count} events={eventCount} pendingPolls={pending} checkpointSha256={hash}");
-        if (destroy)
-            Console.WriteLine($"GA structural parity liveDestroyed=True duplicateDestroy=True staleGenerationSurvived={count > 1} ticketDestroyed=True createSurvived=True allocatorContinuation=True");
+        if (structural)
+        {
+            Console.WriteLine($"GA structural parity liveDestroyed=True duplicateDestroy=True staleGenerationSurvived={count > 1} ticketDestroyed=True createSurvived=True allocatorContinuation=True markerRemoved=True duplicateRemove=True staleMarkerIntact={count > 1} missingTicketMarker=True");
+            Console.WriteLine($"GA addition parity liveAdded=True duplicateAdd=True staleAddIgnored={count > 1} ticketReadded=True");
+        }
         if (samples != null)
             Console.WriteLine(JsonSerializer.Serialize(new
             {
@@ -270,7 +284,7 @@ internal static class GaDemo
                 if (velocity.Divide)
                     CompareEvent(entity, ordinal++, previousCells[row]);
                 if (velocity.DestroyGeneration != 0)
-                    ordinal += 5;
+                    ordinal += 14;
                 CompareEvent(entity, ordinal, cpuWorld.Get<GaPosition>(entity).Cell);
             }
             if (index != expected.Count || index != actual.Count)
@@ -293,10 +307,11 @@ internal static class GaDemo
 
         void Compare(long tick)
         {
-            if (destroy && (cpuWorld.IsAlive(cpuTarget) != (tick == 0) ||
-                selectedWorld.IsAlive(selectedTarget) != (tick == 0) ||
-                !cpuWorld.IsAlive(cpuSurvivor) || !selectedWorld.IsAlive(selectedSurvivor)))
-                throw new InvalidDataException($"GA structural command liveness diverged at tick {tick}.");
+            if (structural)
+            {
+                VerifyStructuralTargets(cpuWorld, cpuTargets, tick);
+                VerifyStructuralTargets(selectedWorld, selectedTargets, tick);
+            }
 
             for (int row = 0; row < cpuEntities.Length; row++)
             {
@@ -311,7 +326,8 @@ internal static class GaDemo
                     cpuVelocity.Delta.Raw != gpuVelocity.Delta.Raw || cpuVelocity.Step.Raw != gpuVelocity.Step.Raw ||
                     cpuVelocity.Divide != gpuVelocity.Divide || cpuVelocity.TargetId != gpuVelocity.TargetId ||
                     cpuVelocity.TargetGeneration != gpuVelocity.TargetGeneration || cpuVelocity.DestroyId != gpuVelocity.DestroyId ||
-                    cpuVelocity.DestroyGeneration != gpuVelocity.DestroyGeneration)
+                    cpuVelocity.DestroyGeneration != gpuVelocity.DestroyGeneration || cpuVelocity.RemoveId != gpuVelocity.RemoveId ||
+                    cpuVelocity.RemoveGeneration != gpuVelocity.RemoveGeneration)
                     throw new InvalidDataException($"GA runner diverged at tick {tick}, row {row}.");
                 if (tick != 0)
                 {
@@ -336,9 +352,9 @@ internal static class GaDemo
 
         void VerifyAllocator(long tick, World oracle)
         {
-            var lastReleased = ApplyRow(cpuTarget.Id, cpuTarget.Version);
+            var lastReleased = ApplyRow(0, cpuTargets.Destroy.Id, cpuTargets.Destroy.Version);
             if (count > 1)
-                lastReleased = ApplyRow(cpuSurvivor.Id, cpuSurvivor.Version - 1);
+                lastReleased = ApplyRow(1, cpuTargets.Recycled.Id, cpuTargets.Recycled.Version - 1);
 
             int expectedCount = oracle.GetStorageStatistics().EntityCount;
             if (cpuWorld.GetStorageStatistics().EntityCount != expectedCount ||
@@ -351,23 +367,30 @@ internal static class GaDemo
             if (next.Id != lastReleased.Id || next.Version != lastReleased.Version + 1)
                 throw new InvalidDataException($"GA checkpoint allocator continuation diverged at tick {tick}.");
 
-            Entity ApplyRow(int id, int generation)
+            Entity ApplyRow(int row, int id, int generation)
             {
                 var target = oracle.BindEntity(id, generation);
                 if (oracle.IsAlive(target))
                     oracle.DestroyEntity(target);
+                var empty = oracle.CreateEntity();
                 var kept = oracle.CreateEntity();
                 var temporary = oracle.CreateEntity();
                 oracle.DestroyEntity(temporary);
 
-                if (!HasGeneration(cpuWorld, kept) || !HasGeneration(selectedWorld, kept) ||
+                if (!HasGeneration(cpuWorld, empty) || !HasGeneration(selectedWorld, empty) ||
                     HasGeneration(cpuWorld, temporary) || HasGeneration(selectedWorld, temporary))
                     throw new InvalidDataException($"GA ticket lifecycle diverged at tick {tick}, target {id}.");
+                if (!HasTicketAddition(cpuWorld, kept, row) || !HasTicketAddition(selectedWorld, kept, row))
+                    throw new InvalidDataException($"GA ticket addition payload diverged at tick {tick}, target {id}.");
                 return temporary;
             }
 
             static bool HasGeneration(World world, Entity expected) =>
                 world.IsAlive(world.BindEntity(expected.Id, expected.Version));
+
+            bool HasTicketAddition(World world, Entity expected, int row) =>
+                world.TryGet<GaAdded>(world.BindEntity(expected.Id, expected.Version), out var added) &&
+                MatchesAddition(added, 0x2000_0000_0000_0021L, ~previousCells[row], row % 3 == 0);
         }
     }
 
@@ -375,8 +398,8 @@ internal static class GaDemo
     {
         using var cpuWorld = new World(new WorldOptions(32));
         using var gpuWorld = new World(new WorldOptions(chunkCapacity));
-        var cpuEntities = Seed(cpuWorld, 131, fault: true, destroy: true, out _, out _);
-        var gpuEntities = Seed(gpuWorld, 131, fault: true, destroy: true, out _, out _);
+        var cpuEntities = Seed(cpuWorld, 131, fault: true, structural: true, out _);
+        var gpuEntities = Seed(gpuWorld, 131, fault: true, structural: true, out _);
         var cpuSnapshot = new GaTickSnapshot();
         var gpuSnapshot = new GaTickSnapshot();
         using var cpu = new DeterministicRunner<byte>(cpuWorld, CpuWorkload(cpuSnapshot), workerCount: 2);
@@ -407,7 +430,27 @@ internal static class GaDemo
         snapshot.Bind(tick, GaSnapshotPacket.Capture<GaSignal>(world, SnapshotLayout,
             static (in GaSignal component, Span<uint> words) => words[0] = unchecked((uint)component.Value)));
 
-    private static Entity[] Seed(World world, int count, bool fault, bool destroy, out Entity destroyTarget, out Entity destroySurvivor)
+    private readonly record struct StructuralTargets(Entity Destroy, Entity Recycled, Entity Remove);
+
+    private static void VerifyStructuralTargets(World world, StructuralTargets targets, long tick)
+    {
+        bool initial = tick == 0;
+        if (world.IsAlive(targets.Destroy) != initial || !world.IsAlive(targets.Recycled) || !world.IsAlive(targets.Remove))
+            throw new InvalidDataException($"GA structural command liveness diverged at tick {tick}.");
+        if (world.TryGet<GaRemovalMarker>(targets.Remove, out var removed) != initial ||
+            initial && removed.Value != RemovalTargetMarker ||
+            !world.TryGet<GaRemovalMarker>(targets.Recycled, out var retained) || retained.Value != RecycledTargetMarker)
+            throw new InvalidDataException($"GA component removal diverged at tick {tick}.");
+        if (world.TryGet<GaAdded>(targets.Remove, out var added) != !initial ||
+            !initial && !MatchesAddition(added, -0x1_0000_0007L, -37, true) ||
+            world.Has<GaAdded>(targets.Recycled))
+            throw new InvalidDataException($"GA live component addition diverged at tick {tick}.");
+    }
+
+    private static bool MatchesAddition(in GaAdded added, long raw, int count, bool flag) =>
+        added.Amount.Raw == raw && added.Data.Count == count && added.Data.Flag == flag;
+
+    private static Entity[] Seed(World world, int count, bool fault, bool structural, out StructuralTargets targets)
     {
         var recycled = world.CreateEntity();
         var spare = world.CreateEntity();
@@ -447,30 +490,33 @@ internal static class GaDemo
         }
         world.DestroyEntity(spare);
 
-        destroyTarget = default;
-        destroySurvivor = default;
-        if (destroy)
+        targets = default;
+        if (structural)
         {
-            destroyTarget = world.CreateEntity();
+            var destroyTarget = world.CreateEntity();
             var stale = world.CreateEntity();
             world.DestroyEntity(stale);
-            destroySurvivor = world.CreateEntity();
-            if (destroySurvivor.Id != stale.Id || destroySurvivor.Version == stale.Version)
+            var survivor = world.CreateEntity(new GaRemovalMarker { Value = RecycledTargetMarker });
+            if (survivor.Id != stale.Id || survivor.Version == stale.Version)
                 throw new InvalidOperationException("The structural fixture requires a recycled entity generation.");
+            var removeTarget = world.CreateEntity(new GaRemovalMarker { Value = RemovalTargetMarker });
+            targets = new StructuralTargets(destroyTarget, survivor, removeTarget);
 
-            SetDestroyTarget(entities[0], destroyTarget);
+            SetStructure(entities[0], destroyTarget, removeTarget);
             if (count > 1)
-                SetDestroyTarget(entities[1], stale);
+                SetStructure(entities[1], stale, stale);
             if (fault)
-                SetDestroyTarget(entities[64], destroyTarget);
+                SetStructure(entities[64], destroyTarget, removeTarget);
         }
         return entities;
 
-        void SetDestroyTarget(Entity source, Entity target)
+        void SetStructure(Entity source, Entity destroyTarget, Entity removeTarget)
         {
             ref var velocity = ref world.Get<GaVelocity>(source);
-            velocity.DestroyId = target.Id;
-            velocity.DestroyGeneration = target.Version;
+            velocity.DestroyId = destroyTarget.Id;
+            velocity.DestroyGeneration = destroyTarget.Version;
+            velocity.RemoveId = removeTarget.Id;
+            velocity.RemoveGeneration = removeTarget.Version;
         }
     }
 
@@ -561,6 +607,8 @@ internal static class GaDemo
             fields.Set(5, FieldValue.From(value.TargetGeneration));
             fields.Set(6, FieldValue.From(value.DestroyId));
             fields.Set(7, FieldValue.From(value.DestroyGeneration));
+            fields.Set(8, FieldValue.From(value.RemoveId));
+            fields.Set(9, FieldValue.From(value.RemoveGeneration));
         }
 
         public GaVelocity Read(ComponentReader fields) => new()
@@ -571,7 +619,9 @@ internal static class GaDemo
             TargetId = fields.Get(4).AsInt32(),
             TargetGeneration = fields.Get(5).AsInt32(),
             DestroyId = fields.Get(6).AsInt32(),
-            DestroyGeneration = fields.Get(7).AsInt32()
+            DestroyGeneration = fields.Get(7).AsInt32(),
+            RemoveId = fields.Get(8).AsInt32(),
+            RemoveGeneration = fields.Get(9).AsInt32()
         };
     }
 
@@ -579,5 +629,27 @@ internal static class GaDemo
     {
         public void Write(in GaSignal value, ComponentWriter fields) => fields.Set(1, FieldValue.From(value.Value));
         public GaSignal Read(ComponentReader fields) => new() { Value = fields.Get(1).AsInt32() };
+    }
+
+    private sealed class RemovalMarkerCodec : IComponentCodec<GaRemovalMarker>
+    {
+        public void Write(in GaRemovalMarker value, ComponentWriter fields) => fields.Set(1, FieldValue.From(value.Value));
+        public GaRemovalMarker Read(ComponentReader fields) => new() { Value = fields.Get(1).AsInt32() };
+    }
+
+    private sealed class AddedCodec : IComponentCodec<GaAdded>
+    {
+        public void Write(in GaAdded value, ComponentWriter fields)
+        {
+            fields.Set(1, FieldValue.From(value.Amount.Raw));
+            fields.Set(2, FieldValue.From(value.Data.Count));
+            fields.Set(3, FieldValue.From(value.Data.Flag));
+        }
+
+        public GaAdded Read(ComponentReader fields) => new()
+        {
+            Amount = Fixed.FromRaw(fields.Get(1).AsInt64()),
+            Data = new GaAddedData { Count = fields.Get(2).AsInt32(), Flag = fields.Get(3).AsBoolean() }
+        };
     }
 }

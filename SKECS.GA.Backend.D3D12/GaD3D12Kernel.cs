@@ -6,8 +6,8 @@ public sealed class GaD3D12Kernel : GaPackedKernel
     private readonly GaD3D12Native.Lease _kernel;
 
     internal GaD3D12Kernel(GaD3D12Native api, GaD3D12Native.Lease kernel, uint workgroupSize, uint maxGroups,
-        uint maxBufferBytes, IReadOnlyList<GaSourceSpan> sourceMap)
-        : base(workgroupSize, maxGroups, maxBufferBytes, sourceMap)
+        uint maxBufferBytes, IReadOnlyList<GaSourceSpan> sourceMap, int tickResourceWords, int? bufferRowWords)
+        : base(workgroupSize, maxGroups, maxBufferBytes, sourceMap, tickResourceWords, bufferRowWords)
     {
         _api = api;
         _kernel = kernel;

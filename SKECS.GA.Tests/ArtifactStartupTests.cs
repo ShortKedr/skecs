@@ -143,17 +143,42 @@ public sealed class ArtifactStartupTests
     [InlineData(GaOutputRecord.DestroyTicketKind, 0u, 0u)]
     [InlineData(GaOutputRecord.DestroyTicketKind, 1u, 0u)]
     [InlineData(GaOutputRecord.DestroyTicketKind, uint.MaxValue, 0u)]
+    [InlineData(GaOutputRecord.RemoveEntityBase, 0u, 1u)]
+    [InlineData(GaOutputRecord.RemoveTicketBase, 0u, 0u)]
     public void InvalidMixedOutputIsRejectedBeforeAnyBatchWrite(uint kind, uint first, uint second)
     {
         var fixture = new Fixture(mixedOutputs: true);
-        var device = new TestDevice { CreateKernel = () => new InvalidOutputKernel(kind, first, second) };
+        RejectBeforeWrite(fixture, () => new InvalidOutputKernel(kind, first, second), []);
+    }
+
+    [Theory]
+    [InlineData(GaOutputRecord.AddEntityBase, 2u, 0u)]
+    [InlineData(GaOutputRecord.AddEntityBase, 1u, 9u)]
+    [InlineData(GaOutputRecord.AddTicketBase, 1u, 0u)]
+    [InlineData(GaOutputRecord.AddEntityBase + 2, 1u, 0u)]
+    public void InvalidAdditionIsRejectedBeforeAnyBatchWrite(uint kind, uint value, uint padding)
+    {
+        var fixture = new Fixture(mixedOutputs: true, additions: 2, additionWords: 2);
+        GaComponentAddition[] bindings =
+        [
+            GaComponentAddition.For(static words => new FlagComponent(words[0] != 0), 1, [0]),
+            GaComponentAddition.For(static words => new PairComponent((int)words[0], (int)words[1]), 2, []),
+        ];
+        RejectBeforeWrite(fixture, () => new InvalidAdditionKernel(kind, value, padding), bindings);
+    }
+
+    private static void RejectBeforeWrite(Fixture fixture, Func<IGaPreparedKernel> kernel,
+        ReadOnlySpan<GaComponentAddition> bindings)
+    {
+        var device = new TestDevice { CreateKernel = kernel };
         using var startup = GaStartup.Select(GaPolicy.RequireGpu,
             [new(fixture.Contract, [fixture.Load()])], [device]);
         var writes = 0;
         var identity = fixture.Contract;
         var processor = new GaBatchProcessor<byte>(startup, identity.SystemId, identity.SourceDigest,
             identity.IrDigest, identity.ComponentSchemaDigest, 1, static (_, _) => { },
-            (_, count, _) => writes += count, identity.EventCapacity, observe: null, snapshot: null, usesCommands: true);
+            (_, count, _) => writes += count, identity.EventCapacity, observe: null, snapshot: null, usesCommands: true,
+            componentRemovals: [], componentAdditions: bindings);
         using var world = new World();
         world.CreateEntity(new CommandTestComponent(1));
         world.CreateEntity(new CommandTestComponent(2));
@@ -169,6 +194,8 @@ public sealed class ArtifactStartupTests
     }
 
     private readonly record struct CommandTestComponent(int Value);
+    private readonly record struct FlagComponent(bool Value);
+    private readonly record struct PairComponent(int First, int Second);
 
     private sealed class InvalidOutputKernel(uint kind, uint first, uint second) : GaPackedKernel(64, 1, 128, [])
     {
@@ -186,15 +213,32 @@ public sealed class ArtifactStartupTests
         protected override void Release() { }
     }
 
+    private sealed class InvalidAdditionKernel(uint kind, uint value, uint padding) : GaPackedKernel(64, 1, 128, [])
+    {
+        protected override void Dispatch(uint groups, uint[] input, uint[] output, uint[] faults)
+        {
+            uint[] packet =
+            [
+                GaEventPacket.Version, 2, 2, GaOutputRecord.Words + 2,
+                1, GaOutputRecord.CreateEntityKind, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                1, kind, 0, 0, value, padding, 0, 0, 0, 0, 0
+            ];
+            packet.CopyTo(output, 2);
+        }
+
+        protected override void Release() { }
+    }
+
     private sealed class Fixture
     {
-        public Fixture(string systemId = "Movement", bool mixedOutputs = false)
+        public Fixture(string systemId = "Movement", bool mixedOutputs = false, int additions = 0, int additionWords = 0)
         {
             var digest = GaArtifactManifest.ComputeDigest(Shader);
             Contract = mixedOutputs
                 ? new GaContractIdentity(systemId, "test/v1", digest, digest, digest,
                     GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion)
-                    { EventCapacity = 2, UsesCommands = true }
+                    { EventCapacity = 2, UsesCommands = true, ComponentAdditionCount = additions,
+                        AdditionPayloadWords = additionWords }
                 : new GaContractIdentity(systemId, "test/v1", digest, digest, digest, 1, 1, 1);
             var tool = new GaToolchain("2025.6.1", "SPIRV", GaArtifactFormat.SpirV, "spirv_1_3", [], ["B=1", "A=0"], []);
             var layout = new GaResourceLayout(8, 4, 8, [new("x", 0, 4, 0, 0), new("y", 4, 4, 0, 0)]);

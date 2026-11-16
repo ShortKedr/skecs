@@ -85,6 +85,7 @@ public static partial class GaSemanticAnalysis
         private readonly INamedTypeSymbol? context;
         private readonly INamedTypeSymbol? ticket;
         private readonly INamedTypeSymbol? fixedType;
+        private ImmutableArray<TypedConstant> snapshotFields;
         private readonly List<IMethodSymbol> callChain = new();
         private readonly Dictionary<ITypeParameterSymbol, ITypeSymbol> typeArguments = new(SymbolEqualityComparer.Default);
         private readonly HashSet<IMethodSymbol> verified = new(SymbolEqualityComparer.Default);
@@ -105,6 +106,7 @@ public static partial class GaSemanticAnalysis
 
         public ImmutableArray<Diagnostic> Run()
         {
+            ValidateSnapshotDeclaration();
             var components = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
             foreach (var parameter in entry.Parameters)
             {
@@ -128,6 +130,9 @@ public static partial class GaSemanticAnalysis
                     Report(Write, Source(parameter), $"Declare a single access for '{type.ToDisplayString()}' so references cannot alias.");
             }
 
+            ValidateOwnAccesses(components);
+            resourceType = ReadDeclaredInputType("GaTickResource", "runner tick input");
+            bufferType = ReadDeclaredInputType("GaReadBuffer", "read buffer element type");
             VisitMethod(entry, Source(entry));
             return diagnostics.ToImmutable();
         }

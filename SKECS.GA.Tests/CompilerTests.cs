@@ -264,8 +264,6 @@ public sealed class CompilerTests
                 context.Destroy(outer);
             }
             """);
-        Assert.Equal(5, GaProgram.SubsetVersion);
-        Assert.Equal(5, GaProgram.IrVersion);
         Assert.True(program.UsesCommands);
         Assert.Equal(3, program.TicketLocalCount);
         Assert.Equal(13, program.EventCapacity);
@@ -323,6 +321,335 @@ public sealed class CompilerTests
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0006");
     }
 
+    [Fact]
+    public void RemovesKeepStableComponentAndSourceOrderWithoutChangingQueryMembership()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                p.Point.X = 37;
+                context.Emit(4);
+                var ticket = context.Create();
+                context.Remove<RemovalGroup<int>.Marker>(ticket: ticket);
+                context.Remove<Velocity>(entityId: 60 / v.X, generation: checked(v.Y + 1));
+                context.Remove<RemovalGroup<int>.Marker>(ticket);
+            }
+            """);
+        Assert.True(program.UsesCommands);
+        Assert.Equal(5, program.EventCapacity);
+        Assert.Equal(new[] { "global::RemovalGroup<int>.Marker", "global::Velocity" }, program.RemovalComponents);
+        Assert.Equal(new[] { "global::Position", "global::Velocity" }, program.Components.Select(component => component.Id));
+        Assert.Equal(new[] { "Point.X", "X", "Y" }, program.Fields.Select(field => field.Path));
+
+        uint[] row = [7, 5, 8];
+        var outputs = new List<GaOutputRecord> { GaOutputRecord.EmitInt32(1) };
+        Assert.Null(GaInterpreter.Execute(program, row, outputs));
+        Assert.Equal(37u, row[0]);
+        Assert.Equal(new[]
+        {
+            GaOutputRecord.EmitInt32(1), GaOutputRecord.EmitInt32(4), GaOutputRecord.CreateEntity(),
+            GaOutputRecord.RemoveTicket(0, 1), GaOutputRecord.RemoveEntity(1, 12, 9), GaOutputRecord.RemoveTicket(0, 1)
+        }, outputs);
+
+        row = [7, 0, int.MaxValue];
+        var fault = GaInterpreter.Execute(program, row, outputs);
+        Assert.True(fault.HasValue);
+        Assert.Equal(GaFaultKind.DivideByZero, fault.Value.Kind);
+        Assert.Equal(0ul, fault.Value.EvaluationOrdinal);
+        Assert.Equal(7u, row[0]);
+        Assert.Equal(6, outputs.Count);
+
+        row = [7, 5, int.MaxValue];
+        fault = GaInterpreter.Execute(program, row, outputs);
+        Assert.True(fault.HasValue);
+        Assert.Equal(GaFaultKind.Overflow, fault.Value.Kind);
+        Assert.Equal(1ul, fault.Value.EvaluationOrdinal);
+        Assert.Equal(7u, row[0]);
+        Assert.Equal(6, outputs.Count);
+    }
+
+    [Fact]
+    public void RemovalComponentIdentityChangesSchemaAndIrDigests()
+    {
+        var left = Compile("""
+            public void Execute(in SystemContext context, ref Position p)
+            {
+                context.Remove<RemovalGroup<int>.Marker>(3, 2);
+            }
+            """);
+        var right = Compile("""
+            public void Execute(in SystemContext context, ref Position p)
+            {
+                context.Remove<RemovalGroup<uint>.Marker>(3, 2);
+            }
+            """);
+        Assert.Equal(left.Components, right.Components);
+        Assert.Equal(left.Fields, right.Fields);
+        string leftCodec = GaRowCodecEmitter.Emit(left);
+        string rightCodec = GaRowCodecEmitter.Emit(right);
+        Assert.NotEqual(DigestLine(leftCodec, "ComponentSchemaDigest"), DigestLine(rightCodec, "ComponentSchemaDigest"));
+        Assert.NotEqual(DigestLine(leftCodec, "IrDigest"), DigestLine(rightCodec, "IrDigest"));
+    }
+
+    [Theory]
+    [InlineData("context.Remove<Velocity>(default(GaEntityTicket));")]
+    [InlineData("var ticket = context.Create(); var alias = ticket; context.Remove<Velocity>(alias);")]
+    [InlineData("context.Remove<Velocity>(context.Create());")]
+    [InlineData("context.Remove<Velocity>(generation: 2, entityId: 3);")]
+    [InlineData("var alias = context; alias.Remove<Velocity>(3, 2);")]
+    [InlineData("context.Remove<int>(3, 2);")]
+    public void RejectsInvalidRemovalTargetsAndComponentTypes(string statements)
+    {
+        var result = Analyze($$"""
+            public void Execute(in SystemContext context, ref Position p) { {{statements}} }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0006");
+    }
+
+    [Fact]
+    public void AddPackPreservesFieldOrderPaddingAndFaultAtomicity()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                p.Point.X = 40;
+                var ticket = context.Create();
+                context.Add(11, 12, new AdditionPayload
+                {
+                    Marker = v.Flag,
+                    Raw = Fixed.FromRaw(-4294967294L),
+                    Data = new AdditionData { Number = checked(v.X + 1), Code = AdditionCode.Selected },
+                    Count = 120u / (uint)v.Y
+                });
+                context.Add(ticket, default(AdditionPayload));
+                context.Add<Velocity>(ticket, v);
+            }
+            """);
+        Assert.Equal(4, program.EventCapacity);
+        Assert.Equal(6, program.AdditionPayloadWords);
+        Assert.Equal(new[] { "global::Position", "global::Velocity" }, program.Components.Select(component => component.Id));
+        Assert.Equal(new[] { "global::AdditionPayload", "global::Velocity" }, program.AdditionComponents.Select(component => component.Id));
+        Assert.Equal(new[] { "Count", "Data.Code", "Data.Number", "Marker", "Raw" },
+            program.AdditionComponents[0].Fields.Select(field => field.Path));
+        Assert.Equal("global::AdditionCode", program.AdditionComponents[0].Fields[1].ClrEnumType);
+        Assert.Equal(new[] { "Point.X", "Flag", "X", "Y" }, program.Fields.Select(field => field.Path));
+
+        uint[] row = [7, 1, 5, 6];
+        uint[] records = Enumerable.Repeat(uint.MaxValue, 36).ToArray();
+        Assert.Throws<InvalidOperationException>(() => GaInterpreter.Execute(program, row, new List<GaOutputRecord>()));
+        Assert.Null(GaInterpreter.ExecutePackedOutputs(program, row, records, out int count));
+        Assert.Equal(4, count);
+        Assert.Equal(40u, row[0]);
+        Assert.Equal(new uint[]
+        {
+            GaOutputRecord.CreateEntityKind, 0, 0, 0, 0, 0, 0, 0, 0,
+            GaOutputRecord.AddEntityBase, 11, 12, 20, 8, 6, 1, 2, uint.MaxValue,
+            GaOutputRecord.AddTicketBase, 0, 0, 0, 0, 0, 0, 0, 0,
+            GaOutputRecord.AddTicketBase + 1, 0, 0, 1, 5, 6, 0, 0, 0
+        }, records);
+
+        Array.Fill(records, uint.MaxValue);
+        row = [7, 1, int.MaxValue, 0];
+        var fault = GaInterpreter.ExecutePackedOutputs(program, row, records, out count);
+        Assert.True(fault.HasValue);
+        Assert.Equal(GaFaultKind.Overflow, fault.Value.Kind);
+        Assert.Equal(0ul, fault.Value.EvaluationOrdinal);
+        Assert.Equal(0, count);
+        Assert.Equal(7u, row[0]);
+        Assert.All(records, word => Assert.Equal(uint.MaxValue, word));
+    }
+
+    [Fact]
+    public void AddInitializerEvaluationOrderChangesIrButNotSchema()
+    {
+        var left = Compile("""
+            public void Execute(in SystemContext context)
+            {
+                context.Add(3, 2, new AdditionPayload { Count = 1, Marker = true });
+            }
+            """);
+        var right = Compile("""
+            public void Execute(in SystemContext context)
+            {
+                context.Add(3, 2, new AdditionPayload { Marker = true, Count = 1 });
+            }
+            """);
+        string leftCodec = GaRowCodecEmitter.Emit(left);
+        string rightCodec = GaRowCodecEmitter.Emit(right);
+        Assert.Equal(DigestLine(leftCodec, "ComponentSchemaDigest"), DigestLine(rightCodec, "ComponentSchemaDigest"));
+        Assert.NotEqual(DigestLine(leftCodec, "IrDigest"), DigestLine(rightCodec, "IrDigest"));
+    }
+
+    [Fact]
+    public void AddMarkerUsesAnOrderedRecordWithNoPayloadWords()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context)
+            {
+                context.Add(3, 2, new RemovalGroup<int>.Marker());
+            }
+            """);
+        Assert.Equal(0, program.AdditionPayloadWords);
+        Assert.Equal(1, program.EventCapacity);
+        Assert.Empty(Assert.Single(program.AdditionComponents).Fields);
+        uint[] records = new uint[3];
+        Assert.Null(GaInterpreter.ExecutePackedOutputs(program, [], records, out int count));
+        Assert.Equal(1, count);
+        Assert.Equal(new uint[] { GaOutputRecord.AddEntityBase, 3, 2 }, records);
+    }
+
+    [Theory]
+    [InlineData("context.Add(3, 2, new AdditionCtor());")]
+    [InlineData("context.Add(3, 2, new AdditionProperty { Count = 1 });")]
+    [InlineData("context.Add(3, 2, default(AdditionReadonly));")]
+    [InlineData("context.Add<AdditionPayload>(default(GaEntityTicket), default);")]
+    [InlineData("context.Add<AdditionPayload>(generation: 2, entityId: 3, value: default);")]
+    [InlineData("var alias = context; alias.Add<AdditionPayload>(3, 2, default);")]
+    public void RejectsUnportableAddCalls(string statements)
+    {
+        var result = Analyze($$"""
+            public void Execute(in SystemContext context) { {{statements}} }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0006");
+    }
+
+    [Fact]
+    public void DomainOrderPersistsAcrossOutputsAndResetsPerInvocation()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, in Velocity v)
+            {
+                context.Emit(v.X);
+                context.SetDomainOrder(primary: 0, secondary: 0);
+                context.Emit(20);
+                if (v.Y != 0)
+                    context.SetDomainOrder(-2, 4);
+                context.Emit(30);
+            }
+            """);
+        Assert.True(GaProgram.SubsetVersion >= 8);
+        Assert.True(GaProgram.IrVersion >= 8);
+        Assert.True(program.UsesDomainOrder);
+        Assert.False(program.UsesCommands);
+        Assert.Equal(3, program.EventCapacity);
+        uint[] row = [11, 1];
+        uint[] records = Enumerable.Repeat(uint.MaxValue, 18).ToArray();
+        Assert.Throws<InvalidOperationException>(() => GaInterpreter.Execute(program, row, new int[3], out _));
+        Assert.Throws<InvalidOperationException>(() => GaInterpreter.Execute(program, row, new List<GaOutputRecord>()));
+        Assert.Null(GaInterpreter.ExecutePackedOutputs(program, row, records, out int count));
+        Assert.Equal(3, count);
+        Assert.Equal(new uint[]
+        {
+            GaOutputRecord.EmitInt32Kind, 11, 0, 0, 0, 0,
+            GaOutputRecord.EmitInt32Kind, 20, 0, 1, 0, 0,
+            GaOutputRecord.EmitInt32Kind, 30, 0, 1, unchecked((uint)-2), 4
+        }, records);
+
+        row = [12, 0];
+        Assert.Null(GaInterpreter.ExecutePackedOutputs(program, row, records, out count));
+        Assert.Equal(3, count);
+        Assert.Equal(new uint[]
+        {
+            GaOutputRecord.EmitInt32Kind, 12, 0, 0, 0, 0,
+            GaOutputRecord.EmitInt32Kind, 20, 0, 1, 0, 0,
+            GaOutputRecord.EmitInt32Kind, 30, 0, 1, 0, 0
+        }, records);
+    }
+
+    [Fact]
+    public void DomainOrderFollowsTypedPayloadInPackedRecords()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context)
+            {
+                context.SetDomainOrder(-3, 4);
+                var ticket = context.Create();
+                context.Add(ticket, new AdditionPayload { Count = 2, Data = new AdditionData { Number = 7 } });
+                context.SetDomainOrder(-2, -5);
+                context.Destroy(ticket);
+            }
+            """);
+        Assert.True(program.UsesDomainOrder);
+        Assert.True(program.UsesCommands);
+        Assert.Equal(3, program.EventCapacity);
+        Assert.Equal(6, program.AdditionPayloadWords);
+        uint[] records = new uint[36];
+        Assert.Null(GaInterpreter.ExecutePackedOutputs(program, [], records, out int count));
+        Assert.Equal(3, count);
+        Assert.Equal(new uint[]
+        {
+            GaOutputRecord.CreateEntityKind, 0, 0, 0, 0, 0, 0, 0, 0, 1, unchecked((uint)-3), 4,
+            GaOutputRecord.AddTicketBase, 0, 0, 2, 0, 7, 0, 0, 0, 1, unchecked((uint)-3), 4,
+            GaOutputRecord.DestroyTicketKind, 0, 0, 0, 0, 0, 0, 0, 0, 1, unchecked((uint)-2), unchecked((uint)-5)
+        }, records);
+    }
+
+    [Fact]
+    public void DomainOrderArgumentsPreserveFirstFaultAndDoNotPublish()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                context.SetDomainOrder(-1, 2);
+                p.Point.X = 5;
+                context.Emit(17);
+                context.SetDomainOrder(checked(v.X + 1), 120 / v.Y);
+                context.Emit(18);
+            }
+            """);
+        Assert.Equal(2, program.EventCapacity);
+        uint[] records = Enumerable.Repeat(uint.MaxValue, 12).ToArray();
+        uint[] row = [9, int.MaxValue, 0];
+        var first = GaInterpreter.ExecutePackedOutputs(program, row, records, out int count);
+        Assert.True(first.HasValue);
+        Assert.Equal(GaFaultKind.Overflow, first.Value.Kind);
+        Assert.Equal(0ul, first.Value.EvaluationOrdinal);
+        Assert.Equal(0, count);
+        Assert.Equal(9u, row[0]);
+        Assert.All(records, word => Assert.Equal(uint.MaxValue, word));
+
+        row = [9, 2, 0];
+        var second = GaInterpreter.ExecutePackedOutputs(program, row, records, out count);
+        Assert.True(second.HasValue);
+        Assert.Equal(GaFaultKind.DivideByZero, second.Value.Kind);
+        Assert.Equal(1ul, second.Value.EvaluationOrdinal);
+        Assert.Equal(0, count);
+        Assert.Equal(9u, row[0]);
+        Assert.All(records, word => Assert.Equal(uint.MaxValue, word));
+    }
+
+    [Fact]
+    public void DomainOrderChangesArtifactSchemaAndArgumentsChangeIr()
+    {
+        var unkeyed = Compile("public void Execute(in SystemContext context) { context.Emit(2); }");
+        var keyed = Compile("public void Execute(in SystemContext context) { context.SetDomainOrder(0, 1); context.Emit(2); }");
+        var different = Compile("public void Execute(in SystemContext context) { context.SetDomainOrder(1, 0); context.Emit(2); }");
+        string unkeyedCodec = GaRowCodecEmitter.Emit(unkeyed);
+        string keyedCodec = GaRowCodecEmitter.Emit(keyed);
+        string differentCodec = GaRowCodecEmitter.Emit(different);
+        Assert.False(unkeyed.UsesDomainOrder);
+        Assert.NotEqual(DigestLine(unkeyedCodec, "ComponentSchemaDigest"), DigestLine(keyedCodec, "ComponentSchemaDigest"));
+        Assert.Equal(DigestLine(keyedCodec, "ComponentSchemaDigest"), DigestLine(differentCodec, "ComponentSchemaDigest"));
+        Assert.NotEqual(DigestLine(keyedCodec, "IrDigest"), DigestLine(differentCodec, "IrDigest"));
+    }
+
+    [Theory]
+    [InlineData("context.SetDomainOrder(secondary: 2, primary: 1);")]
+    [InlineData("var alias = context; alias.SetDomainOrder(1, 2);")]
+    public void RejectsDomainOrderOnAliasesAndReorderedNamedArguments(string statements)
+    {
+        var result = Analyze($$"""
+            public void Execute(in SystemContext context) { {{statements}} }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0006");
+    }
+
+    private static string DigestLine(string codec, string member) => codec.Split('\n')
+        .Single(line => line.TrimStart().StartsWith($"public const string {member} = ", StringComparison.Ordinal));
+
     private static GaProgram Compile(string body)
     {
         var result = Analyze(body);
@@ -334,9 +661,17 @@ public sealed class CompilerTests
     {
         var syntax = CSharpSyntaxTree.ParseText("""
             using SKECS.GA;
+            using SKECS.Numerics;
             public struct Vector { public int X; public int Y; }
             public struct Position { public Vector Point; }
             public struct Velocity { public int X; public int Y; public bool Flag; }
+            public struct RemovalGroup<T> where T : unmanaged { public struct Marker { } }
+            public enum AdditionCode : uint { Selected = 8 }
+            public struct AdditionData { public int Number; public AdditionCode Code; }
+            public struct AdditionPayload { public uint Count; public AdditionData Data; public bool Marker; public Fixed Raw; }
+            public struct AdditionCtor { public int Count; public AdditionCtor() { Count = 1; } }
+            public struct AdditionProperty { public int Count { get => 0; set { } } }
+            public struct AdditionReadonly { public readonly int Count; }
             [SecsSystem(SystemId = "fixtures.movement")]
             public partial struct Movement
             {
@@ -346,7 +681,8 @@ public sealed class CompilerTests
             {
                 MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
                 MetadataReference.CreateFromFile(AssemblyPath("System.Runtime.dll")),
-                MetadataReference.CreateFromFile(typeof(SecsSystemAttribute).Assembly.Location)
+                MetadataReference.CreateFromFile(typeof(SecsSystemAttribute).Assembly.Location),
+                MetadataReference.CreateFromFile(typeof(SKECS.Numerics.Fixed).Assembly.Location)
             }, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         var entry = compilation.GetTypeByMetadataName("Movement")!.GetMembers("Execute").OfType<IMethodSymbol>().Single();
         return GaCompiler.Compile(compilation, entry);

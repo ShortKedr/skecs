@@ -27,13 +27,14 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     private readonly int _workerCount;
     private World.RunnerLease? _lease;
     private RunnerSystemPlan<TInput>? _plan;
+    private List<RunnerEmission>? _groupEmissions;
     private object? _ticketScope;
     private List<DeterministicEvent>? _events;
     private Dictionary<int, object>? _reductions;
     private long _tickIndex;
     private TInput _input;
     private Fixed _step;
-    private int _systemIndex;
+    private int _kernelIndex;
     private int _nextJob;
     private int _pendingCount;
     private IDeterministicBatchSubmission<TInput>? _pending;
@@ -90,7 +91,7 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     }
 
     /// <summary>Submits up to the given positive number of new logical jobs.</summary>
-    /// <remarks>Plan preparation, sorting and system barriers can also take time, including
+    /// <remarks>Plan preparation, snapshot callbacks, sorting and system barriers can also take time, including
     /// after the last budgeted job. This budget does not bound wall-clock duration.</remarks>
     public DeterministicTickStatus Advance(int logicalJobBudget)
     {
@@ -105,16 +106,22 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
             var trace = RunnerTrace.Log.IsEnabled() ? RunnerTrace.Log : null;
             if (!TryApplyBatch())
                 return Status;
-            while (_systemIndex < _systems.Length)
+            while (_kernelIndex < _systems.Length)
             {
                 if (_plan is null)
                 {
                     var started = trace == null ? 0 : Stopwatch.GetTimestamp();
-                    _plan = new RunnerSystemPlan<TInput>(_systems[_systemIndex], _world.Id);
+                    _plan = new RunnerSystemPlan<TInput>(_systems[_kernelIndex], _world.Id);
                     trace?.Finish("plan", started);
                     started = trace == null ? 0 : Stopwatch.GetTimestamp();
                     _plan.SortRows();
                     trace?.Finish("row-sort", started);
+                    if (_plan.SnapshotPreparation is { } prepare)
+                    {
+                        started = trace == null ? 0 : Stopwatch.GetTimestamp();
+                        prepare(_plan.CreateSnapshotSource(_tickIndex, _input, _step));
+                        trace?.Finish("snapshot", started);
+                    }
                 }
 
                 var batch = Math.Min(logicalJobBudget, _plan.JobCount - _nextJob);
@@ -140,9 +147,9 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
                 }
 
                 if (_nextJob != _plan.JobCount) return Status;
-                CommitSystem(trace);
+                CompleteKernel(trace);
                 _plan = null;
-                _systemIndex++;
+                _kernelIndex++;
                 _nextJob = 0;
             }
 
@@ -209,10 +216,19 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
         }
     }
 
-    private void CommitSystem(RunnerTrace? trace)
+    private void CompleteKernel(RunnerTrace? trace)
     {
         var started = trace == null ? 0 : Stopwatch.GetTimestamp();
-        var emissions = _plan!.CollectEmissions();
+        var plan = _plan!;
+        var emissions = plan.CollectEmissions(_groupEmissions);
+        var next = _kernelIndex + 1;
+        if (next < _systems.Length && _systems[next].Order == plan.SystemOrder)
+        {
+            _groupEmissions = emissions;
+            trace?.Finish("merge-sort", started);
+            return;
+        }
+        _groupEmissions = null;
         emissions?.Sort(static (left, right) => left.Key.CompareTo(right.Key));
         trace?.Finish("merge-sort", started);
         if (emissions is null) return;
@@ -243,11 +259,12 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     private void ClearTick()
     {
         _plan = null;
+        _groupEmissions = null;
         _events = null;
         _reductions = null;
         _ticketScope = null;
         _input = default;
-        _systemIndex = 0;
+        _kernelIndex = 0;
         _nextJob = 0;
         _pendingCount = 0;
     }

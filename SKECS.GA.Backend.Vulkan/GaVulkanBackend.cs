@@ -119,7 +119,9 @@ public sealed class GaVulkanBackend : IDisposable
                     _probed.Add(index);
                 }
                 return new GaPreparation(
-                    new GaVulkanKernel(_api, handle, workgroup, device.MaxGroupsX, device.MaxStorageBufferRange, sourceMap),
+                    new GaVulkanKernel(_api, handle, workgroup, device.MaxGroupsX, device.MaxStorageBufferRange,
+                        sourceMap, manifest.Contract.TickResourceWords,
+                        manifest.Contract.BufferSchema is null ? null : manifest.Contract.BufferRowWords),
                     GaStartupReason.None);
             }
             catch (GaVulkanException failure)

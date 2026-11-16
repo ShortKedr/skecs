@@ -9,15 +9,22 @@ public sealed class GaSnapshotCpuBatch<TInput> : IDeterministicBatchProcessor<TI
     private readonly ExecuteJob _execute;
 
     public GaSnapshotCpuBatch(GaTickSnapshot snapshot, ExecuteJob execute)
+        : this(snapshot, execute, null)
+    {
+    }
+
+    public GaSnapshotCpuBatch(GaTickSnapshot snapshot, ExecuteJob execute, string? snapshotSchema)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(execute);
-        _snapshot = new GaTickSnapshot.Reader(snapshot);
+        if (snapshotSchema is not null && !GaSnapshotLayout.IsValidSchema(snapshotSchema))
+            throw new ArgumentException("Invalid GA snapshot schema.", nameof(snapshotSchema));
+        _snapshot = new GaTickSnapshot.Reader(snapshot, snapshotSchema);
         _execute = execute;
     }
 
     public IDeterministicBatchSubmission<TInput> Begin(DeterministicBatch<TInput> batch) =>
-        new Submission(_snapshot.Get(batch.TickIndex), _execute);
+        new Submission(_snapshot.Get(batch.TickIndex, batch.Stage, batch.SystemOrder, batch.KernelOrder), _execute);
 
     private sealed class Submission(GaSnapshotPacket snapshot, ExecuteJob execute) : IDeterministicBatchSubmission<TInput>
     {

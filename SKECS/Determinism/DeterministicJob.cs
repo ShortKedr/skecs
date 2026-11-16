@@ -21,6 +21,10 @@ public readonly ref struct DeterministicJob<TInput> where TInput : unmanaged
     }
 
     public long TickIndex => _buffer.TickIndex;
+    public SystemStage Stage => _buffer.Stage;
+    public int SystemOrder => _buffer.SystemOrder;
+    public int KernelOrder => _buffer.KernelOrder;
+    public DeterministicDomainOrder? DomainOrder => _buffer.DomainOrder;
 
     public TInput Input { get; }
 
@@ -31,6 +35,16 @@ public readonly ref struct DeterministicJob<TInput> where TInput : unmanaged
     public int Count => _rows.Length;
 
     public Entity GetEntity(int index) => _rows[index].Entity;
+
+    /// <summary>Returns the cached source key, or null for the default entity order.</summary>
+    public DeterministicDomainKey? GetSourceOrderKey(int row) => _buffer.GetSourceOrderKey((int)GetSourceOrderOrdinal(row));
+
+    /// <summary>Returns a row's zero-based position in the entire kernel's source order.</summary>
+    public long GetSourceOrderOrdinal(int row)
+    {
+        if ((uint)row >= (uint)_rows.Length) throw new ArgumentOutOfRangeException(nameof(row));
+        return (long)JobId * DeterministicRunner<TInput>.LogicalJobSize + row;
+    }
 
     public T Read<T>(int index) where T : unmanaged
     {
@@ -75,13 +89,18 @@ public readonly ref struct DeterministicSource
     private readonly JobBuffer _buffer;
     private readonly int _slot;
     private readonly Entity _entity;
+    private readonly DeterministicDomainKey? _domainKey;
 
-    internal DeterministicSource(JobBuffer buffer, int slot, Entity entity)
+    internal DeterministicSource(JobBuffer buffer, int slot, Entity entity, DeterministicDomainKey? domainKey = null)
     {
         _buffer = buffer;
         _slot = slot;
         _entity = entity;
+        _domainKey = domainKey;
     }
+
+    /// <summary>Returns a source that uses the given domain key and shares this source's ordinal sequence.</summary>
+    public DeterministicSource WithDomainOrder(DeterministicDomainKey key) => new(_buffer, _slot, _entity, key);
 
     public CreateTicket Create()
     {
@@ -100,9 +119,17 @@ public readonly ref struct DeterministicSource
 
     public void Add<T>(Entity entity, T value) where T : unmanaged => Component(ComponentCommand.Add, new CommandTarget(entity), value);
 
+    /// <summary>Queues addition to the given entity generation in this job's world.</summary>
+    public void Add<T>(int entityId, int generation, T value) where T : unmanaged =>
+        Add(new Entity(entityId, generation, _buffer?.WorldId ?? 0), value);
+
     public void Add<T>(CreateTicket ticket, T value) where T : unmanaged => Component(ComponentCommand.Add, new CommandTarget(ticket), value);
 
     public void Remove<T>(Entity entity) where T : unmanaged => Component(ComponentCommand.Remove, new CommandTarget(entity), default(T));
+
+    /// <summary>Queues removal from the given entity generation in this job's world.</summary>
+    public void Remove<T>(int entityId, int generation) where T : unmanaged =>
+        Remove<T>(new Entity(entityId, generation, _buffer?.WorldId ?? 0));
 
     public void Remove<T>(CreateTicket ticket) where T : unmanaged => Component(ComponentCommand.Remove, new CommandTarget(ticket), default(T));
 
@@ -122,7 +149,7 @@ public readonly ref struct DeterministicSource
     private DeterministicOrderKey CurrentKey()
     {
         if (_buffer is null) throw new InvalidOperationException("The command source was not obtained from a job.");
-        return _buffer.CurrentKey(_slot, _entity);
+        return _buffer.CurrentKey(_slot, _entity, _domainKey);
     }
 
     private void Destroy(CommandTarget target)
@@ -171,19 +198,22 @@ internal sealed class JobBuffer
 {
     private readonly Dictionary<Type, PreparedAccess> _access;
     private readonly int _rowCount;
-    private readonly SystemStage _stage;
-    private readonly int _systemOrder;
+    private readonly RunnerSourceOrderKey[]? _sourceOrderKeys;
     private int[]? _ordinals;
 
-    public JobBuffer(int jobId, int rowCount, long worldId, long tickIndex, SystemStage stage, int systemOrder,
-        Dictionary<Type, PreparedAccess> access, object ticketScope, PreparedReductions reductions)
+    public JobBuffer(int jobId, int rowCount, long worldId, long tickIndex, SystemStage stage, int systemOrder, int kernelOrder,
+        Dictionary<Type, PreparedAccess> access, object ticketScope, PreparedReductions reductions,
+        DeterministicDomainOrder? domainOrder, RunnerSourceOrderKey[]? sourceOrderKeys)
     {
         JobId = jobId;
         _rowCount = rowCount;
         WorldId = worldId;
         TickIndex = tickIndex;
-        _stage = stage;
-        _systemOrder = systemOrder;
+        Stage = stage;
+        SystemOrder = systemOrder;
+        KernelOrder = kernelOrder;
+        DomainOrder = domainOrder;
+        _sourceOrderKeys = sourceOrderKeys;
         _access = access;
         TicketScope = ticketScope;
         Reductions = reductions;
@@ -192,11 +222,17 @@ internal sealed class JobBuffer
     public int JobId { get; }
     public long WorldId { get; }
     public long TickIndex { get; }
+    public SystemStage Stage { get; }
+    public int SystemOrder { get; }
+    public int KernelOrder { get; }
+    public DeterministicDomainOrder? DomainOrder { get; }
     public object TicketScope { get; }
     public PreparedReductions Reductions { get; }
     public List<RunnerEmission>? Emissions { get; private set; }
 
     public int Require<T>(ComponentRuleKind kind) where T : unmanaged => PreparedAccess.Require<T>(_access, kind);
+
+    public DeterministicDomainKey? GetSourceOrderKey(int ordinal) => _sourceOrderKeys?[ordinal].Key;
 
     public void Enqueue(int slot, RunnerEmission emission)
     {
@@ -206,11 +242,15 @@ internal sealed class JobBuffer
         _ordinals[slot] = nextOrdinal;
     }
 
-    public DeterministicOrderKey CurrentKey(int slot, Entity entity)
+    public DeterministicOrderKey CurrentKey(int slot, Entity entity, DeterministicDomainKey? domainKey)
     {
+        if ((DomainOrder is not null) != domainKey.HasValue)
+            throw new InvalidOperationException(DomainOrder is null
+                ? "This system does not declare domain ordering."
+                : "A domain-ordered group requires a domain key for every output.");
         var ordinal = _ordinals?[slot] ?? 0;
         return slot == _rowCount
-            ? new DeterministicOrderKey(TickIndex, _stage, _systemOrder, DeterministicSourceKind.Job, JobId, 0, ordinal)
-            : new DeterministicOrderKey(TickIndex, _stage, _systemOrder, DeterministicSourceKind.Entity, entity.Id, entity.Version, ordinal);
+            ? new DeterministicOrderKey(TickIndex, Stage, SystemOrder, KernelOrder, DeterministicSourceKind.Job, JobId, 0, ordinal, domainKey)
+            : new DeterministicOrderKey(TickIndex, Stage, SystemOrder, KernelOrder, DeterministicSourceKind.Entity, entity.Id, entity.Version, ordinal, domainKey);
     }
 }

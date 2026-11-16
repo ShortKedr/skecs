@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using SKECS.Numerics;
 
 namespace SKECS.GA;
 
@@ -9,15 +10,28 @@ public readonly record struct GaSnapshotKey(int Id, int Generation);
 public sealed class GaSnapshotLayout
 {
     private readonly GaScalar[] _fields;
+    private readonly int[] _offsets;
     private readonly int[] _booleanOffsets;
 
     public GaSnapshotLayout(ReadOnlySpan<GaScalar> fields)
     {
         _fields = fields.ToArray();
+        _offsets = new int[fields.Length];
+        var schema = new char[fields.Length];
         var booleans = new List<int>();
         int offset = 0;
-        foreach (var field in _fields)
+        for (int index = 0; index < _fields.Length; index++)
         {
+            var field = _fields[index];
+            _offsets[index] = offset;
+            schema[index] = field switch
+            {
+                GaScalar.Bool => 'b',
+                GaScalar.Int32 => 'i',
+                GaScalar.UInt32 => 'u',
+                GaScalar.Fixed => 'f',
+                _ => throw new ArgumentException("A snapshot field must be a supported GA scalar.", nameof(fields))
+            };
             switch (field)
             {
                 case GaScalar.Bool:
@@ -30,18 +44,36 @@ public sealed class GaSnapshotLayout
                 case GaScalar.Fixed:
                     offset = checked(offset + 2);
                     break;
-                default:
-                    throw new ArgumentException("A snapshot field must be a supported GA scalar.", nameof(fields));
             }
         }
+        Schema = new string(schema);
         _booleanOffsets = booleans.ToArray();
         ValueWordCount = offset;
         RowWordCount = checked(offset + GaSnapshotPacket.KeyWordCount);
     }
 
     public ReadOnlySpan<GaScalar> Fields => _fields;
+    /// <summary>The ordered field codes b, i, u and f used by GA artifact contracts.</summary>
+    public string Schema { get; }
     public int ValueWordCount { get; }
     public int RowWordCount { get; }
+
+    public int GetWordOffset(int field)
+    {
+        if ((uint)field >= (uint)_offsets.Length)
+            throw new ArgumentOutOfRangeException(nameof(field));
+        return _offsets[field];
+    }
+
+    public static bool IsValidSchema(string schema)
+    {
+        if (string.IsNullOrEmpty(schema))
+            return false;
+        foreach (char code in schema)
+            if (code is not ('b' or 'i' or 'u' or 'f'))
+                return false;
+        return true;
+    }
 
     internal void ValidateBooleans(ReadOnlySpan<uint> words)
     {
@@ -177,15 +209,41 @@ public sealed class GaSnapshotPacket
 
     public int ReadInt32(int id, int generation, int fallback)
     {
-        RequireInt32Layout();
+        RequireSchema(null);
         return TryGet(new GaSnapshotKey(id, generation), out var values)
             ? unchecked((int)values[0]) : fallback;
     }
 
-    internal void RequireInt32Layout()
+    public bool ReadBool(int id, int generation, int field, bool fallback) =>
+        ReadFieldBits(id, generation, field, GaScalar.Bool, fallback ? 1u : 0u) != 0;
+
+    public int ReadInt32(int id, int generation, int field, int fallback) =>
+        unchecked((int)ReadFieldBits(id, generation, field, GaScalar.Int32, unchecked((uint)fallback)));
+
+    public uint ReadUInt32(int id, int generation, int field, uint fallback) =>
+        (uint)ReadFieldBits(id, generation, field, GaScalar.UInt32, fallback);
+
+    public Fixed ReadFixed(int id, int generation, int field, Fixed fallback) =>
+        Fixed.FromRaw(unchecked((long)ReadFieldBits(id, generation, field, GaScalar.Fixed, unchecked((ulong)fallback.Raw))));
+
+    internal ulong ReadFieldBits(int id, int generation, int field, GaScalar type, ulong fallback)
     {
-        if (Layout.Fields is not [GaScalar.Int32])
-            throw new ArgumentException("The scalar lookup requires exactly one Int32 snapshot field.");
+        int offset = Layout.GetWordOffset(field);
+        if (Layout.Fields[field] != type)
+            throw new ArgumentException("The snapshot field type does not match the lookup type.", nameof(field));
+        if (!TryGet(new GaSnapshotKey(id, generation), out var values))
+            return fallback;
+        ulong bits = values[offset];
+        if (type == GaScalar.Fixed)
+            bits |= (ulong)values[offset + 1] << 32;
+        return bits;
+    }
+
+    internal void RequireSchema(string? expected)
+    {
+        expected ??= "i";
+        if (Layout.Schema != expected)
+            throw new ArgumentException($"The GA snapshot layout '{Layout.Schema}' does not match '{expected}'.");
     }
 
     public void WriteLittleEndian(Span<byte> destination)

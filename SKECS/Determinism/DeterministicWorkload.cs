@@ -27,6 +27,15 @@ public sealed class DeterministicQuery
 
     public DeterministicQuery ReadWrite<T>() where T : unmanaged => Add<T>(ComponentRuleKind.ReadWrite);
 
+    /// <summary>Specifies row order for an entity kernel without changing its query membership or access rules.</summary>
+    public DeterministicQuery OrderBy(DeterministicSourceOrder order)
+    {
+        SourceOrder = order ?? throw new ArgumentNullException(nameof(order));
+        return this;
+    }
+
+    internal DeterministicSourceOrder? SourceOrder { get; private set; }
+
     internal ComponentRule[] Snapshot() => _rules.ToArray();
 
     private DeterministicQuery Add<T>(ComponentRuleKind kind) where T : unmanaged
@@ -42,10 +51,13 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
     private readonly List<SystemRegistration<TInput>> _systems = new();
     private readonly List<object> _reductions = new();
     private readonly long _id = Interlocked.Increment(ref WorkloadIds.Next);
+    private int _systemCount;
+    private bool _configuringGroup;
 
     /// <summary>Registers an ordered tick-local fold and returns its typed channel.</summary>
     public DeterministicReduction<T> AddReduction<T>(T seed, Func<T, T, T> combine) where T : unmanaged
     {
+        RequireOutsideGroup();
         if (combine is null) throw new ArgumentNullException(nameof(combine));
         var channel = new DeterministicReduction<T>(_id, _reductions.Count, seed);
         _reductions.Add(new ReductionDefinition<T>(channel, combine));
@@ -64,9 +76,9 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
     public DeterministicWorkload<TInput> AddBatchSystem(
         SystemStage stage, DeterministicQuery query, IDeterministicBatchProcessor<TInput> processor)
     {
-        if (processor is null) throw new ArgumentNullException(nameof(processor));
-        _systems.Add(new SystemRegistration<TInput>(stage, _systems.Count, GetRules(stage, query),
-            runOnce: false, execute: null, batchProcessor: processor));
+        RequireOutsideGroup();
+        _systems.Add(SystemRegistration<TInput>.ForBatch(stage, _systemCount, 0, query, processor));
+        _systemCount++;
         return this;
     }
 
@@ -76,13 +88,66 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
         where TProcessor : unmanaged, IDeterministicJobProcessor<TInput>
         => Add(stage, access, processor, runOnce: true);
 
+    /// <summary>Registers a preparation callback that reads the current system's rows once per tick.</summary>
+    /// <remarks>The callback runs on the runner thread, including when its query has no matches.</remarks>
+    public DeterministicWorkload<TInput> AddSnapshotPreparation(SystemStage stage, DeterministicQuery query,
+        DeterministicSnapshotPreparation<TInput> prepare)
+    {
+        RequireOutsideGroup();
+        _systems.Add(SystemRegistration<TInput>.ForSnapshot(stage, _systemCount, 0, query, prepare));
+        _systemCount++;
+        return this;
+    }
+
+    /// <summary>Registers an ordered group of kernels with a shared commit barrier.</summary>
+    /// <remarks>Later kernels see row writes from earlier kernels. Commands, events and reductions
+    /// from the group become visible at its final barrier. Configure members through the supplied builder.</remarks>
+    public DeterministicWorkload<TInput> AddCommitGroup(SystemStage stage, Action<DeterministicCommitGroup<TInput>> configure)
+        => AddCommitGroupCore(stage, null, configure);
+
+    /// <summary>Registers a commit group whose outputs are sorted by their declared domain keys.</summary>
+    public DeterministicWorkload<TInput> AddCommitGroup(SystemStage stage, DeterministicDomainOrder order,
+        Action<DeterministicCommitGroup<TInput>> configure)
+    {
+        if (order is null) throw new ArgumentNullException(nameof(order));
+        return AddCommitGroupCore(stage, order, configure);
+    }
+
+    private DeterministicWorkload<TInput> AddCommitGroupCore(SystemStage stage, DeterministicDomainOrder? domainOrder,
+        Action<DeterministicCommitGroup<TInput>> configure)
+    {
+        RequireOutsideGroup();
+        SystemRegistration<TInput>.RequireStage(stage);
+        if (configure is null) throw new ArgumentNullException(nameof(configure));
+
+        var group = new DeterministicCommitGroup<TInput>(stage, _systemCount, domainOrder);
+        List<SystemRegistration<TInput>> members;
+        _configuringGroup = true;
+        try
+        {
+            configure(group);
+        }
+        finally
+        {
+            members = group.Close();
+            _configuringGroup = false;
+        }
+        if (members.Count == 0) throw new ArgumentException("A commit group needs at least one kernel.", nameof(configure));
+        _systems.AddRange(members);
+        _systemCount++;
+        return this;
+    }
+
     internal PreparedSystem<TInput>[] Prepare(World world)
     {
+        RequireOutsideGroup();
         var ordered = _systems.ToArray();
         Array.Sort(ordered, static (left, right) =>
         {
             var stage = left.Stage.CompareTo(right.Stage);
-            return stage != 0 ? stage : left.Order.CompareTo(right.Order);
+            if (stage != 0) return stage;
+            var system = left.Order.CompareTo(right.Order);
+            return system != 0 ? system : left.KernelOrder.CompareTo(right.KernelOrder);
         });
         var prepared = new PreparedSystem<TInput>[ordered.Length];
         for (var i = 0; i < prepared.Length; i++)
@@ -96,25 +161,16 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
         SystemStage stage, DeterministicQuery query, TProcessor processor, bool runOnce)
         where TProcessor : unmanaged, IDeterministicJobProcessor<TInput>
     {
-        var rules = GetRules(stage, query);
-        if (runOnce && Array.Exists(rules, static rule =>
-                rule.Kind == ComponentRuleKind.Include || rule.Kind == ComponentRuleKind.Exclude))
-            throw new ArgumentException("A standalone job has no entity filters.", nameof(query));
-
-        _systems.Add(new SystemRegistration<TInput>(stage, _systems.Count, rules, runOnce, job =>
-        {
-            var copy = processor;
-            copy.Execute(job);
-        }));
+        RequireOutsideGroup();
+        _systems.Add(SystemRegistration<TInput>.ForJob(stage, _systemCount, 0, query, processor, runOnce));
+        _systemCount++;
         return this;
     }
 
-    private static ComponentRule[] GetRules(SystemStage stage, DeterministicQuery query)
+    private void RequireOutsideGroup()
     {
-        if (stage < SystemStage.PreUpdate || stage > SystemStage.PostUpdate)
-            throw new ArgumentOutOfRangeException(nameof(stage));
-        if (query is null) throw new ArgumentNullException(nameof(query));
-        return query.Snapshot();
+        if (_configuringGroup)
+            throw new InvalidOperationException("Configure commit group kernels through the supplied builder.");
     }
 }
 
@@ -155,20 +211,80 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
     private readonly bool _runOnce;
     private readonly ExecuteJob<TInput>? _execute;
     private readonly IDeterministicBatchProcessor<TInput>? _batchProcessor;
+    private readonly DeterministicSnapshotPreparation<TInput>? _snapshotPreparation;
+    private readonly DeterministicSourceOrder? _sourceOrder;
 
-    public SystemRegistration(SystemStage stage, int order, ComponentRule[] rules, bool runOnce,
-        ExecuteJob<TInput>? execute, IDeterministicBatchProcessor<TInput>? batchProcessor = null)
+    private SystemRegistration(SystemStage stage, int order, int kernelOrder, ComponentRule[] rules, bool runOnce,
+        ExecuteJob<TInput>? execute, IDeterministicBatchProcessor<TInput>? batchProcessor = null,
+        DeterministicSnapshotPreparation<TInput>? snapshotPreparation = null, DeterministicDomainOrder? domainOrder = null,
+        DeterministicSourceOrder? sourceOrder = null)
     {
         Stage = stage;
         Order = order;
+        KernelOrder = kernelOrder;
+        DomainOrder = domainOrder;
         _rules = rules;
         _runOnce = runOnce;
         _execute = execute;
         _batchProcessor = batchProcessor;
+        _snapshotPreparation = snapshotPreparation;
+        _sourceOrder = sourceOrder;
     }
 
     public SystemStage Stage { get; }
     public int Order { get; }
+    public int KernelOrder { get; }
+    public DeterministicDomainOrder? DomainOrder { get; }
+
+    public static SystemRegistration<TInput> ForJob<TProcessor>(SystemStage stage, int order, int kernelOrder,
+        DeterministicQuery query, TProcessor processor, bool runOnce, DeterministicDomainOrder? domainOrder = null)
+        where TProcessor : unmanaged, IDeterministicJobProcessor<TInput>
+    {
+        var rules = GetRules(stage, query);
+        if (runOnce && Array.Exists(rules, static rule =>
+                rule.Kind == ComponentRuleKind.Include || rule.Kind == ComponentRuleKind.Exclude))
+            throw new ArgumentException("A standalone job has no entity filters.", nameof(query));
+        if (runOnce && query.SourceOrder is not null)
+            throw new ArgumentException("A standalone job has no entity source order.", nameof(query));
+
+        return new SystemRegistration<TInput>(stage, order, kernelOrder, rules, runOnce, job =>
+        {
+            var copy = processor;
+            copy.Execute(job);
+        }, domainOrder: domainOrder, sourceOrder: query.SourceOrder);
+    }
+
+    public static SystemRegistration<TInput> ForBatch(SystemStage stage, int order, int kernelOrder,
+        DeterministicQuery query, IDeterministicBatchProcessor<TInput> processor, DeterministicDomainOrder? domainOrder = null)
+    {
+        if (processor is null) throw new ArgumentNullException(nameof(processor));
+        return new SystemRegistration<TInput>(stage, order, kernelOrder, GetRules(stage, query),
+            runOnce: false, execute: null, batchProcessor: processor, domainOrder: domainOrder, sourceOrder: query.SourceOrder);
+    }
+
+    public static SystemRegistration<TInput> ForSnapshot(SystemStage stage, int order, int kernelOrder,
+        DeterministicQuery query, DeterministicSnapshotPreparation<TInput> prepare, DeterministicDomainOrder? domainOrder = null)
+    {
+        if (prepare is null) throw new ArgumentNullException(nameof(prepare));
+        var rules = GetRules(stage, query);
+        if (query.SourceOrder is not null)
+            throw new ArgumentException("Snapshot preparation always reads rows in canonical entity order.", nameof(query));
+        return new SystemRegistration<TInput>(stage, order, kernelOrder, rules,
+            runOnce: false, execute: null, snapshotPreparation: prepare, domainOrder: domainOrder);
+    }
+
+    internal static void RequireStage(SystemStage stage)
+    {
+        if (stage < SystemStage.PreUpdate || stage > SystemStage.PostUpdate)
+            throw new ArgumentOutOfRangeException(nameof(stage));
+    }
+
+    private static ComponentRule[] GetRules(SystemStage stage, DeterministicQuery query)
+    {
+        RequireStage(stage);
+        if (query is null) throw new ArgumentNullException(nameof(query));
+        return query.Snapshot();
+    }
 
     public PreparedSystem<TInput> Prepare(World world)
     {
@@ -194,7 +310,8 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
         }
 
         var query = _runOnce ? null : world.GetOrCreateQueryCache(new QueryCacheKey(include, exclude));
-        return new PreparedSystem<TInput>(Stage, Order, query, access, _execute, _batchProcessor);
+        return new PreparedSystem<TInput>(Stage, Order, KernelOrder, query, access, _execute, _batchProcessor,
+            _snapshotPreparation, DomainOrder, _sourceOrder?.Bind(world));
     }
 }
 
@@ -219,22 +336,31 @@ internal readonly struct PreparedAccess
 
 internal sealed class PreparedSystem<TInput> where TInput : unmanaged
 {
-    public PreparedSystem(SystemStage stage, int order, QueryCacheEntry? query,
+    public PreparedSystem(SystemStage stage, int order, int kernelOrder, QueryCacheEntry? query,
         Dictionary<Type, PreparedAccess> access, ExecuteJob<TInput>? execute,
-        IDeterministicBatchProcessor<TInput>? batchProcessor)
+        IDeterministicBatchProcessor<TInput>? batchProcessor, DeterministicSnapshotPreparation<TInput>? snapshotPreparation,
+        DeterministicDomainOrder? domainOrder, Func<RunnerRow, DeterministicDomainKey>? selectSourceKey)
     {
         Stage = stage;
         Order = order;
+        KernelOrder = kernelOrder;
+        DomainOrder = domainOrder;
         Query = query;
         Access = access;
         Execute = execute;
         BatchProcessor = batchProcessor;
+        SnapshotPreparation = snapshotPreparation;
+        SelectSourceKey = selectSourceKey;
     }
 
     public SystemStage Stage { get; }
     public int Order { get; }
+    public int KernelOrder { get; }
+    public DeterministicDomainOrder? DomainOrder { get; }
     public QueryCacheEntry? Query { get; }
     public Dictionary<Type, PreparedAccess> Access { get; }
     public ExecuteJob<TInput>? Execute { get; }
     public IDeterministicBatchProcessor<TInput>? BatchProcessor { get; }
+    public DeterministicSnapshotPreparation<TInput>? SnapshotPreparation { get; }
+    public Func<RunnerRow, DeterministicDomainKey>? SelectSourceKey { get; }
 }

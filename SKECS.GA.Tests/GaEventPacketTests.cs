@@ -68,6 +68,27 @@ public sealed class GaEventPacketTests
         Assert.Equal(1, world.GetStorageStatistics().EntityCount);
     }
 
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(2u)]
+    [InlineData(1u)]
+    public void InvalidDomainRecordDoesNotEnqueueThePrecedingCreate(uint secondTag)
+    {
+        using var world = new World();
+        world.CreateEntity(new Value(1));
+        var workload = new DeterministicWorkload<byte>().AddCommitGroup(SystemStage.Update,
+            new DeterministicDomainOrder("test-pair", 1), group =>
+                group.AddSystem(new DeterministicQuery().With<Value>(), new RejectInvalidDomain(secondTag)));
+        using var runner = new DeterministicRunner<byte>(world, workload);
+        runner.BeginTick(1, 0, Fixed.One);
+
+        Assert.Equal(DeterministicTickStatus.Completed, runner.Advance(1));
+        var published = Assert.Single(runner.LastCompleted!.Events);
+        Assert.Equal(0, published.Key.LocalOrdinal);
+        Assert.Equal(17, published.Get<int>());
+        Assert.Equal(1, world.GetStorageStatistics().EntityCount);
+    }
+
     private readonly record struct Value(int Number);
 
     private readonly struct RejectInvalidTicket : IDeterministicJobProcessor<byte>
@@ -82,6 +103,30 @@ public sealed class GaEventPacketTests
             catch (InvalidDataException)
             {
                 source.Emit(17);
+            }
+        }
+    }
+
+    private readonly struct RejectInvalidDomain(uint secondTag) : IDeterministicJobProcessor<byte>
+    {
+        public void Execute(DeterministicJob<byte> job)
+        {
+            const int width = GaOutputRecord.Words + GaOutputRecord.DomainWordCount;
+            Span<uint> packed = stackalloc uint[2 * width];
+            GaOutputRecord.CreateEntity().Write(packed[..width]);
+            GaOutputRecord.WriteDomainOrder(packed[..width], hasKey: true, primary: 2, secondary: 0);
+            GaOutputRecord.DestroyTicket(0).Write(packed[width..]);
+            GaOutputRecord.WriteDomainOrder(packed[width..], hasKey: true, primary: 1, secondary: 0);
+            packed[width + GaOutputRecord.Words] = secondTag;
+
+            var source = job.ForEntity(0);
+            try
+            {
+                GaOutputRecord.ApplyPackedSource(source, packed, width, [], [], usesDomainOrder: true);
+            }
+            catch (InvalidDataException)
+            {
+                source.WithDomainOrder(new DeterministicDomainKey(0, 0)).Emit(17);
             }
         }
     }

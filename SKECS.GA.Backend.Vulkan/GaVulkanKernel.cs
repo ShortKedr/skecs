@@ -6,8 +6,8 @@ public sealed class GaVulkanKernel : GaPackedKernel
     private readonly GaVulkanNative.Lease _kernel;
 
     internal GaVulkanKernel(GaVulkanNative api, GaVulkanNative.Lease kernel, uint workgroupSize,
-        uint maxGroups, uint maxBufferBytes, IReadOnlyList<GaSourceSpan> sourceMap)
-        : base(workgroupSize, maxGroups, maxBufferBytes, sourceMap)
+        uint maxGroups, uint maxBufferBytes, IReadOnlyList<GaSourceSpan> sourceMap, int tickResourceWords, int? bufferRowWords)
+        : base(workgroupSize, maxGroups, maxBufferBytes, sourceMap, tickResourceWords, bufferRowWords)
     {
         _api = api;
         _kernel = kernel;

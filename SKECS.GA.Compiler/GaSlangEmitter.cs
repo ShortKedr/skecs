@@ -19,22 +19,25 @@ public static class GaSlangEmitter
     private static GaSlangModule Emit(GaProgram program, bool vulkan)
     {
         ArgumentNullException.ThrowIfNull(program);
-        return new Emitter().Emit(program, vulkan);
+        return new Emitter(program).Emit(vulkan);
     }
 
-    private sealed class Emitter
+    private sealed class Emitter(GaProgram program)
     {
         private readonly StringBuilder _code = new();
         private readonly List<GaSourceSpan> _sources = new();
+        private readonly bool _usesOptional = program.Components.Any(component => component.Origin == GaComponentOrigin.Optional);
         private int _indent;
         private int _temporary;
-        private int _eventCapacity;
-        private bool _usesCommands;
+        private readonly int _eventCapacity = program.EventCapacity;
+        private readonly bool _mixedOutputs = program.UsesCommands || program.UsesDomainOrder;
+        private readonly int _recordWords = program.UsesCommands || program.UsesDomainOrder
+            ? checked(GaOutputRecord.Words + program.AdditionPayloadWords +
+                (program.UsesDomainOrder ? GaOutputRecord.DomainWordCount : 0))
+            : 1;
 
-        internal GaSlangModule Emit(GaProgram program, bool vulkan)
+        internal GaSlangModule Emit(bool vulkan)
         {
-            _eventCapacity = program.EventCapacity;
-            _usesCommands = program.UsesCommands;
             if (program.UsesFixed)
                 _code.Append(GaFixedSlangLibrary.Load()).Append('\n');
             if (program.UsesSnapshot)
@@ -61,17 +64,38 @@ public static class GaSlangEmitter
             Line($"uint gaRow = id.x * {Word(stride)};");
             Line($"uint gaFault = id.x * {Word(GaSlangModule.FaultStride)};");
             Line("uint2 gaOrdinal = uint2(0u, 0u);");
+            if (program.TickResourceWords != 0)
+                TickResourceLayout(stride);
+            if (program.BufferSchema is not null)
+                BufferLayout(stride);
             if (program.UsesSnapshot)
                 SnapshotLayout(stride);
             if (_eventCapacity != 0)
                 EventLayout(stride);
+            for (int i = 0; i < program.Components.Count; i++)
+            {
+                int presence = program.PresenceOffsets[i];
+                if (presence < 0)
+                    continue;
+                Line($"uint {Presence(i)} = gaInput[1u + gaRow + {Word(presence)}];");
+                var component = program.Components[i];
+                if (component.Origin == GaComponentOrigin.Own)
+                    FaultWhen($"{Presence(i)} == 0u", GaFaultKind.MissingOwnComponent, "gaOrdinal", component.OwnSource);
+            }
+            if (program.UsesDomainOrder)
+            {
+                Line("uint gaHasDomainOrder = 0u;");
+                Line("uint gaDomainPrimary = 0u, gaDomainSecondary = 0u;");
+            }
             for (int i = 0; i < program.Fields.Count; i++)
             {
                 int offset = program.Offsets[i];
-                if (program.Fields[i].Type == GaScalar.Fixed)
-                    Line($"uint2 {Field(i)} = uint2(gaInput[1u + gaRow + {Word(offset)}], gaInput[1u + gaRow + {Word(offset + 1)}]);");
-                else
-                    Line($"uint {Field(i)} = gaInput[1u + gaRow + {Word(offset)}];");
+                var type = program.Fields[i].Type;
+                string firstWord = $"gaInput[1u + gaRow + {Word(offset)}]";
+                string value = type == GaScalar.Fixed
+                    ? $"uint2({firstWord}, gaInput[1u + gaRow + {Word(offset + 1)}])"
+                    : firstWord;
+                Line($"{Type(type)} {Field(i)} = {value};");
             }
             for (int i = 0; i < program.Locals.Count; i++)
                 Line($"{Type(program.Locals[i])} {Local(i)} = {Literal(program.Locals[i], 0)};");
@@ -91,6 +115,12 @@ public static class GaSlangEmitter
                 else
                     Line($"gaOutput[gaRow + {Word(offset)}] = {Field(i)};");
             }
+            for (int i = 0; i < program.Components.Count; i++)
+            {
+                int presence = program.PresenceOffsets[i];
+                if (presence >= 0)
+                    Line($"gaOutput[gaRow + {Word(presence)}] = {Presence(i)};");
+            }
             for (int i = 0; i < GaSlangModule.FaultStride; i++)
                 Line($"gaFaults[gaFault + {Word(i)}] = 0u;");
             if (_eventCapacity != 0)
@@ -109,26 +139,81 @@ public static class GaSlangEmitter
 
         private void SnapshotLayout(int stride)
         {
-            Line($"uint gaSnapshotStart = 1u + gaInput[0] * {Word(stride)};");
-            Line("uint gaInputWords, gaInputStride;");
-            Line("gaInput.GetDimensions(gaInputWords, gaInputStride);");
+            if (program.BufferSchema is not null)
+            {
+                Line($"uint gaSnapshotStart = gaBufferData + gaBufferCount * {Word(program.BufferRowWords)};");
+            }
+            else if (program.TickResourceWords != 0)
+            {
+                Line($"uint gaSnapshotStart = gaTickResourceStart + {Word(program.TickResourceWords)};");
+            }
+            else
+            {
+                Line($"uint gaSnapshotStart = 1u + gaInput[0] * {Word(stride)};");
+                Line("uint gaInputWords, gaInputStride;");
+                Line("gaInput.GetDimensions(gaInputWords, gaInputStride);");
+            }
             Line("uint gaSnapshotWords = gaInputWords - min(gaSnapshotStart, gaInputWords);");
             Line("GaSnapshotViewV1 gaSnapshotView;");
-            Line("bool gaSnapshotValid = gaTryOpenSnapshotV1(gaInput, gaSnapshotStart, gaSnapshotWords, 1u, gaSnapshotView);");
+            int valueWords = program.SnapshotLayout?.ValueWordCount ?? 1;
+            Line($"bool gaSnapshotValid = gaTryOpenSnapshotV1(gaInput, gaSnapshotStart, gaSnapshotWords, {Word(valueWords)}, gaSnapshotView);");
+        }
+
+        private void TickResourceLayout(int stride)
+        {
+            GuardRowDimensions(stride);
+            Line($"uint gaTickResourceStart = 1u + gaInput[0] * {Word(stride)};");
+            string comparison = program.UsesSnapshot || program.BufferSchema is not null ? "<" : "!=";
+            Line($"if (gaInputWords - gaTickResourceStart {comparison} {Word(program.TickResourceWords)}) return;");
+            for (int i = 0; i < program.TickResourceFields.Count; i++)
+            {
+                int offset = program.TickResourceOffsets[i];
+                var type = program.TickResourceFields[i].Type;
+                string firstWord = $"gaInput[gaTickResourceStart + {Word(offset)}]";
+                string value = type == GaScalar.Fixed
+                    ? $"uint2({firstWord}, gaInput[gaTickResourceStart + {Word(offset + 1)}])"
+                    : firstWord;
+                Line($"{Type(type)} {TickField(i)} = {value};");
+            }
+        }
+
+        private void GuardRowDimensions(int stride)
+        {
+            Line("uint gaInputWords, gaInputStride;");
+            Line("gaInput.GetDimensions(gaInputWords, gaInputStride);");
+            Line($"if (gaInputWords < 1u || gaInput[0] > (gaInputWords - 1u) / {Word(stride)}) return;");
+        }
+
+        private void BufferLayout(int stride)
+        {
+            if (program.TickResourceWords == 0)
+                GuardRowDimensions(stride);
+            string bufferStart = program.TickResourceWords == 0
+                ? $"1u + gaInput[0] * {Word(stride)}"
+                : $"gaTickResourceStart + {Word(program.TickResourceWords)}";
+            Line($"uint gaBufferStart = {bufferStart};");
+            Line("if (gaBufferStart >= gaInputWords) return;");
+            Line("uint gaBufferCount = gaInput[gaBufferStart];");
+            Line("if (gaBufferCount > 0x7fffffffu) return;");
+            Line("uint gaBufferData = gaBufferStart + 1u;");
+            string width = Word(program.BufferRowWords);
+            if (program.BufferRowWords != 0)
+                Line($"if (gaBufferCount > (gaInputWords - gaBufferData) / {width}) return;");
+            if (!program.UsesSnapshot)
+                Line($"if (gaBufferData + gaBufferCount * {width} != gaInputWords) return;");
         }
 
         private void EventLayout(int stride)
         {
-            int recordWords = _usesCommands ? GaOutputRecord.Words : 1;
             Line($"uint gaEvents = gaInput[0] * {Word(stride)};");
             Line("if (id.x == 0u)");
             Open();
             Line($"gaOutput[gaEvents] = {Word(GaEventPacket.Version)};");
             Line("gaOutput[gaEvents + 1u] = gaInput[0];");
             Line($"gaOutput[gaEvents + 2u] = {Word(_eventCapacity)};");
-            Line($"gaOutput[gaEvents + 3u] = {Word(recordWords)};");
+            Line($"gaOutput[gaEvents + 3u] = {Word(_recordWords)};");
             Close();
-            Line($"uint gaEventRow = gaEvents + {Word(GaEventPacket.HeaderWords)} + id.x * {Word(checked(1 + _eventCapacity * recordWords))};");
+            Line($"uint gaEventRow = gaEvents + {Word(GaEventPacket.HeaderWords)} + id.x * {Word(checked(1 + _eventCapacity * _recordWords))};");
             Line("uint gaEventCount = 0u;");
             // Fault returns leave the row's event count zero.
             Line("gaOutput[gaEventRow] = 0u;");
@@ -145,11 +230,20 @@ public static class GaSlangEmitter
                 case GaStore assignment:
                     Line($"{Slot(assignment.Slot)} = {Value(assignment.Value)};");
                     break;
+                case GaArrayStore store:
+                {
+                    string index = CheckedArrayIndex(store.Field, store.Index, store.Source);
+                    if (store.Previous is { } previous)
+                        ArraySelect(store.Field, index, element => $"{Slot(previous)} = {element};");
+                    string value = Temp(Value(store.Value), Type(store.Field.Type));
+                    ArraySelect(store.Field, index, element => $"{element} = {value};");
+                    break;
+                }
                 case GaEmit emission:
                     if (_eventCapacity != 0)
                     {
                         string value = Value(emission.Value);
-                        if (_usesCommands)
+                        if (_mixedOutputs)
                             WriteOutput(GaOutputRecord.EmitInt32Kind, value, "0u");
                         else
                         {
@@ -177,6 +271,37 @@ public static class GaSlangEmitter
                 case GaDestroyTicket destroy:
                     if (_eventCapacity != 0)
                         WriteOutput(GaOutputRecord.DestroyTicketKind, Ticket(destroy.TicketSlot), "0u");
+                    break;
+                case GaRemove remove:
+                    if (_eventCapacity != 0)
+                    {
+                        string entityId = Temp(Value(remove.EntityId));
+                        string generation = Temp(Value(remove.Generation));
+                        WriteOutput(GaOutputRecord.RemoveEntityBase | (uint)remove.ComponentIndex, entityId, generation);
+                    }
+                    break;
+                case GaRemoveTicket remove:
+                    if (_eventCapacity != 0)
+                        WriteOutput(GaOutputRecord.RemoveTicketBase | (uint)remove.ComponentIndex, Ticket(remove.TicketSlot), "0u");
+                    break;
+                case GaAdd add:
+                    if (_eventCapacity != 0)
+                    {
+                        string entityId = Temp(Value(add.EntityId));
+                        string generation = Temp(Value(add.Generation));
+                        WriteAddition(GaOutputRecord.AddEntityBase | (uint)add.ComponentIndex, entityId, generation,
+                            add.ComponentIndex, add.Values);
+                    }
+                    break;
+                case GaAddTicket add:
+                    if (_eventCapacity != 0)
+                        WriteAddition(GaOutputRecord.AddTicketBase | (uint)add.ComponentIndex, Ticket(add.TicketSlot), "0u",
+                            add.ComponentIndex, add.Values);
+                    break;
+                case GaSetDomainOrder order:
+                    Line($"gaDomainPrimary = {Value(order.Primary)};");
+                    Line($"gaDomainSecondary = {Value(order.Secondary)};");
+                    Line("gaHasDomainOrder = 1u;");
                     break;
                 case GaIf branch:
                     Line($"if ({Value(branch.Condition)} != 0u)");
@@ -210,10 +335,49 @@ public static class GaSlangEmitter
 
         private void WriteOutput(uint kind, string first, string second)
         {
-            string offset = Temp($"gaEventRow + 1u + gaEventCount * {Word(GaOutputRecord.Words)}");
+            WriteOutputHeader(kind, first, second);
+            Line("++gaEventCount;");
+        }
+
+        private string WriteOutputHeader(uint kind, string first, string second)
+        {
+            string offset = Temp($"gaEventRow + 1u + gaEventCount * {Word(_recordWords)}");
             Line($"gaOutput[{offset}] = {Word(kind)};");
             Line($"gaOutput[{offset} + 1u] = {first};");
             Line($"gaOutput[{offset} + 2u] = {second};");
+            if (program.AdditionPayloadWords != 0)
+            {
+                string index = Name();
+                Line($"for (uint {index} = {Word(GaOutputRecord.Words)}; {index} < {Word(GaOutputRecord.Words + program.AdditionPayloadWords)}; ++{index})");
+                Line($"    gaOutput[{offset} + {index}] = 0u;");
+            }
+            if (program.UsesDomainOrder)
+            {
+                int domain = _recordWords - GaOutputRecord.DomainWordCount;
+                Line($"gaOutput[{offset} + {Word(domain)}] = gaHasDomainOrder;");
+                Line($"gaOutput[{offset} + {Word(domain + 1)}] = gaDomainPrimary;");
+                Line($"gaOutput[{offset} + {Word(domain + 2)}] = gaDomainSecondary;");
+            }
+            return offset;
+        }
+
+        private void WriteAddition(uint kind, string first, string second, int componentIndex,
+            IReadOnlyList<GaAdditionValue> values)
+        {
+            var component = program.AdditionComponents[componentIndex];
+            string offset = WriteOutputHeader(kind, first, second);
+            foreach (var value in values)
+            {
+                int word = GaOutputRecord.Words + component.Offsets[value.FieldIndex];
+                string bits = Value(value.Value);
+                if (value.Value.Type == GaScalar.Fixed)
+                {
+                    Line($"gaOutput[{offset} + {Word(word)}] = {bits}.x;");
+                    Line($"gaOutput[{offset} + {Word(word + 1)}] = {bits}.y;");
+                }
+                else
+                    Line($"gaOutput[{offset} + {Word(word)}] = {bits};");
+            }
             Line("++gaEventCount;");
         }
 
@@ -227,8 +391,26 @@ public static class GaSlangEmitter
                     return Literal(constant.Type, constant.Bits);
                 case GaLoad load:
                     return Slot(load.Slot);
+                case GaArrayRead array:
+                    string index = CheckedArrayIndex(array.Field, array.Index, array.Source);
+                    string element = Temp(Literal(array.Type, 0), Type(array.Type));
+                    ArraySelect(array.Field, index, field => $"{element} = {field};");
+                    return element;
                 case GaSnapshotRead read:
                     return SnapshotRead(read);
+                case GaBufferCount:
+                    return "gaBufferCount";
+                case GaBufferRead read:
+                    return BufferRead(read);
+                case GaResourceRead read:
+                    return TickField(read.FieldIndex);
+                case GaHasOwn has:
+                    return Presence(has.ComponentIndex);
+                case GaTryRead read:
+                    string present = Presence(read.ComponentIndex);
+                    foreach (var copy in read.Copies)
+                        Line($"{Slot(copy.Local)} = {present} != 0u ? {Slot(copy.Field)} : {Literal(copy.Local.Type, 0)};");
+                    return present;
                 case GaCast cast:
                     string bits = Value(cast.Operand);
                     if (cast.Type == GaScalar.Fixed)
@@ -274,15 +456,55 @@ public static class GaSlangEmitter
         {
             string id = Temp(Value(read.EntityId));
             string generation = Temp(Value(read.Generation));
-            string result = Temp(Value(read.Fallback));
+            string result = Temp(Value(read.Fallback), Type(read.Type));
             Line("if (gaSnapshotValid)");
             Open();
             string offset = Name();
             Line($"uint {offset};");
             Line($"if (gaTryFindSnapshotV1(gaInput, gaSnapshotView, {id}, {generation}, {offset}))");
-            Line($"    {result} = gaInput[{offset}];");
+            int word = read.FieldIndex < 0 ? 0 : program.SnapshotLayout!.GetWordOffset(read.FieldIndex);
+            string firstWord = word == 0 ? $"gaInput[{offset}]" : $"gaInput[{offset} + {Word(word)}]";
+            string value = read.Type == GaScalar.Fixed
+                ? $"uint2({firstWord}, gaInput[{offset} + {Word(word + 1)}])"
+                : firstWord;
+            Line($"    {result} = {value};");
             Close();
             return result;
+        }
+
+        private string CheckedArrayIndex(GaArrayField field, GaValue value, GaSourceSpan source)
+            => CheckedIndex(value, Word(field.Length), source);
+
+        private string CheckedIndex(GaValue value, string length, GaSourceSpan source)
+        {
+            string index = Temp(Value(value));
+            FaultWhen($"{index} >= {length}", GaFaultKind.IndexOutOfRange, NextOrdinal(), source);
+            return index;
+        }
+
+        private string BufferRead(GaBufferRead read)
+        {
+            string index = CheckedIndex(read.Index, "gaBufferCount", read.Source);
+            int field = program.BufferOffsets[read.FieldIndex];
+            string offset = Temp($"gaBufferData + {index} * {Word(program.BufferRowWords)} + {Word(field)}");
+            string word = $"gaInput[{offset}]";
+            string value = read.Type switch
+            {
+                GaScalar.Fixed => $"uint2({word}, gaInput[{offset} + 1u])",
+                GaScalar.Bool => $"({word} != 0u ? 1u : 0u)",
+                _ => word
+            };
+            return Temp(value, Type(read.Type));
+        }
+
+        private void ArraySelect(GaArrayField field, string index, Func<string, string> statement)
+        {
+            // Keep per-row state in named values across dynamic reads and writes.
+            Line($"switch ({index})");
+            Open();
+            for (int element = 0; element < field.Length; element++)
+                Line($"case {Word(element)}: {statement(Field(field.FirstField + element))} break;");
+            Close();
         }
 
         private string Binary(GaBinary binary)
@@ -299,6 +521,8 @@ public static class GaSlangEmitter
                 return result;
             }
 
+            if (_usesOptional)
+                left = Temp(left, Type(binary.Left.Type));
             string right = Value(binary.Right);
             if (binary.Left.Type == GaScalar.Fixed)
                 return FixedBinary(binary, left, right);
@@ -451,7 +675,9 @@ public static class GaSlangEmitter
             ? $"uint2({Word(unchecked((uint)value))}, {Word((uint)(value >> 32))})"
             : Word(checked((uint)value));
         private static string Field(int index) => "f" + index.ToString(CultureInfo.InvariantCulture);
+        private static string TickField(int index) => "tickField" + index.ToString(CultureInfo.InvariantCulture);
         private static string Local(int index) => "l" + index.ToString(CultureInfo.InvariantCulture);
+        private static string Presence(int index) => "present" + index.ToString(CultureInfo.InvariantCulture);
         private static string Slot(GaSlot slot) => slot.IsField ? Field(slot.Index) : Local(slot.Index);
         private void Line(string text) => _code.Append(' ', _indent * 4).Append(text).Append('\n');
         private void Open() { Line("{"); _indent++; }
