@@ -14,6 +14,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="$(RuntimeFrameworkVersion)" />
     <ProjectReference Include="../../../SKECS.GA.Backend.WebGpu/SKECS.GA.Backend.WebGpu.csproj" />
     <Compile Include="../movement-conformance/MovementKernel.cs" />
+    <Compile Include="../movement-conformance/MovementFixture.cs" />
     <Compile Include="../movement-conformance/Program.cs" />
     <Compile Include="$(Bundle)/ga-adapter.g.cs" />
     <Compile Include="$(Bundle)/ga-row-codec.g.cs" />

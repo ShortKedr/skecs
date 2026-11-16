@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-android36.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ApplicationId>org.skecs.ga.movement</ApplicationId>
+    <SupportedOSPlatformVersion>28.0</SupportedOSPlatformVersion>
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+    <AndroidPackageFormats>apk</AndroidPackageFormats>
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <AndroidEnableProfiledAot>false</AndroidEnableProfiledAot>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../SKECS.GA.Backend.Vulkan/SKECS.GA.Backend.Vulkan.csproj" />
+    <Compile Include="../movement-conformance/MovementKernel.cs" Link="MovementKernel.cs" />
+    <Compile Include="../movement-conformance/MovementFixture.cs" Link="MovementFixture.cs" />
+    <Compile Include="$(Bundle)/ga-adapter.g.cs" />
+    <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
+    <AndroidAsset Include="$(Bundle)/movement.manifest.json;$(Bundle)/movement.content-id;$(Bundle)/movement.spv;$(Bundle)/movement.layout;$(Bundle)/movement.source-map.json"
+                  Link="bundle/%(Filename)%(Extension)" />
+    <AndroidNativeLibrary Include="$(NativeArm64)" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(NativeX64)" Abi="x86_64" />
+  </ItemGroup>
+  <Target Name="ValidateConformanceInputs" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Bundle)' == '' Or !Exists('$(Bundle)/movement.spv')" Text="Set Bundle to the packaged Movement Vulkan artifact directory." />
+    <Error Condition="!Exists('$(NativeArm64)') Or !Exists('$(NativeX64)')" Text="Set NativeArm64 and NativeX64 to API 28 libga-vulkan-native.so libraries." />
+  </Target>
+</Project>
