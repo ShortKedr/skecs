@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+    <ProjectReference Include="../SKECS.GA/SKECS.GA.csproj" />
+    <ProjectReference Include="../SKECS.GA.Analyzers/SKECS.GA.Analyzers.csproj" PrivateAssets="all" />
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md;AnalyzerReleases.Unshipped.md" />
+    <EmbeddedResource Include="Slang/GaFixedV1.slang" LogicalName="SKECS.GA.GaFixedV1.slang" />
+    <EmbeddedResource Include="Slang/GaSnapshotV1.slang" LogicalName="SKECS.GA.GaSnapshotV1.slang" />
+    <InternalsVisibleTo Include="Ga.Conformance" />
+  </ItemGroup>
+</Project>

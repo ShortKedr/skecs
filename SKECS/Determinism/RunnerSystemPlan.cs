@@ -46,19 +46,27 @@ internal sealed class RunnerSystemPlan<TInput> where TInput : unmanaged
     }
 
     public int JobCount => _outputs.Length;
+    public SystemStage Stage => _system.Stage;
+    public int SystemOrder => _system.Order;
+    public IDeterministicBatchProcessor<TInput>? BatchProcessor => _system.BatchProcessor;
 
     public void SortRows() => Array.Sort(_rows, RunnerRow.Compare);
 
     public void ExecuteJob(int jobId, long worldId, long tickIndex, TInput input, Fixed step,
         object ticketScope, PreparedReductions reductions)
     {
+        _system.Execute!(GetJob(jobId, worldId, tickIndex, input, step, ticketScope, reductions));
+    }
+
+    internal DeterministicJob<TInput> GetJob(int jobId, long worldId, long tickIndex, TInput input, Fixed step,
+        object ticketScope, PreparedReductions reductions)
+    {
         var size = DeterministicRunner<TInput>.LogicalJobSize;
         var first = jobId * size;
         var rows = new ReadOnlySpan<RunnerRow>(_rows, first, Math.Min(size, _rows.Length - first));
-        var buffer = new JobBuffer(jobId, rows.Length, worldId, tickIndex, _system.Stage, _system.Order,
+        var buffer = _outputs[jobId] ??= new JobBuffer(jobId, rows.Length, worldId, tickIndex, _system.Stage, _system.Order,
             _system.Access, ticketScope, reductions);
-        _system.Execute(new DeterministicJob<TInput>(rows, buffer, input, step));
-        _outputs[jobId] = buffer;
+        return new DeterministicJob<TInput>(rows, buffer, input, step);
     }
 
     public List<RunnerEmission>? CollectEmissions()

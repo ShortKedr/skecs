@@ -58,6 +58,18 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
         where TProcessor : unmanaged, IDeterministicJobProcessor<TInput>
         => Add(stage, query, processor, runOnce: false);
 
+    /// <summary>Registers an entity system that submits consecutive ranges of logical jobs.</summary>
+    /// <remarks>The registered processor belongs to its runner. Use independent processors
+    /// when building workloads for runners that execute concurrently.</remarks>
+    public DeterministicWorkload<TInput> AddBatchSystem(
+        SystemStage stage, DeterministicQuery query, IDeterministicBatchProcessor<TInput> processor)
+    {
+        if (processor is null) throw new ArgumentNullException(nameof(processor));
+        _systems.Add(new SystemRegistration<TInput>(stage, _systems.Count, GetRules(stage, query),
+            runOnce: false, execute: null, batchProcessor: processor));
+        return this;
+    }
+
     /// <summary>Registers a single job with no entity rows. Query filters are disallowed.</summary>
     public DeterministicWorkload<TInput> AddJob<TProcessor>(
         SystemStage stage, DeterministicQuery access, TProcessor processor)
@@ -84,10 +96,7 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
         SystemStage stage, DeterministicQuery query, TProcessor processor, bool runOnce)
         where TProcessor : unmanaged, IDeterministicJobProcessor<TInput>
     {
-        if (stage < SystemStage.PreUpdate || stage > SystemStage.PostUpdate)
-            throw new ArgumentOutOfRangeException(nameof(stage));
-        if (query is null) throw new ArgumentNullException(nameof(query));
-        var rules = query.Snapshot();
+        var rules = GetRules(stage, query);
         if (runOnce && Array.Exists(rules, static rule =>
                 rule.Kind == ComponentRuleKind.Include || rule.Kind == ComponentRuleKind.Exclude))
             throw new ArgumentException("A standalone job has no entity filters.", nameof(query));
@@ -98,6 +107,14 @@ public sealed class DeterministicWorkload<TInput> where TInput : unmanaged
             copy.Execute(job);
         }));
         return this;
+    }
+
+    private static ComponentRule[] GetRules(SystemStage stage, DeterministicQuery query)
+    {
+        if (stage < SystemStage.PreUpdate || stage > SystemStage.PostUpdate)
+            throw new ArgumentOutOfRangeException(nameof(stage));
+        if (query is null) throw new ArgumentNullException(nameof(query));
+        return query.Snapshot();
     }
 }
 
@@ -136,15 +153,18 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
 {
     private readonly ComponentRule[] _rules;
     private readonly bool _runOnce;
-    private readonly ExecuteJob<TInput> _execute;
+    private readonly ExecuteJob<TInput>? _execute;
+    private readonly IDeterministicBatchProcessor<TInput>? _batchProcessor;
 
-    public SystemRegistration(SystemStage stage, int order, ComponentRule[] rules, bool runOnce, ExecuteJob<TInput> execute)
+    public SystemRegistration(SystemStage stage, int order, ComponentRule[] rules, bool runOnce,
+        ExecuteJob<TInput>? execute, IDeterministicBatchProcessor<TInput>? batchProcessor = null)
     {
         Stage = stage;
         Order = order;
         _rules = rules;
         _runOnce = runOnce;
         _execute = execute;
+        _batchProcessor = batchProcessor;
     }
 
     public SystemStage Stage { get; }
@@ -174,7 +194,7 @@ internal sealed class SystemRegistration<TInput> where TInput : unmanaged
         }
 
         var query = _runOnce ? null : world.GetOrCreateQueryCache(new QueryCacheKey(include, exclude));
-        return new PreparedSystem<TInput>(Stage, Order, query, access, _execute);
+        return new PreparedSystem<TInput>(Stage, Order, query, access, _execute, _batchProcessor);
     }
 }
 
@@ -200,18 +220,21 @@ internal readonly struct PreparedAccess
 internal sealed class PreparedSystem<TInput> where TInput : unmanaged
 {
     public PreparedSystem(SystemStage stage, int order, QueryCacheEntry? query,
-        Dictionary<Type, PreparedAccess> access, ExecuteJob<TInput> execute)
+        Dictionary<Type, PreparedAccess> access, ExecuteJob<TInput>? execute,
+        IDeterministicBatchProcessor<TInput>? batchProcessor)
     {
         Stage = stage;
         Order = order;
         Query = query;
         Access = access;
         Execute = execute;
+        BatchProcessor = batchProcessor;
     }
 
     public SystemStage Stage { get; }
     public int Order { get; }
     public QueryCacheEntry? Query { get; }
     public Dictionary<Type, PreparedAccess> Access { get; }
-    public ExecuteJob<TInput> Execute { get; }
+    public ExecuteJob<TInput>? Execute { get; }
+    public IDeterministicBatchProcessor<TInput>? BatchProcessor { get; }
 }

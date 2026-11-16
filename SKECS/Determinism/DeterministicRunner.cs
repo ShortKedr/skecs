@@ -35,6 +35,8 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     private Fixed _step;
     private int _systemIndex;
     private int _nextJob;
+    private int _pendingCount;
+    private IDeterministicBatchSubmission<TInput>? _pending;
     private bool _advancing;
     private bool _disposed;
 
@@ -87,7 +89,7 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
         Status = DeterministicTickStatus.Pending;
     }
 
-    /// <summary>Runs up to the given positive number of logical jobs.</summary>
+    /// <summary>Submits up to the given positive number of new logical jobs.</summary>
     /// <remarks>Plan preparation, sorting and system barriers can also take time, including
     /// after the last budgeted job. This budget does not bound wall-clock duration.</remarks>
     public DeterministicTickStatus Advance(int logicalJobBudget)
@@ -101,6 +103,8 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
         try
         {
             var trace = RunnerTrace.Log.IsEnabled() ? RunnerTrace.Log : null;
+            if (!TryApplyBatch())
+                return Status;
             while (_systemIndex < _systems.Length)
             {
                 if (_plan is null)
@@ -117,11 +121,22 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
                 if (batch != 0)
                 {
                     var started = trace == null ? 0 : Stopwatch.GetTimestamp();
-                    ParallelJobExecutor.Execute(_plan, _nextJob, batch, _workerCount, _world.Id, _tickIndex,
-                        _input, _step, _ticketScope!, _definitions);
-                    _nextJob += batch;
+                    if (_plan.BatchProcessor is { } processor)
+                    {
+                        _pendingCount = batch;
+                        _pending = processor.Begin(CreateBatch(readOnly: true)) ??
+                            throw new InvalidOperationException("A deterministic batch processor returned no submission.");
+                    }
+                    else
+                    {
+                        ParallelJobExecutor.Execute(_plan, _nextJob, batch, _workerCount, _world.Id, _tickIndex,
+                            _input, _step, _ticketScope!, _definitions);
+                        _nextJob += batch;
+                    }
                     trace?.Finish("jobs", started);
                     logicalJobBudget -= batch;
+                    if (!TryApplyBatch())
+                        return Status;
                 }
 
                 if (_nextJob != _plan.JobCount) return Status;
@@ -155,7 +170,15 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
     {
         EnsureAvailable();
         if (Status != DeterministicTickStatus.Pending) throw new InvalidOperationException("There is no pending tick to abort.");
-        SetFault(new OperationCanceledException("The deterministic tick was aborted."));
+        _advancing = true;
+        try
+        {
+            SetFault(new OperationCanceledException("The deterministic tick was aborted."));
+        }
+        finally
+        {
+            _advancing = false;
+        }
     }
 
     /// <summary>Destroys the owned world and closes the runner after a pending or faulted tick.</summary>
@@ -200,6 +223,23 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
         trace?.Finish("commit", started);
     }
 
+    private DeterministicBatch<TInput> CreateBatch(bool readOnly) =>
+        new(_plan!, _nextJob, _pendingCount, _world.Id, _tickIndex, _input, _step, _ticketScope!, _definitions, readOnly);
+
+    private bool TryApplyBatch()
+    {
+        if (_pending is not { } submission)
+            return true;
+        if (!submission.IsCompleted)
+            return false;
+        submission.Apply(CreateBatch(readOnly: false));
+        _nextJob += _pendingCount;
+        _pendingCount = 0;
+        _pending = null;
+        submission.Dispose();
+        return true;
+    }
+
     private void ClearTick()
     {
         _plan = null;
@@ -209,12 +249,33 @@ public sealed class DeterministicRunner<TInput> : IDisposable where TInput : unm
         _input = default;
         _systemIndex = 0;
         _nextJob = 0;
+        _pendingCount = 0;
     }
 
     private void SetFault(Exception fault)
     {
-        Fault = fault;
         Status = DeterministicTickStatus.Faulted;
+        if (_pending is { } submission)
+        {
+            _pending = null;
+            try
+            {
+                submission.Discard();
+            }
+            catch (Exception discardFault)
+            {
+                fault = new AggregateException("The deterministic batch failed while draining.", fault, discardFault);
+            }
+            try
+            {
+                submission.Dispose();
+            }
+            catch (Exception disposeFault)
+            {
+                fault = new AggregateException("The deterministic batch failed while releasing its resources.", fault, disposeFault);
+            }
+        }
+        Fault = fault;
         ClearTick();
     }
 

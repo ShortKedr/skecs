@@ -7,6 +7,11 @@ using System.Text.Json;
 using SKECS;
 using SKECS.Numerics;
 
+#if SKECS_DEMO_GA
+if (args.Length > 0 && args[0] == "ga")
+    return GaDemo.Run(args[1..]);
+#endif
+
 var measure = args.Length > 0 && args[0] == "--measure";
 if (measure) args = args[1..];
 var requestedMode = args.Length > 0 ? args[0] : "all";

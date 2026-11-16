@@ -9,4 +9,16 @@
   <ItemGroup>
     <ProjectReference Include="../SKECS/SKECS.csproj" />
   </ItemGroup>
+  <PropertyGroup Condition="'$(GaDemoBundleDirectory)' != ''">
+    <DefineConstants>$(DefineConstants);SKECS_DEMO_GA</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(GaDemoBundleDirectory)' == ''">
+    <Compile Remove="GaDemo.cs;GaMovement.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(GaDemoBundleDirectory)' != ''">
+    <ProjectReference Include="../SKECS.GA.Backend.Vulkan/SKECS.GA.Backend.Vulkan.csproj" />
+    <ProjectReference Include="../SKECS.GA.Backend.D3D12/SKECS.GA.Backend.D3D12.csproj" />
+    <ProjectReference Include="../SKECS.Serialization/SKECS.Serialization.csproj" />
+    <Compile Include="$(GaDemoBundleDirectory)/ga-adapter.g.cs;$(GaDemoBundleDirectory)/ga-row-codec.g.cs" />
+  </ItemGroup>
 </Project>
