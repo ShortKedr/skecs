@@ -48,6 +48,25 @@ public readonly unsafe struct Query<T1>
         }
     }
 
+    /// <summary>Runs a processor once per matching chunk, in the same order as <see cref="Chunks"/>.</summary>
+    /// <remarks>Do not make structural changes to the owning world during traversal.
+    /// Use the chunk view and its pointers only during the callback.</remarks>
+    public void ForEachChunk<TProcessor>(ref TProcessor processor)
+        where TProcessor : struct, IQueryChunkProcessor<T1>
+    {
+        var world = _entry.World;
+        world.BeginQuery();
+        try
+        {
+            foreach (var chunk in Chunks())
+                processor.Execute(chunk);
+        }
+        finally
+        {
+            world.EndQuery();
+        }
+    }
+
     public QueryChunkEnumerable<T1> Chunks()
     {
         _entry.World.ThrowIfDisposed();
@@ -104,6 +123,25 @@ public readonly unsafe struct Query<T1, T2>
                     processor.Execute(new Entity(entities[row], versions[row], worldId), ref pointer1[row], ref pointer2[row]);
                 }
             }
+        }
+    }
+
+    /// <summary>Runs a processor once per matching chunk, in the same order as <see cref="Chunks"/>.</summary>
+    /// <remarks>Do not make structural changes to the owning world during traversal.
+    /// Use the chunk view and its pointers only during the callback.</remarks>
+    public void ForEachChunk<TProcessor>(ref TProcessor processor)
+        where TProcessor : struct, IQueryChunkProcessor<T1, T2>
+    {
+        var world = _entry.World;
+        world.BeginQuery();
+        try
+        {
+            foreach (var chunk in Chunks())
+                processor.Execute(chunk);
+        }
+        finally
+        {
+            world.EndQuery();
         }
     }
 
@@ -167,6 +205,25 @@ public readonly unsafe struct Query<T1, T2, T3>
                     processor.Execute(new Entity(entities[row], versions[row], worldId), ref pointer1[row], ref pointer2[row], ref pointer3[row]);
                 }
             }
+        }
+    }
+
+    /// <summary>Runs a processor once per matching chunk, in the same order as <see cref="Chunks"/>.</summary>
+    /// <remarks>Do not make structural changes to the owning world during traversal.
+    /// Use the chunk view and its pointers only during the callback.</remarks>
+    public void ForEachChunk<TProcessor>(ref TProcessor processor)
+        where TProcessor : struct, IQueryChunkProcessor<T1, T2, T3>
+    {
+        var world = _entry.World;
+        world.BeginQuery();
+        try
+        {
+            foreach (var chunk in Chunks())
+                processor.Execute(chunk);
+        }
+        finally
+        {
+            world.EndQuery();
         }
     }
 
