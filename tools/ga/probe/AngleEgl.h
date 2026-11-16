@@ -74,6 +74,8 @@ public:
 
 class AngleDisplay
 {
+    // Keep a packaged Vulkan loader resident until both ANGLE modules are released.
+    std::optional<AngleModule> vulkanLoader;
     AngleModule gles, egl;
     EglHandle display = nullptr;
     bool owned = false;
@@ -100,6 +102,12 @@ public:
     AngleDisplay(const std::filesystem::path& directory, uint32_t renderer, AnglePciId pci)
         : gles(directory / L"libGLESv2.dll"), egl(directory / L"libEGL.dll")
     {
+        if (renderer == 1)
+        {
+            const auto packagedLoader = directory / L"vulkan-1.dll";
+            if (std::filesystem::exists(packagedLoader))
+                vulkanLoader.emplace(packagedLoader);
+        }
         const auto address = extension("eglGetPlatformDisplayEXT");
         require(address != nullptr, "ANGLE eglGetPlatformDisplayEXT unavailable");
         const auto platform = std::bit_cast<GlFunction<EglHandle, EglEnum, void*, const EglInt*>>(address);
