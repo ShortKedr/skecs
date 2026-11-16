@@ -82,43 +82,57 @@ public sealed partial class World : IDisposable
         return PublishCreation(archetype, slot, entity, acquiredBacking);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private EntitySlot ReserveCreation(Archetype archetype, out Entity entity, out bool acquiredBacking)
     {
         EnsureAdaptiveTraversalAllowsStructuralChange();
         var lastFree = _freeEntityIds.Count - 1;
-        var reused = lastFree >= 0;
-        var id = reused ? _freeEntityIds[lastFree] : _entityRecords.Count;
-        if (!reused)
+        if (lastFree >= 0)
         {
-            // Accessor growth can fail. Complete it before allocating or exposing the new row.
-            foreach (var accessor in _accessors) accessor.EnsureCapacity(id);
-            var grew = _diagnostics != null && _entityRecords.Count == _entityRecords.Capacity;
-            _entityRecords.Add(default);
-            if (grew) RecordDiagnosticEntityTable();
+            var id = _freeEntityIds[lastFree];
+            entity = new Entity(id, _entityRecords[id].Version, Id);
         }
-        entity = new Entity(id, reused ? _entityRecords[id].Version : 1, Id);
-        try
+        else
         {
-            return archetype.ReserveEntity(out acquiredBacking);
+            var id = _entityRecords.Count;
+            PrepareNewEntityRecord(id);
+            entity = new Entity(id, 1, Id);
         }
-        catch
-        {
-            if (!reused) _entityRecords.RemoveAt(id);
-            throw;
-        }
+
+        return archetype.ReserveEntity(out acquiredBacking);
+    }
+
+    private void PrepareNewEntityRecord(int id)
+    {
+        // Allocation can fail. Reserve capacity before any slot or ID becomes visible.
+        foreach (var accessor in _accessors) accessor.EnsureCapacity(id);
+        if (id != _entityRecords.Capacity) return;
+#if NET8_0_OR_GREATER
+        _entityRecords.EnsureCapacity(checked(id + 1));
+#else
+        _entityRecords.Capacity = Math.Max(4, checked(id * 2));
+#endif
+        if (_diagnostics != null) RecordDiagnosticEntityTable();
     }
 
     private Entity PublishCreation(Archetype archetype, EntitySlot slot, Entity entity, bool acquiredBacking)
     {
         archetype.PublishEntity(slot, entity);
-        if (_freeEntityIds.Count != 0) _freeEntityIds.RemoveAt(_freeEntityIds.Count - 1);
-
         var record = new EntityRecord
         {
             Version = entity.Version, Alive = true, Archetype = archetype,
             ChunkIndex = slot.ChunkIndex, RowIndex = slot.RowIndex
         };
-        _entityRecords[entity.Id] = record;
+        var lastFree = _freeEntityIds.Count - 1;
+        if (lastFree >= 0)
+        {
+            _freeEntityIds.RemoveAt(lastFree);
+            _entityRecords[entity.Id] = record;
+        }
+        else
+        {
+            _entityRecords.Add(record);
+        }
         RefreshAccessors(entity.Id, record);
         if (_diagnostics != null) RecordDiagnosticCreate(archetype, slot.ChunkIndex, entity.Id);
         if (acquiredBacking || _adaptive != null) MaintainChurnPool();
@@ -126,10 +140,9 @@ public sealed partial class World : IDisposable
         return entity;
     }
 
-    private void CancelCreation(Archetype archetype, EntitySlot slot, Entity entity)
+    private void CancelAdaptiveCreation(Archetype archetype, EntitySlot slot, Entity entity)
     {
-        if (_adaptive != null) RemovePackedComponents(entity);
-        if (_freeEntityIds.Count == 0) _entityRecords.RemoveAt(entity.Id);
+        RemovePackedComponents(entity);
         archetype.ReturnIfEmpty(slot.ChunkIndex);
     }
 
@@ -138,6 +151,13 @@ public sealed partial class World : IDisposable
         ThrowIfDisposed();
         var type1 = _componentTypes.GetOrCreate<T1>().Id;
         var archetype = GetCreationArchetype(type1, -1, -1);
+        if (_adaptive == null)
+        {
+            var offset = archetype.GetComponentOffset(type1);
+            var column = ReserveCreation(archetype, out var created, out var acquired);
+            column.InitializeComponent(offset, component1);
+            return PublishCreation(archetype, column, created, acquired);
+        }
         var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
         try
         {
@@ -145,7 +165,7 @@ public sealed partial class World : IDisposable
         }
         catch
         {
-            CancelCreation(archetype, slot, entity);
+            CancelAdaptiveCreation(archetype, slot, entity);
             throw;
         }
         return PublishCreation(archetype, slot, entity, acquiredBacking);
@@ -163,6 +183,17 @@ public sealed partial class World : IDisposable
         var type2 = _componentTypes.GetOrCreate<T2>().Id;
         var type3 = _componentTypes.GetOrCreate<T3>().Id;
         var archetype = GetCreationArchetype(type1, type2, type3);
+        if (_adaptive == null)
+        {
+            var offset1 = archetype.GetComponentOffset(type1);
+            var offset2 = archetype.GetComponentOffset(type2);
+            var offset3 = archetype.GetComponentOffset(type3);
+            var column = ReserveCreation(archetype, out var created, out var acquired);
+            column.InitializeComponent(offset1, component1);
+            column.InitializeComponent(offset2, component2);
+            column.InitializeComponent(offset3, component3);
+            return PublishCreation(archetype, column, created, acquired);
+        }
         var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
         try
         {
@@ -172,7 +203,7 @@ public sealed partial class World : IDisposable
         }
         catch
         {
-            CancelCreation(archetype, slot, entity);
+            CancelAdaptiveCreation(archetype, slot, entity);
             throw;
         }
         return PublishCreation(archetype, slot, entity, acquiredBacking);
@@ -183,7 +214,10 @@ public sealed partial class World : IDisposable
         ThrowIfDisposed();
         var type1 = _componentTypes.GetOrCreate<T1>().Id;
         var type2 = _componentTypes.GetOrCreate<T2>().Id;
-        return new EntityFactory<T1, T2>(this, GetCreationArchetype(type1, type2, -1), type1, type2);
+        var archetype = GetCreationArchetype(type1, type2, -1);
+        if (_adaptive == null)
+            return new EntityFactory<T1, T2>(this, archetype, archetype.GetComponentOffset(type1), archetype.GetComponentOffset(type2));
+        return new EntityFactory<T1, T2>(this, archetype, type1, type2);
     }
 
     public void CreateEntities<T1, T2>(Span<Entity> output, in T1 component1, in T2 component2)
@@ -211,10 +245,20 @@ public sealed partial class World : IDisposable
         return archetype;
     }
 
-    internal Entity CreateEntityIn<T1, T2>(Archetype archetype, int type1, int type2, in T1 component1, in T2 component2)
+    internal Entity CreateEntityIn<T1, T2>(Archetype archetype, int first, int second, in T1 component1, in T2 component2)
         where T1 : unmanaged where T2 : unmanaged
     {
         ThrowIfDisposed();
+        if (_adaptive != null) return CreateAdaptiveEntityIn(archetype, first, second, component1, component2);
+        var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
+        slot.InitializeComponent(first, component1);
+        slot.InitializeComponent(second, component2);
+        return PublishCreation(archetype, slot, entity, acquiredBacking);
+    }
+
+    private Entity CreateAdaptiveEntityIn<T1, T2>(Archetype archetype, int type1, int type2, in T1 component1, in T2 component2)
+        where T1 : unmanaged where T2 : unmanaged
+    {
         var slot = ReserveCreation(archetype, out var entity, out var acquiredBacking);
         try
         {
@@ -223,7 +267,7 @@ public sealed partial class World : IDisposable
         }
         catch
         {
-            CancelCreation(archetype, slot, entity);
+            CancelAdaptiveCreation(archetype, slot, entity);
             throw;
         }
         return PublishCreation(archetype, slot, entity, acquiredBacking);
@@ -717,17 +761,23 @@ public sealed partial class World : IDisposable
         _diagnostics?.DisposeWorld();
     }
 
-    internal readonly struct EntitySlot
+    internal readonly unsafe struct EntitySlot
     {
-        public EntitySlot(int chunkIndex, int rowIndex)
+        public EntitySlot(Archetype.Chunk chunk, int rowIndex)
         {
-            ChunkIndex = chunkIndex;
+            Chunk = chunk;
             RowIndex = rowIndex;
         }
 
-        public int ChunkIndex { get; }
+        public Archetype.Chunk Chunk { get; }
 
+        public int ChunkIndex => Chunk.SlotIndex;
         public int RowIndex { get; }
+
+        // The offset was validated before reserving this slot. The unmanaged write cannot allocate.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal void InitializeComponent<T>(int offset, in T value) where T : unmanaged =>
+            ((T*)(Chunk.Memory + offset))[RowIndex] = value;
     }
 
     internal struct EntityRecord

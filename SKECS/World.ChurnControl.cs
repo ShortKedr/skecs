@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 
 namespace SKECS;
 
@@ -55,10 +56,12 @@ public sealed partial class World
     private int MaintainChurnPool() => _churnPool is { EmptyBytes: > 0 } pool
         ? pool.Trim(GetChurnTableBytes()) : 0;
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void CompleteChurnChange(Archetype.RemovalResult removed, bool acquiredBacking = false)
     {
         if (_churnPool == null) return;
-        if (removed.Source!.ReturnIfEmpty(removed.MovedChunkIndex) || acquiredBacking) MaintainChurnPool();
+        if (removed.BecameEmpty) removed.Source!.ReturnIfEmpty(removed.MovedChunkIndex);
+        if (removed.BecameEmpty || acquiredBacking) MaintainChurnPool();
     }
 
     private unsafe long GetChurnTableBytes()

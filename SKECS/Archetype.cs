@@ -10,6 +10,7 @@ internal sealed unsafe class Archetype : IDisposable
     private readonly int[] _columnByType;
     private readonly int[] _offsetByType;
     private readonly int[] _offsets;
+    private readonly int _chunkCapacity;
     private readonly int _allocationSize;
     private readonly Dictionary<int, Transition> _addEdges = new();
     private readonly Dictionary<int, Transition> _removeEdges = new();
@@ -22,6 +23,7 @@ internal sealed unsafe class Archetype : IDisposable
     public Archetype(World world, ComponentSetKey key, ComponentType[] componentTypes)
     {
         _world = world;
+        _chunkCapacity = world.ChunkCapacity;
         if (world.UsesChurnControl)
         {
             _chunkSlots = new List<Chunk>();
@@ -105,19 +107,24 @@ internal sealed unsafe class Archetype : IDisposable
         return slot;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal World.EntitySlot ReserveEntity(out bool acquiredBacking)
     {
         acquiredBacking = _availableChunks.Count == 0;
-        if (acquiredBacking)
-        {
-            // Reserve capacity for this slot's future full-to-partial transition before attaching memory.
-            EnsureRoom(_availableChunks, _chunkSlots.Count + (_vacantSlot < 0 ? 1 : 0));
-            if (_localReserve != null) AttachBacking(_world.ChurnPool!, _localReserve);
-            else AllocateLegacyChunk();
-        }
+        if (acquiredBacking) AcquireBacking();
 
         var chunkIndex = _availableChunks[_availableChunks.Count - 1];
-        return new World.EntitySlot(chunkIndex, _chunkSlots[chunkIndex].Count);
+        var chunk = _chunkSlots[chunkIndex];
+        return new World.EntitySlot(chunk, chunk.Count);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AcquireBacking()
+    {
+        // Reserve capacity for this slot's future full-to-partial transition before attaching memory.
+        EnsureRoom(_availableChunks, _chunkSlots.Count + (_vacantSlot < 0 ? 1 : 0));
+        if (_localReserve != null) AttachBacking(_world.ChurnPool!, _localReserve);
+        else AllocateLegacyChunk();
     }
 
     private void AllocateLegacyChunk()
@@ -166,12 +173,13 @@ internal sealed unsafe class Archetype : IDisposable
         if (list.Capacity < required) list.Capacity = Math.Max(required, Math.Max(4, list.Capacity * 2));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void PublishEntity(World.EntitySlot slot, Entity entity)
     {
-        var chunk = _chunkSlots[slot.ChunkIndex];
+        var chunk = slot.Chunk;
         chunk.Entities[slot.RowIndex] = entity.Id;
         chunk.Versions[slot.RowIndex] = entity.Version;
-        if (++chunk.Count == _world.ChunkCapacity) RemoveAvailable(chunk);
+        if (++chunk.Count == _chunkCapacity) _availableChunks.RemoveAt(_availableChunks.Count - 1);
     }
 
     internal bool ReturnIfEmpty(int chunkIndex)
@@ -218,7 +226,7 @@ internal sealed unsafe class Archetype : IDisposable
     public RemovalResult RemoveAt(int chunkIndex, int rowIndex)
     {
         var chunk = _chunkSlots[chunkIndex];
-        if (chunk.Count == _world.ChunkCapacity) AddAvailable(chunk);
+        if (chunk.Count == _chunkCapacity) AddAvailable(chunk);
         var lastRow = chunk.Count - 1;
 
         if (rowIndex != lastRow)
@@ -235,11 +243,9 @@ internal sealed unsafe class Archetype : IDisposable
         }
 
         var movedEntityId = rowIndex == lastRow ? -1 : chunk.Entities[rowIndex];
-        chunk.Count--;
+        chunk.Count = lastRow;
 
-        return rowIndex == lastRow
-            ? new RemovalResult(this, -1, chunkIndex, rowIndex)
-            : new RemovalResult(this, movedEntityId, chunkIndex, rowIndex);
+        return new RemovalResult(this, movedEntityId, chunkIndex, rowIndex, lastRow == 0);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -303,7 +309,7 @@ internal sealed unsafe class Archetype : IDisposable
         public void Copy(int sourceChunkIndex, int sourceRowIndex, World.EntitySlot destinationSlot)
         {
             var source = _source._chunkSlots[sourceChunkIndex].Memory;
-            var target = Destination._chunkSlots[destinationSlot.ChunkIndex].Memory;
+            var target = destinationSlot.Chunk.Memory;
             foreach (var column in _columns)
             {
                 CopyComponent(source + column.SourceOffset + sourceRowIndex * column.Size,
@@ -342,11 +348,22 @@ internal sealed unsafe class Archetype : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void* GetComponentPointer(int chunkIndex, int componentTypeId)
+    internal int GetComponentOffset(int componentTypeId)
     {
         if ((uint)componentTypeId >= (uint)_offsetByType.Length || _offsetByType[componentTypeId] < 0)
-            throw new InvalidOperationException($"Component {componentTypeId} is not in archetype.");
-        return _chunkSlots[chunkIndex].Memory + _offsetByType[componentTypeId];
+            throw MissingComponent(componentTypeId);
+        return _offsetByType[componentTypeId];
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static InvalidOperationException MissingComponent(int componentTypeId) =>
+        new InvalidOperationException($"Component {componentTypeId} is not in archetype.");
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void* GetComponentPointer(int chunkIndex, int componentTypeId)
+    {
+        var offset = GetComponentOffset(componentTypeId);
+        return _chunkSlots[chunkIndex].Memory + offset;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -358,12 +375,13 @@ internal sealed unsafe class Archetype : IDisposable
 
     internal readonly struct RemovalResult
     {
-        public RemovalResult(Archetype source, int movedEntityId, int movedChunkIndex, int movedRowIndex)
+        public RemovalResult(Archetype source, int movedEntityId, int movedChunkIndex, int movedRowIndex, bool becameEmpty)
         {
             Source = source;
             MovedEntityId = movedEntityId;
             MovedChunkIndex = movedChunkIndex;
             MovedRowIndex = movedRowIndex;
+            BecameEmpty = becameEmpty;
         }
 
         public Archetype? Source { get; }
@@ -373,6 +391,8 @@ internal sealed unsafe class Archetype : IDisposable
         public int MovedChunkIndex { get; }
 
         public int MovedRowIndex { get; }
+
+        public bool BecameEmpty { get; }
     }
 
     internal sealed unsafe class Chunk : IDisposable
