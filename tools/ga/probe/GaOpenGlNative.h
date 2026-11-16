@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #if defined(SKECS_GA_GL_BUILD)
@@ -22,6 +23,9 @@ typedef struct GaOpenGlDevice
 
 // Status 0 means success. Status 1 includes a NUL-terminated UTF-8 error when a buffer is provided.
 SKECS_GA_GL_API int32_t SKECS_GA_GL_CALL skecs_ga_gl_open(void** context, char* error, uint32_t errorCapacity);
+// ANGLE accepts an absolute DLL directory. Renderer 0 is D3D11, 1 is Vulkan, and 2 is OpenGL.
+SKECS_GA_GL_API int32_t SKECS_GA_GL_CALL skecs_ga_gl_open_es(const wchar_t* angleDirectory, uint32_t renderer,
+    void** context, char* error, uint32_t errorCapacity);
 SKECS_GA_GL_API void SKECS_GA_GL_CALL skecs_ga_gl_close(void* context);
 SKECS_GA_GL_API int32_t SKECS_GA_GL_CALL skecs_ga_gl_device_count(void* context, uint32_t* count,
     char* error, uint32_t errorCapacity);

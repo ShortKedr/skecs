@@ -13,10 +13,21 @@ public static class GaOpenGlPackager
 
     public static Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId, string slangAdapterPath,
         string spirvCrossExecutable, string outputDirectory, string artifactName, int workgroupX)
+        => Build(program, simulationContractId, slangAdapterPath, spirvCrossExecutable, outputDirectory, artifactName,
+            workgroupX, embeddedProfile: false);
+
+    public static Task<GaArtifactBundle> BuildEs(GaProgram program, string simulationContractId, string slangAdapterPath,
+        string spirvCrossExecutable, string outputDirectory, string artifactName,
+        int workgroupX = GaSlangModule.ThreadsPerGroup)
+        => Build(program, simulationContractId, slangAdapterPath, spirvCrossExecutable, outputDirectory, artifactName,
+            workgroupX, embeddedProfile: true);
+
+    private static Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId, string slangAdapterPath,
+        string spirvCrossExecutable, string outputDirectory, string artifactName, int workgroupX, bool embeddedProfile)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spirvCrossExecutable);
         return GaArtifactPackager.Build(program, simulationContractId, slangAdapterPath, outputDirectory, artifactName,
-            GaArtifactFormat.Glsl, Path.GetFullPath(spirvCrossExecutable), workgroupX);
+            GaArtifactFormat.Glsl, Path.GetFullPath(spirvCrossExecutable), workgroupX, embeddedProfile);
     }
 }
 
@@ -26,17 +37,43 @@ internal static class GaOpenGlCompiler
     private const string CrossSha256 = "cc19353f15b3db467d58d5e0a97add7a6797fbc52313c57d38b0f77bfa2f90a1";
     private const string OptimizerVersion = "v2025.1 v2025.1.rc1-0-gf289d047";
     private const string OptimizerSha256 = "e8ced090e643ab277296039e61c19de39c23535bdebd31109e8e7db23a86c303";
+    private const string SpirvTarget = "--target-env=vulkan1.1";
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
-    internal static GaToolchain ReadToolchain(FileStream cross, FileStream optimizer)
+    // Keep the pinned optimizer's -O sequence except if-conversion. Its vector selects became
+    // integer mix calls that ANGLE could link but could not compile when first dispatching on D3D11.
+    private static readonly string[] EsOptimizationPasses =
+    [
+        "--wrap-opkill", "--eliminate-dead-branches", "--merge-return", "--inline-entry-points-exhaustive",
+        "--eliminate-dead-functions", "--eliminate-dead-code-aggressive", "--private-to-local",
+        "--eliminate-local-single-block", "--eliminate-local-single-store", "--eliminate-dead-code-aggressive",
+        "--scalar-replacement=100", "--convert-local-access-chains", "--eliminate-local-single-block",
+        "--eliminate-local-single-store", "--eliminate-dead-code-aggressive", "--ssa-rewrite",
+        "--eliminate-dead-code-aggressive", "--ccp", "--eliminate-dead-code-aggressive", "--loop-unroll",
+        "--eliminate-dead-branches", "--redundancy-elimination", "--combine-access-chains",
+        "--simplify-instructions", "--scalar-replacement=100", "--convert-local-access-chains",
+        "--eliminate-local-single-block", "--eliminate-local-single-store", "--eliminate-dead-code-aggressive",
+        "--ssa-rewrite", "--eliminate-dead-code-aggressive", "--vector-dce", "--eliminate-dead-inserts",
+        "--eliminate-dead-branches", "--simplify-instructions", "--copy-propagate-arrays", "--reduce-load-size",
+        "--eliminate-dead-code-aggressive", "--merge-blocks", "--redundancy-elimination",
+        "--eliminate-dead-branches", "--merge-blocks", "--simplify-instructions"
+    ];
+
+    internal static GaToolchain ReadToolchain(FileStream cross, FileStream optimizer, bool embeddedProfile)
     {
         ValidateToolHash(cross, $"SPIRV-Cross {CrossRevision}", CrossSha256);
         ValidateToolHash(optimizer, $"SPIRV-Tools {OptimizerVersion}", OptimizerSha256);
         string downstream = $"SPIRV-Tools {OptimizerVersion} sha256:{OptimizerSha256}, SPIRV-Cross {CrossRevision} sha256:{CrossSha256}";
-        return new GaToolchain("2025.6.1", downstream, GaArtifactFormat.Glsl, "glsl_430",
-            ["GenerateSpirvDirectly", "VulkanUseEntryPointName", "--target-env=vulkan1.1", "-O", "--version 430", "--no-es"],
+        var (version, esFlag) = GetTranslationOptions(embeddedProfile);
+        return new GaToolchain("2025.6.1", downstream, GaArtifactFormat.Glsl,
+            embeddedProfile ? "glsl_es_310" : "glsl_430",
+            ["GenerateSpirvDirectly", "VulkanUseEntryPointName", SpirvTarget,
+                embeddedProfile ? "-O without --if-conversion" : "-O", $"--version {version}", esFlag],
             [], []);
     }
+
+    private static (string Version, string EsFlag) GetTranslationOptions(bool embeddedProfile) =>
+        embeddedProfile ? ("310", "--es") : ("430", "--no-es");
 
     private static void ValidateToolHash(FileStream executable, string name, string expected)
     {
@@ -46,25 +83,30 @@ internal static class GaOpenGlCompiler
     }
 
     internal static async Task Translate(string cross, string optimizer, string spirvPath, string outputDirectory,
-        string shaderPath, string reflectionPath, GaResourceBinding[] bindings, int workgroupX)
+        string shaderPath, string reflectionPath, GaResourceBinding[] bindings, int workgroupX, bool embeddedProfile)
     {
         string optimized = Path.Combine(outputDirectory, "optimized.spv");
         string jsonPath = Path.Combine(outputDirectory, "cross-layout.json");
         string glslPath = Path.Combine(outputDirectory, "cross.comp");
         // The spatial conformance loop diverged on real OpenGL when translated without this step.
-        await GaArtifactPackager.RunCompiler(optimizer, ["--target-env=vulkan1.1", "-O", spirvPath, "-o", optimized],
+        string[] passes = embeddedProfile ? EsOptimizationPasses : ["-O"];
+        await GaArtifactPackager.RunCompiler(optimizer, [SpirvTarget, .. passes, spirvPath, "-o", optimized],
             "SPIRV-Tools").ConfigureAwait(false);
         await GaArtifactPackager.RunCompiler(cross, [optimized, "--reflect", "--output", jsonPath], "SPIRV-Cross")
             .ConfigureAwait(false);
         string layout = CanonicalText(await File.ReadAllTextAsync(jsonPath, Utf8).ConfigureAwait(false));
         ValidateReflection(layout, bindings, workgroupX);
 
+        var (version, esFlag) = GetTranslationOptions(embeddedProfile);
         await GaArtifactPackager.RunCompiler(cross,
-            [optimized, "--version", "430", "--no-es", "--output", glslPath], "SPIRV-Cross").ConfigureAwait(false);
+            [optimized, "--version", version, esFlag, "--output", glslPath], "SPIRV-Cross").ConfigureAwait(false);
         string shader = CanonicalText(await File.ReadAllTextAsync(glslPath, Utf8).ConfigureAwait(false));
-        if (!shader.StartsWith("#version 430\n", StringComparison.Ordinal) ||
+        string versionDirective = embeddedProfile ? $"#version {version} es\n" : $"#version {version}\n";
+        if (!shader.StartsWith(versionDirective, StringComparison.Ordinal) ||
             shader.Split('\n').Any(line => line.TrimStart().StartsWith("#extension", StringComparison.Ordinal)))
-            throw new InvalidDataException("SPIRV-Cross must produce GLSL 430 compute source without extra extensions.");
+            throw new InvalidDataException(embeddedProfile
+                ? "SPIRV-Cross must produce GLSL ES 310 compute source without extra extensions."
+                : "SPIRV-Cross must produce GLSL 430 compute source without extra extensions.");
         await File.WriteAllTextAsync(shaderPath, shader, Utf8).ConfigureAwait(false);
         await File.WriteAllTextAsync(reflectionPath, layout, Utf8).ConfigureAwait(false);
     }

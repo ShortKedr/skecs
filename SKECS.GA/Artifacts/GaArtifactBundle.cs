@@ -70,8 +70,12 @@ public sealed class GaArtifactBundle
         GaArtifactFormat.Dxil or GaArtifactFormat.Dxbc => IsDirect3DContainer(toolchain.Format, artifact),
         GaArtifactFormat.MetalLibrary => artifact.StartsWith("MTLB"u8),
         GaArtifactFormat.Wgsl => true, // The WebGPU shader module validates the source.
-        GaArtifactFormat.Glsl => toolchain.TargetProfile == "glsl_430" &&
-            artifact.StartsWith("#version 430\n"u8) && artifact.IndexOf((byte)0) < 0,
+        GaArtifactFormat.Glsl => artifact.IndexOf((byte)0) < 0 && (toolchain.TargetProfile switch
+        {
+            "glsl_430" => artifact.StartsWith("#version 430\n"u8),
+            "glsl_es_310" => artifact.StartsWith("#version 310 es\n"u8),
+            _ => false
+        }),
         _ => false
     };
 

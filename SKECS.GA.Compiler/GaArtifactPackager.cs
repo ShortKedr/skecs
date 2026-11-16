@@ -54,7 +54,7 @@ internal static class GaArtifactPackager
 {
     internal static async Task<GaArtifactBundle> Build(GaProgram program, string simulationContractId,
         string slangExecutablePath, string outputDirectory, string artifactName, GaArtifactFormat format,
-        string? downstreamPath, int workgroupX)
+        string? downstreamPath, int workgroupX, bool embeddedProfile = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrWhiteSpace(simulationContractId);
@@ -88,7 +88,7 @@ internal static class GaArtifactPackager
             GaArtifactFormat.SpirV => VulkanToolchain(),
             GaArtifactFormat.Dxil => D3D12Toolchain(downstreamPath!),
             GaArtifactFormat.Dxbc => D3D11Toolchain(fxcPath!, fxcFile!),
-            GaArtifactFormat.Glsl => GaOpenGlCompiler.ReadToolchain(crossFile!, optimizerFile!),
+            GaArtifactFormat.Glsl => GaOpenGlCompiler.ReadToolchain(crossFile!, optimizerFile!, embeddedProfile),
             GaArtifactFormat.Wgsl => GaWebGpuCompiler.ReadToolchain(slangCompiler!, slangLibrary!),
             _ => throw new ArgumentOutOfRangeException(nameof(format))
         };
@@ -105,7 +105,7 @@ internal static class GaArtifactPackager
         if (format == GaArtifactFormat.Glsl)
         {
             (bindings, usage) = await CompileOpenGl(directory, slangExecutablePath, downstreamPath!, optimizerPath!, sourcePath,
-                binaryPath, reflectionPath, workgroupX).ConfigureAwait(false);
+                binaryPath, reflectionPath, workgroupX, embeddedProfile).ConfigureAwait(false);
             reflection = await File.ReadAllBytesAsync(reflectionPath).ConfigureAwait(false);
         }
         else if (format == GaArtifactFormat.Wgsl)
@@ -163,7 +163,7 @@ internal static class GaArtifactPackager
 
     private static async Task<(GaResourceBinding[], GaResourceUsage[])> CompileOpenGl(string outputDirectory,
         string slangAdapterPath, string spirvCrossExecutable, string spirvOptimizer, string sourcePath,
-        string shaderPath, string reflectionPath, int workgroupX)
+        string shaderPath, string reflectionPath, int workgroupX, bool embeddedProfile)
     {
         string staging = Path.Combine(outputDirectory, ".ga-opengl-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
@@ -176,7 +176,7 @@ internal static class GaArtifactPackager
             var (bindings, usage) = ParseReflection(await File.ReadAllLinesAsync(slangLayout).ConfigureAwait(false),
                 VulkanToolchain(), workgroupX);
             await GaOpenGlCompiler.Translate(spirvCrossExecutable, spirvOptimizer, spirv, staging, shaderPath, reflectionPath,
-                bindings, workgroupX).ConfigureAwait(false);
+                bindings, workgroupX, embeddedProfile).ConfigureAwait(false);
             return (bindings.Select(binding => binding with { Namespace = GaBindingNamespace.OpenGlShaderStorage })
                 .ToArray(), usage);
         }

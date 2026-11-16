@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl')]
+    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl', 'gles')]
     [ValidateNotNullOrEmpty()]
     [string[]]$Backend = @('vulkan', 'd3d12'),
     [ValidateRange(0, 2147483647)]
@@ -16,7 +16,10 @@ param(
     [switch]$CpuOnly,
     [switch]$BuildOnly,
     [string]$FxcDirectory,
-    [string]$SpirvCrossExecutable
+    [string]$SpirvCrossExecutable,
+    [string]$AngleDirectory,
+    [ValidateSet('D3D11', 'Vulkan', 'OpenGl')]
+    [string]$AngleRenderer
 )
 
 & "$PSScriptRoot/../Run-GameplayConformance.ps1" -FixtureDirectory $PSScriptRoot -SystemId target-read -KernelSources TargetKernel.cs `

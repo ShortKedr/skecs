@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -31,6 +32,7 @@
 namespace
 {
 #include "StartupGlsl.h"
+#include "StartupGlslEs.h"
 
 static_assert(sizeof(GaOpenGlDevice) == 668);
 
@@ -59,16 +61,16 @@ void require(bool condition, std::string_view message)
 }
 
 template<class Function>
-Function bind(const char* name, bool required = true)
+Function bindWgl(const char* name)
 {
     const auto raw = wglGetProcAddress(name);
     const auto address = std::bit_cast<uintptr_t>(raw);
     if (address > 3 && address != static_cast<uintptr_t>(-1))
         return std::bit_cast<Function>(raw);
-    if (required)
-        throw std::runtime_error(std::string("OpenGL function unavailable: ") + name);
-    return nullptr;
+    throw std::runtime_error(std::string("OpenGL function unavailable: ") + name);
 }
+
+#include "AngleEgl.h"
 
 struct Window
 {
@@ -124,7 +126,7 @@ struct Window
 
     void upgrade()
     {
-        const auto createContext = bind<GlFunction<HGLRC, HDC, HGLRC, const int*>>("wglCreateContextAttribsARB");
+        const auto createContext = bindWgl<GlFunction<HGLRC, HDC, HGLRC, const int*>>("wglCreateContextAttribsARB");
         constexpr int major = 0x2091, minor = 0x2092, profile = 0x9126, coreBit = 0x1;
         constexpr int attributes[]{major, 4, minor, 3, profile, coreBit, 0};
         core = createContext(dc, nullptr, attributes);
@@ -132,25 +134,46 @@ struct Window
     }
 };
 
-std::string_view glText(GLenum property)
+class NativeContext
 {
-    const auto* value = glGetString(property);
-    return value ? reinterpret_cast<const char*>(value) : "unavailable";
-}
+    std::optional<Window> window;
+    std::optional<AngleContext> es;
 
-void checkGl(const char* operation)
-{
-    const auto error = glGetError();
-    if (error != GL_NO_ERROR)
+public:
+    void open(const AngleDisplay* angle)
     {
-        char text[160];
-        std::snprintf(text, sizeof(text), "%s failed (OpenGL error 0x%04x)", operation, error);
-        throw std::runtime_error(text);
+        if (angle)
+            es.emplace(*angle).open();
+        else
+        {
+            window.emplace().open();
+            window->upgrade();
+        }
     }
-}
+};
 
 struct Gl
 {
+    const AngleDisplay* angle;
+
+    explicit Gl(const AngleDisplay* angle) : angle(angle) {}
+
+    template<class Function>
+    Function bind(const char* name) const
+    {
+        if (!angle)
+            return bindWgl<Function>(name);
+        const auto address = angle->find(name);
+        if (!address)
+            throw std::runtime_error(std::string("OpenGL ES function unavailable: ") + name);
+        return std::bit_cast<Function>(address);
+    }
+
+    GlFunction<const GLubyte*, GLenum> getString = angle ? bind<decltype(getString)>("glGetString") : glGetString;
+    GlFunction<GLenum> getError = angle ? bind<decltype(getError)>("glGetError") : glGetError;
+    GlFunction<void, GLenum, GLint*> getInteger = angle ? bind<decltype(getInteger)>("glGetIntegerv") : glGetIntegerv;
+    GlFunction<void, GLenum, GLuint, GLint*> getIndexedInteger = bind<decltype(getIndexedInteger)>("glGetIntegeri_v");
+    GlFunction<void, GLenum, int64_t*> getInteger64 = bind<decltype(getInteger64)>("glGetInteger64v");
     GlFunction<GLuint, GLenum> createShader = bind<decltype(createShader)>("glCreateShader");
     GlFunction<void, GLuint, GLsizei, const char* const*, const GLint*> source = bind<decltype(source)>("glShaderSource");
     GlFunction<void, GLuint> compile = bind<decltype(compile)>("glCompileShader");
@@ -162,56 +185,107 @@ struct Gl
     GlFunction<void, GLuint> link = bind<decltype(link)>("glLinkProgram");
     GlFunction<void, GLuint, GLenum, GLint*> programParameter = bind<decltype(programParameter)>("glGetProgramiv");
     GlFunction<void, GLuint, GLsizei, GLsizei*, char*> programLog = bind<decltype(programLog)>("glGetProgramInfoLog");
+    GlFunction<void, GLuint> deleteProgram = bind<decltype(deleteProgram)>("glDeleteProgram");
     GlFunction<void, GLuint> use = bind<decltype(use)>("glUseProgram");
     GlFunction<void, GLuint, GLenum, GLenum, GLint*> interfaceParameter =
         bind<decltype(interfaceParameter)>("glGetProgramInterfaceiv");
     GlFunction<void, GLuint, GLenum, GLuint, GLsizei, const GLenum*, GLsizei, GLsizei*, GLint*> resourceParameter =
         bind<decltype(resourceParameter)>("glGetProgramResourceiv");
     GlFunction<void, GLsizei, GLuint*> genBuffers = bind<decltype(genBuffers)>("glGenBuffers");
+    GlFunction<void, GLsizei, const GLuint*> deleteBuffers = bind<decltype(deleteBuffers)>("glDeleteBuffers");
     GlFunction<void, GLenum, GLuint> bindBuffer = bind<decltype(bindBuffer)>("glBindBuffer");
     GlFunction<void, GLenum, GLuint, GLuint> bindBufferBase = bind<decltype(bindBufferBase)>("glBindBufferBase");
+    GlFunction<void, GLenum, GLuint, GLuint, BufferSize, BufferSize> bindBufferRange =
+        angle ? bind<decltype(bindBufferRange)>("glBindBufferRange") : nullptr;
     GlFunction<void, GLenum, BufferSize, const void*, GLenum> upload = bind<decltype(upload)>("glBufferData");
     GlFunction<void, GLenum, BufferSize, BufferSize, const void*> overwrite = bind<decltype(overwrite)>("glBufferSubData");
-    GlFunction<void, GLenum, BufferSize, BufferSize, void*> read = bind<decltype(read)>("glGetBufferSubData");
+    GlFunction<void, GLenum, BufferSize, BufferSize, void*> read = angle ? nullptr : bind<decltype(read)>("glGetBufferSubData");
+    GlFunction<void*, GLenum, BufferSize, BufferSize, GLbitfield> map = angle ? bind<decltype(map)>("glMapBufferRange") : nullptr;
+    GlFunction<GLboolean, GLenum> unmap = angle ? bind<decltype(unmap)>("glUnmapBuffer") : nullptr;
     GlFunction<void, GLuint, GLuint, GLuint> dispatch = bind<decltype(dispatch)>("glDispatchCompute");
     GlFunction<void, GLbitfield> barrier = bind<decltype(barrier)>("glMemoryBarrier");
     GlFunction<Sync, GLenum, GLbitfield> fence = bind<decltype(fence)>("glFenceSync");
     GlFunction<GLenum, Sync, GLbitfield, uint64_t> wait = bind<decltype(wait)>("glClientWaitSync");
     GlFunction<void, Sync> deleteSync = bind<decltype(deleteSync)>("glDeleteSync");
+
+    std::string_view text(GLenum property) const
+    {
+        const auto* value = getString(property);
+        return value ? reinterpret_cast<const char*>(value) : "unavailable";
+    }
+
+    void check(const char* operation) const
+    {
+        const auto error = getError();
+        if (error != GL_NO_ERROR)
+        {
+            char text[160];
+            std::snprintf(text, sizeof(text), "%s failed (OpenGL error 0x%04x)", operation, error);
+            throw std::runtime_error(text);
+        }
+    }
+
+    void readStorage(BufferSize length, uint32_t* destination) const
+    {
+        if (angle)
+        {
+            constexpr GLbitfield mapReadBit = 0x0001;
+            const auto* data = map(shaderStorageBuffer, 0, length, mapReadBit);
+            check("OpenGL ES glMapBufferRange");
+            require(data != nullptr, "OpenGL ES glMapBufferRange returned null");
+            std::memcpy(destination, data, static_cast<size_t>(length));
+            require(unmap(shaderStorageBuffer) == GL_TRUE, "OpenGL ES storage buffer unmap failed");
+        }
+        else
+            read(shaderStorageBuffer, 0, length, destination);
+        check("OpenGL readback");
+    }
 };
 
 GLuint build(const Gl& gl, std::string_view source)
 {
-    require(source.starts_with("#version 430") && source.find('\0') == std::string_view::npos,
-        "expected desktop GLSL 430 source");
+    const auto version = gl.angle ? std::string_view("#version 310 es") : std::string_view("#version 430");
+    require(source.starts_with(version) && source.find('\0') == std::string_view::npos,
+        gl.angle ? "expected GLSL ES 310 source" : "expected desktop GLSL 430 source");
     const auto shader = gl.createShader(computeShader);
-    const char* text = source.data();
-    const auto length = static_cast<GLint>(source.size());
-    gl.source(shader, 1, &text, &length);
-    gl.compile(shader);
-    GLint compiled = 0, logLength = 0;
-    gl.shaderParameter(shader, compileStatus, &compiled);
-    if (!compiled)
+    GLuint program = 0;
+    try
     {
-        gl.shaderParameter(shader, infoLogLength, &logLength);
-        std::string log(static_cast<size_t>(std::clamp(logLength, 1, 2048)), '\0');
-        gl.shaderLog(shader, static_cast<GLsizei>(log.size()), nullptr, log.data());
-        throw std::runtime_error(std::string("OpenGL compute compilation failed: ") + log.c_str());
+        const char* text = source.data();
+        const auto length = static_cast<GLint>(source.size());
+        gl.source(shader, 1, &text, &length);
+        gl.compile(shader);
+        GLint compiled = 0, logLength = 0;
+        gl.shaderParameter(shader, compileStatus, &compiled);
+        if (!compiled)
+        {
+            gl.shaderParameter(shader, infoLogLength, &logLength);
+            std::string log(static_cast<size_t>(std::clamp(logLength, 1, 2048)), '\0');
+            gl.shaderLog(shader, static_cast<GLsizei>(log.size()), nullptr, log.data());
+            throw std::runtime_error(std::string("OpenGL compute compilation failed: ") + log.c_str());
+        }
+        program = gl.createProgram();
+        gl.attach(program, shader);
+        gl.link(program);
+        GLint linked = 0;
+        gl.programParameter(program, linkStatus, &linked);
+        if (!linked)
+        {
+            gl.programParameter(program, infoLogLength, &logLength);
+            std::string log(static_cast<size_t>(std::clamp(logLength, 1, 2048)), '\0');
+            gl.programLog(program, static_cast<GLsizei>(log.size()), nullptr, log.data());
+            throw std::runtime_error(std::string("OpenGL compute link failed: ") + log.c_str());
+        }
+        gl.check("compile and link");
     }
-    const auto program = gl.createProgram();
-    gl.attach(program, shader);
+    catch (...)
+    {
+        gl.deleteShader(shader);
+        if (program)
+            gl.deleteProgram(program);
+        throw;
+    }
     gl.deleteShader(shader);
-    gl.link(program);
-    GLint linked = 0;
-    gl.programParameter(program, linkStatus, &linked);
-    if (!linked)
-    {
-        gl.programParameter(program, infoLogLength, &logLength);
-        std::string log(static_cast<size_t>(std::clamp(logLength, 1, 2048)), '\0');
-        gl.programLog(program, static_cast<GLsizei>(log.size()), nullptr, log.data());
-        throw std::runtime_error(std::string("OpenGL compute link failed: ") + log.c_str());
-    }
-    checkGl("compile and link");
     return program;
 }
 
@@ -243,7 +317,7 @@ void checkProgram(const Gl& gl, GLuint program, uint32_t workgroupX, const std::
         gl.resourceParameter(program, bufferVariable, static_cast<GLuint>(variable), 3, properties, 3, nullptr, words.data());
         require(words == std::array<GLint, 3>{GL_UNSIGNED_INT, 0, 4}, "expected std430 uint array with four-byte stride");
     }
-    checkGl("program reflection");
+    gl.check("program reflection");
 }
 
 template<size_t Capacity>
@@ -256,32 +330,32 @@ void copyText(char (&destination)[Capacity], std::string_view source)
     destination[length] = '\0';
 }
 
-GaOpenGlDevice deviceInfo()
+GaOpenGlDevice deviceInfo(const Gl& gl)
 {
-    const auto vendor = glText(GL_VENDOR), renderer = glText(GL_RENDERER), version = glText(GL_VERSION);
+    const auto vendor = gl.text(GL_VENDOR), renderer = gl.text(GL_RENDERER), version = gl.text(GL_VERSION);
     std::string identity(vendor);
     identity += ' ';
     identity += renderer;
     for (auto& ch : identity)
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     for (const auto* software : {"gdi generic", "llvmpipe", "softpipe", "swiftshader", "software rasterizer",
-        "microsoft basic render", "warp"})
+        "microsoft basic render", "warp", "null renderer"})
         require(identity.find(software) == std::string::npos, "OpenGL software renderer is unsupported");
 
     GLint major = 0, minor = 0, groups = 0, groupSize = 0, invocations = 0, bindings = 0, blocks = 0;
     int64_t bufferBytes = 0;
-    const auto getIndexedInteger = bind<GlFunction<void, GLenum, GLuint, GLint*>>("glGetIntegeri_v");
-    const auto getInteger64 = bind<GlFunction<void, GLenum, int64_t*>>("glGetInteger64v");
-    glGetIntegerv(contextMajor, &major);
-    glGetIntegerv(contextMinor, &minor);
-    getIndexedInteger(maxGroups, 0, &groups);
-    getIndexedInteger(maxGroupSize, 0, &groupSize);
-    glGetIntegerv(maxInvocations, &invocations);
-    glGetIntegerv(maxSsboBindings, &bindings);
-    glGetIntegerv(maxComputeSsboBlocks, &blocks);
-    getInteger64(maxSsboBytes, &bufferBytes);
-    checkGl("OpenGL device limits");
-    require((major > 4 || (major == 4 && minor >= 3)) && groups > 0 && groupSize >= 64 && invocations >= 64
+    gl.getInteger(contextMajor, &major);
+    gl.getInteger(contextMinor, &minor);
+    gl.getIndexedInteger(maxGroups, 0, &groups);
+    gl.getIndexedInteger(maxGroupSize, 0, &groupSize);
+    gl.getInteger(maxInvocations, &invocations);
+    gl.getInteger(maxSsboBindings, &bindings);
+    gl.getInteger(maxComputeSsboBlocks, &blocks);
+    gl.getInteger64(maxSsboBytes, &bufferBytes);
+    gl.check("OpenGL device limits");
+    const bool versionSupported = gl.angle ? version.starts_with("OpenGL ES ") && (major > 3 || (major == 3 && minor >= 1))
+        : major > 4 || (major == 4 && minor >= 3);
+    require(versionSupported && groups > 0 && groupSize >= 64 && invocations >= 64
         && bindings > 7 && blocks >= 3 && bufferBytes >= static_cast<int64_t>(sizeof(uint32_t)),
         "OpenGL compute limits are insufficient");
 
@@ -317,27 +391,43 @@ struct Dispatch
     std::span<const uint32_t> input;
     std::span<uint32_t> output;
     std::span<uint32_t> faults;
-    std::promise<void> completion;
 };
 
 class Pipeline
 {
-    const Gl gl;
+    const Gl& gl;
+    GLuint program;
     Locations locations;
     std::array<GLuint, 3> buffers{};
     std::array<BufferSize, 3> bufferSizes{};
     std::array<std::vector<uint32_t>, 2> readback;
     bool unavailable = false;
 
-public:
-    Pipeline(std::string_view source, uint32_t workgroupX, Locations map) : locations(map)
+    void release()
     {
-        const auto program = build(gl, source);
-        checkProgram(gl, program, workgroupX, locations);
-        gl.use(program);
-        gl.genBuffers(static_cast<GLsizei>(buffers.size()), buffers.data());
-        checkGl("OpenGL create compute buffers");
+        gl.use(0);
+        gl.deleteBuffers(static_cast<GLsizei>(buffers.size()), buffers.data());
+        gl.deleteProgram(program);
     }
+
+public:
+    Pipeline(const Gl& gl, std::string_view source, uint32_t workgroupX, Locations map)
+        : gl(gl), program(build(gl, source)), locations(map)
+    {
+        try
+        {
+            checkProgram(gl, program, workgroupX, locations);
+            gl.genBuffers(static_cast<GLsizei>(buffers.size()), buffers.data());
+            gl.check("OpenGL create compute buffers");
+        }
+        catch (...)
+        {
+            release();
+            throw;
+        }
+    }
+
+    ~Pipeline() { release(); }
 
     void execute(const Dispatch& job)
     {
@@ -345,6 +435,7 @@ public:
         readback[0].resize(job.output.size());
         readback[1].resize(job.faults.size());
         unavailable = true;
+        gl.use(program);
         const std::array<std::span<const uint32_t>, 3> payload{job.input, job.output, job.faults};
         for (size_t i = 0; i < buffers.size(); ++i)
         {
@@ -357,19 +448,22 @@ public:
                 gl.upload(shaderStorageBuffer, length, payload[i].data(), dynamicCopy);
                 bufferSizes[i] = length;
             }
-            gl.bindBufferBase(shaderStorageBuffer, locations[i], buffers[i]);
+            if (gl.angle)
+                // ANGLE D3D11 needs the indexed size to refresh its UAV view on a shrink.
+                gl.bindBufferRange(shaderStorageBuffer, locations[i], buffers[i], 0, length);
+            else
+                gl.bindBufferBase(shaderStorageBuffer, locations[i], buffers[i]);
         }
-        checkGl("OpenGL upload and bind");
+        gl.check("OpenGL upload and bind");
         gl.dispatch(job.groups, 1, 1);
         gl.barrier(bufferUpdateBarrier);
-        checkGl("OpenGL dispatch and buffer barrier");
+        gl.check("OpenGL dispatch and buffer barrier");
         waitForReadback(gl);
 
         for (size_t i = 0; i < readback.size(); ++i)
         {
             gl.bindBuffer(shaderStorageBuffer, buffers[i + 1]);
-            gl.read(shaderStorageBuffer, 0, bufferSizes[i + 1], readback[i].data());
-            checkGl("OpenGL readback");
+            gl.readStorage(bufferSizes[i + 1], readback[i].data());
         }
         std::copy(readback[0].begin(), readback[0].end(), job.output.begin());
         std::copy(readback[1].begin(), readback[1].end(), job.faults.begin());
@@ -377,29 +471,37 @@ public:
     }
 };
 
-class Kernel
+class ContextWorker
 {
-    GaOpenGlDevice device;
-    std::mutex callerMutex, workerMutex;
+    struct Job
+    {
+        void* work;
+        void (*execute)(void*, const Gl&);
+        std::exception_ptr failure;
+        bool done = false;
+    };
+
+    GaOpenGlDevice device{};
+    std::mutex mutex;
     std::condition_variable wake;
     std::thread worker;
-    Dispatch* pending = nullptr;
+    Job* pending = nullptr;
     bool stopping = false;
 
-    void run(std::string_view source, uint32_t workgroupX, Locations bindings, std::promise<void> ready)
+    void run(const std::filesystem::path& directory, uint32_t renderer, std::promise<GaOpenGlDevice> ready)
     {
-        // WGL and the hidden HWND are created, used and destroyed on this thread.
-        Window window;
-        std::optional<Pipeline> pipeline;
+        // Native contexts and their surfaces stay on the same worker thread.
+        std::optional<AngleDisplay> angle;
+        NativeContext context;
+        std::optional<Gl> gl;
         try
         {
-            window.open();
-            window.upgrade();
-            const auto actual = deviceInfo();
-            require(std::strcmp(actual.vendor, device.vendor) == 0 && std::strcmp(actual.renderer, device.renderer) == 0
-                && std::strcmp(actual.version, device.version) == 0, "OpenGL kernel renderer changed after enumeration");
-            pipeline.emplace(source, workgroupX, bindings);
-            ready.set_value();
+            if (!directory.empty())
+                angle.emplace(directory, renderer);
+            const auto* display = angle ? &*angle : nullptr;
+            context.open(display);
+            gl.emplace(display);
+            ready.set_value(deviceInfo(*gl));
         }
         catch (...)
         {
@@ -407,38 +509,38 @@ class Kernel
             return;
         }
 
+        std::unique_lock lock(mutex);
         for (;;)
         {
-            Dispatch* job;
-            {
-                std::unique_lock lock(workerMutex);
-                wake.wait(lock, [this] { return stopping || pending != nullptr; });
-                if (stopping)
-                    return;
-                job = std::exchange(pending, nullptr);
-            }
-            auto completion = std::move(job->completion);
+            wake.wait(lock, [this] { return stopping || pending != nullptr; });
+            if (stopping)
+                return;
+            auto& job = *pending;
+            lock.unlock();
             try
             {
-                pipeline->execute(*job);
-                completion.set_value();
+                job.execute(job.work, *gl);
             }
             catch (...)
             {
-                completion.set_exception(std::current_exception());
+                job.failure = std::current_exception();
             }
+            lock.lock();
+            pending = nullptr;
+            job.done = true;
+            wake.notify_all();
         }
     }
 
 public:
-    Kernel(GaOpenGlDevice expected, std::string_view source, uint32_t workgroupX, Locations bindings) : device(expected)
+    ContextWorker(std::filesystem::path directory = {}, uint32_t renderer = 0)
     {
-        std::promise<void> ready;
+        std::promise<GaOpenGlDevice> ready;
         auto initialized = ready.get_future();
-        worker = std::thread(&Kernel::run, this, source, workgroupX, bindings, std::move(ready));
+        worker = std::thread(&ContextWorker::run, this, std::move(directory), renderer, std::move(ready));
         try
         {
-            initialized.get();
+            device = initialized.get();
         }
         catch (...)
         {
@@ -447,38 +549,163 @@ public:
         }
     }
 
-    ~Kernel()
+    ~ContextWorker()
     {
         {
-            std::lock_guard lock(workerMutex);
+            std::lock_guard lock(mutex);
             stopping = true;
         }
-        wake.notify_one();
+        wake.notify_all();
         worker.join();
     }
+
+    const GaOpenGlDevice& info() const { return device; }
+
+    template<class Work>
+    void invoke(Work work)
+    {
+        Job job{&work, [](void* value, const Gl& gl) { (*static_cast<Work*>(value))(gl); }, {}};
+        std::unique_lock lock(mutex);
+        wake.wait(lock, [this] { return pending == nullptr; });
+        pending = &job;
+        wake.notify_all();
+        wake.wait(lock, [&job] { return job.done; });
+        if (job.failure)
+            std::rethrow_exception(job.failure);
+    }
+};
+
+class AngleLease
+{
+    struct Registry
+    {
+        std::mutex mutex;
+        std::filesystem::path directory;
+        std::array<std::weak_ptr<ContextWorker>, 3> workers;
+    };
+
+    static Registry& registry()
+    {
+        static Registry instance;
+        return instance;
+    }
+
+    std::shared_ptr<ContextWorker> worker;
+
+public:
+    AngleLease(const std::filesystem::path& directory, uint32_t renderer)
+    {
+        auto& live = registry();
+        std::lock_guard lock(live.mutex);
+        if (std::ranges::any_of(live.workers, [](const auto& entry) { return !entry.expired(); }))
+        {
+            std::error_code error;
+            require(std::filesystem::equivalent(live.directory, directory, error),
+                "A different ANGLE DLL directory is already in use");
+        }
+        else
+            live.directory = directory;
+
+        auto& slot = live.workers[renderer];
+        worker = slot.lock();
+        if (!worker)
+        {
+            // ANGLE backends can share one display internally. Keep context and
+            // pipeline operations on one worker across all handles for this renderer.
+            worker = std::make_shared<ContextWorker>(directory, renderer);
+            slot = worker;
+        }
+    }
+
+    ~AngleLease()
+    {
+        std::lock_guard lock(registry().mutex);
+        worker.reset();
+    }
+
+    ContextWorker& get() const { return *worker; }
+};
+
+struct DeviceContext
+{
+    GaOpenGlDevice device;
+    std::shared_ptr<const AngleLease> angle;
+};
+
+class Kernel
+{
+    DeviceContext owner;
+    std::unique_ptr<ContextWorker> wgl;
+    ContextWorker& worker;
+    std::optional<Pipeline> pipeline;
+
+public:
+    Kernel(DeviceContext context, std::string_view source, uint32_t workgroupX, Locations bindings)
+        : owner(std::move(context)), wgl(owner.angle ? nullptr : std::make_unique<ContextWorker>()),
+          worker(owner.angle ? owner.angle->get() : *wgl)
+    {
+        const auto& actual = worker.info();
+        const auto& device = owner.device;
+        require(std::strcmp(actual.vendor, device.vendor) == 0 && std::strcmp(actual.renderer, device.renderer) == 0
+            && std::strcmp(actual.version, device.version) == 0, "OpenGL kernel renderer changed after enumeration");
+        worker.invoke([&](const Gl& gl) { pipeline.emplace(gl, source, workgroupX, bindings); });
+    }
+
+    ~Kernel() { worker.invoke([this](const Gl&) { pipeline.reset(); }); }
 
     void dispatch(uint32_t groups, std::span<const uint32_t> input, std::span<uint32_t> output,
         std::span<uint32_t> faults)
     {
+        const auto& device = owner.device;
         require(groups > 0 && groups <= device.maxGroupsX, "OpenGL dispatch group count is out of range");
         require(input.size_bytes() <= device.maxStorageBufferRange && output.size_bytes() <= device.maxStorageBufferRange
             && faults.size_bytes() <= device.maxStorageBufferRange, "OpenGL storage buffer exceeds device limits");
-        std::lock_guard caller(callerMutex);
-        Dispatch job{groups, input, output, faults, {}};
-        auto finished = job.completion.get_future();
-        {
-            std::lock_guard lock(workerMutex);
-            pending = &job;
-        }
-        wake.notify_one();
-        finished.get();
+        worker.invoke([&](const Gl&) { pipeline->execute({groups, input, output, faults}); });
     }
 };
 
-const GaOpenGlDevice& getDevice(void* context, uint32_t index)
+void probeEsBufferSizes(const DeviceContext& owner)
+{
+    constexpr std::string_view source = R"GLSL(#version 310 es
+layout(local_size_x = 1) in;
+layout(std430, binding = 3) readonly buffer InputBuffer { uint inputWords[]; };
+layout(std430, binding = 5) buffer OutputBuffer { uint outputWords[]; };
+layout(std430, binding = 7) buffer FaultBuffer { uint faultWords[]; };
+void main()
+{
+    outputWords[0] = uint(inputWords.length());
+    outputWords[1] = inputWords[0];
+    faultWords[0] = uint(outputWords.length());
+    faultWords[1] = uint(faultWords.length());
+}
+)GLSL";
+    Kernel kernel(owner, source, 1, {3, 5, 7});
+    constexpr uint32_t sentinel = 0xBADC0DEu;
+    constexpr std::array<uint32_t, 3> sizes[]{{65, 64, 16}, {3, 4, 5}, {33, 24, 17}};
+    for (const auto& size : sizes)
+    {
+        std::vector<uint32_t> input(size[0]), output(size[1], sentinel), faults(size[2], sentinel);
+        input[0] = size[0] ^ sentinel;
+        kernel.dispatch(1, input, output, faults);
+        require(output[0] == size[0] && output[1] == input[0] && faults[0] == size[1] && faults[1] == size[2],
+            "OpenGL ES storage lengths changed after buffer resize");
+        require(std::all_of(output.begin() + 2, output.end(), [](auto word) { return word == sentinel; })
+            && std::all_of(faults.begin() + 2, faults.end(), [](auto word) { return word == sentinel; }),
+            "OpenGL ES storage length probe overwrote guard words");
+    }
+}
+
+const DeviceContext& getDevice(void* context, uint32_t index)
 {
     require(context != nullptr && index == 0, "OpenGL context or device index is invalid");
-    return *static_cast<GaOpenGlDevice*>(context);
+    return *static_cast<DeviceContext*>(context);
+}
+
+DeviceContext* openWglDevice()
+{
+    NativeContext context;
+    context.open(nullptr);
+    return new DeviceContext{deviceInfo(Gl(nullptr)), {}};
 }
 
 void writeError(char* error, uint32_t capacity, const char* text)
@@ -519,16 +746,28 @@ int32_t skecs_ga_gl_open(void** context, char* error, uint32_t errorCapacity)
     {
         require(context != nullptr, "OpenGL context destination is required");
         *context = nullptr;
-        Window window;
-        window.open();
-        window.upgrade();
-        *context = new GaOpenGlDevice(deviceInfo());
+        *context = openWglDevice();
+    });
+}
+
+int32_t skecs_ga_gl_open_es(const wchar_t* angleDirectory, uint32_t renderer,
+    void** context, char* error, uint32_t errorCapacity)
+{
+    return perform(error, errorCapacity, [&]
+    {
+        require(context != nullptr, "OpenGL ES context destination is required");
+        *context = nullptr;
+        require(angleDirectory && renderer <= 2, "OpenGL ES ANGLE directory and renderer are required");
+        const std::filesystem::path directory(angleDirectory);
+        require(directory.is_absolute(), "OpenGL ES ANGLE DLL directory must be absolute");
+        auto angle = std::make_shared<AngleLease>(directory, renderer);
+        *context = new DeviceContext{angle->get().info(), std::move(angle)};
     });
 }
 
 void skecs_ga_gl_close(void* context)
 {
-    delete static_cast<GaOpenGlDevice*>(context);
+    delete static_cast<DeviceContext*>(context);
 }
 
 int32_t skecs_ga_gl_device_count(void* context, uint32_t* count, char* error, uint32_t errorCapacity)
@@ -545,7 +784,7 @@ int32_t skecs_ga_gl_get_device(void* context, uint32_t index, GaOpenGlDevice* de
     return perform(error, errorCapacity, [&]
     {
         require(device != nullptr, "OpenGL device destination is required");
-        *device = getDevice(context, index);
+        *device = getDevice(context, index).device;
     });
 }
 
@@ -561,12 +800,16 @@ int32_t skecs_ga_gl_probe(void* context, uint32_t index, char* error, uint32_t e
         remainders.fill(sentinel);
         for (size_t i = 0; i < values.size(); ++i)
             input[i + 1] = std::bit_cast<uint32_t>(values[i]);
-        Kernel kernel(getDevice(context, index), {startupGlsl, sizeof(startupGlsl) - 1}, 64, {3, 5, 7});
+        const auto& owner = getDevice(context, index);
+        const auto source = owner.angle ? std::string_view(startupGlslEs) : std::string_view(startupGlsl);
+        Kernel kernel(owner, source, 64, {3, 5, 7});
         kernel.dispatch(1, input, quotients, remainders);
         for (size_t i = 0; i < values.size(); ++i)
             require(quotients[i] == std::bit_cast<uint32_t>(values[i] / 3)
                 && remainders[i] == std::bit_cast<uint32_t>(values[i] % 3), "OpenGL startup arithmetic mismatch");
         require(quotients.back() == sentinel && remainders.back() == sentinel, "OpenGL startup overwrote guard words");
+        if (owner.angle)
+            probeEsBufferSizes(owner);
     });
 }
 
@@ -577,7 +820,8 @@ int32_t skecs_ga_gl_create_kernel(void* context, uint32_t index, const char* sou
     {
         require(kernel != nullptr, "OpenGL kernel destination is required");
         *kernel = nullptr;
-        const auto& device = getDevice(context, index);
+        const auto& owner = getDevice(context, index);
+        const auto& device = owner.device;
         require(source && sourceByteCount > 0 && sourceByteCount <= static_cast<uint32_t>(std::numeric_limits<GLint>::max())
             && bindings && workgroupX > 0 && workgroupX <= device.maxWorkgroupX && workgroupX <= device.maxWorkgroupInvocations,
             "OpenGL source, group size and storage bindings are required");
@@ -585,7 +829,7 @@ int32_t skecs_ga_gl_create_kernel(void* context, uint32_t index, const char* sou
         require(map[0] != map[1] && map[0] != map[2] && map[1] != map[2]
             && *std::max_element(map.begin(), map.end()) < device.maxStorageBindings,
             "OpenGL shader storage bindings are out of range or repeated");
-        *kernel = new Kernel(device, {source, sourceByteCount}, workgroupX, map);
+        *kernel = new Kernel(owner, {source, sourceByteCount}, workgroupX, map);
     });
 }
 

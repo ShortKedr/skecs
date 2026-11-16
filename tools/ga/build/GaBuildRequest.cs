@@ -64,8 +64,8 @@ internal sealed class GaBuildRequest
             ArgumentException.ThrowIfNullOrWhiteSpace(SlangAdapter);
         if (SlangCompilerExecutable is not null)
             ArgumentException.ThrowIfNullOrWhiteSpace(SlangCompilerExecutable);
-        if (Target is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "webgpu"))
-            throw new ArgumentException("target must be vulkan, d3d12, d3d11, opengl, or webgpu.");
+        if (Target is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "webgpu"))
+            throw new ArgumentException("target must be vulkan, d3d12, d3d11, opengl, gles, or webgpu.");
         if (WorkgroupX < 1 ||
             ((Target is "d3d12" or "d3d11") && WorkgroupX > GaSlangEmitter.MaximumD3D12WorkgroupX))
             throw new ArgumentException("workgroupX must be positive and within the target's group size limit.");

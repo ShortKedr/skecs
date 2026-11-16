@@ -11,10 +11,10 @@ using SKECS.GA.Backend.Vulkan;
 using SKECS.Numerics;
 
 #if !GA_BROWSER_CONFORMANCE
-if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
+if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0 ||
     args[4] is not ("smoke" or "matrix" or "short" or "long"))
-    throw new ArgumentException("Usage: ShotBurstConformance <vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index> <smoke|matrix|short|long>");
+    throw new ArgumentException("Usage: ShotBurstConformance <vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index> <smoke|matrix|short|long>");
 #endif
 
 var contract = new GaContractIdentity(ShotBurstAdapterRowCodec.SystemId, "shot-burst-capacity/1",
@@ -44,7 +44,7 @@ string lane = $"WebGPU {device.Device}";
 var stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
 using var backend = owner;
@@ -358,9 +358,11 @@ static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDispos
         owner = d3d11;
         return d3d11.Devices;
     }
-    if (backend == "opengl")
+    if (backend is "opengl" or "gles")
     {
-        var gl = GaOpenGlBackend.Open(library);
+        var gl = backend == "gles"
+            ? GaOpenGlBackend.OpenEsFromEnvironment(library)
+            : GaOpenGlBackend.Open(library);
         owner = gl;
         return gl.Devices;
     }

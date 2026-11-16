@@ -142,6 +142,17 @@ try {
         }
         @('const char startupGlsl[] = R"GA_STARTUP(' + $glsl + ')GA_STARTUP";') |
             Set-Content -LiteralPath (Join-Path $output 'StartupGlsl.h') -Encoding ascii
+        $startupGlslEs = Join-Path $output 'startup.es310.glsl'
+        & (Join-Path $sdk 'Bin/spirv-val.exe') --target-env vulkan1.1 $startupSpirv
+        if ($LASTEXITCODE -ne 0) { throw 'The OpenGL ES startup intermediate is invalid.' }
+        & $SpirvCrossExecutable $startupSpirv --version 310 --es --entry main --stage comp --output $startupGlslEs
+        if ($LASTEXITCODE -ne 0) { throw 'SPIRV-Cross failed to compile the OpenGL ES startup shader.' }
+        $gles = [IO.File]::ReadAllText($startupGlslEs).ReplaceLineEndings("`n")
+        if (!$gles.StartsWith("#version 310 es`n", [StringComparison]::Ordinal) -or $gles.Contains(')GA_STARTUP"')) {
+            throw 'Invalid GLSL ES 310 startup shader.'
+        }
+        @('constexpr char startupGlslEs[] = R"GA_STARTUP(' + $gles + ')GA_STARTUP";') |
+            Set-Content -LiteralPath (Join-Path $output 'StartupGlslEs.h') -Encoding ascii
         & $runner opengl
         if ($LASTEXITCODE -ne 0) { throw 'OpenGL native probe build failed.' }
     }

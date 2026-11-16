@@ -24,9 +24,9 @@ if (args is ["cpu", var cpuProfile])
     return;
 }
 
-if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
+if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index> <profile>'.");
+    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index> <profile>'.");
 #endif
 
 var contract = new GaContractIdentity(MovementAdapterRowCodec.SystemId, "movement/1",
@@ -89,14 +89,14 @@ using var startup = await GaStartup.SelectAsync(GaPolicy.RequireGpu, [request], 
 #else
 string profile = args[4];
 string stem = Path.Combine(args[1], contract.SystemId);
-string binaryExtension = args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" };
+string binaryExtension = args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" };
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
     File.ReadAllBytes(stem + binaryExtension),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 using IDisposable backend = Open(args[0], args[2], out var devices);
 Check(deviceIndex < devices.Count, $"Only {devices.Count} devices are available.");
-if (args[0] is "d3d11" or "opengl")
+if (args[0] is "d3d11" or "opengl" or "gles")
     VerifyStartup(contract, artifact, devices[deviceIndex]);
 using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])], [devices[deviceIndex]], allowExperimental: true);
 var device = devices[deviceIndex].Info;
@@ -158,7 +158,7 @@ static void VerifyStartup(GaContractIdentity contract, GaArtifactCandidate artif
 
     string[] unverifiedOptions = device.Format == GaArtifactFormat.Dxbc
         ? ["Slang downstream FXC"]
-        : bundle.Manifest.Toolchain.Options.Where(option => option != "-O").ToArray();
+        : bundle.Manifest.Toolchain.Options.SkipLast(1).ToArray();
     var unverifiedCompiler = bundle.Manifest with
     {
         Toolchain = bundle.Manifest.Toolchain with { Options = unverifiedOptions }
@@ -369,9 +369,11 @@ static IDisposable Open(string target, string library, out IReadOnlyList<IGaDevi
         devices = backend.Devices;
         return backend;
     }
-    if (target == "opengl")
+    if (target is "opengl" or "gles")
     {
-        var backend = GaOpenGlBackend.Open(library);
+        var backend = target == "gles"
+            ? GaOpenGlBackend.OpenEsFromEnvironment(library)
+            : GaOpenGlBackend.Open(library);
         devices = backend.Devices;
         return backend;
     }

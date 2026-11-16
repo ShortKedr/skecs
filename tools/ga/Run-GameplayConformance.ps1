@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory)][string[]]$KernelSources,
     [Parameter(Mandatory)][string]$AdapterClass,
     [Parameter(Mandatory)][string]$ProjectName,
-    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl')]
+    [ValidateSet('vulkan', 'd3d12', 'd3d11', 'opengl', 'gles')]
     [ValidateNotNullOrEmpty()]
     [string[]]$Backend = @('vulkan', 'd3d12'),
     [ValidateRange(0, 2147483647)]
@@ -20,7 +20,10 @@ param(
     [switch]$CpuOnly,
     [switch]$BuildOnly,
     [string]$FxcDirectory,
-    [string]$SpirvCrossExecutable
+    [string]$SpirvCrossExecutable,
+    [string]$AngleDirectory,
+    [ValidateSet('D3D11', 'Vulkan', 'OpenGl')]
+    [string]$AngleRenderer
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,9 +39,15 @@ if (!$CpuOnly -and $Backend -contains 'd3d11') {
     if (!$FxcDirectory) { throw 'Set FxcDirectory to the pinned Windows SDK x64 compiler directory for D3D11.' }
     $FxcDirectory = (Resolve-Path -LiteralPath $FxcDirectory).Path
 }
-if (!$CpuOnly -and $Backend -contains 'opengl') {
-    if (!$SpirvCrossExecutable) { throw 'Set SpirvCrossExecutable to the pinned translator for OpenGL.' }
+if (!$CpuOnly -and ($Backend -contains 'opengl' -or $Backend -contains 'gles')) {
+    if (!$SpirvCrossExecutable) { throw 'Set SpirvCrossExecutable to the pinned translator for OpenGL and OpenGL ES.' }
     $SpirvCrossExecutable = (Resolve-Path -LiteralPath $SpirvCrossExecutable).Path
+}
+$angle = $null
+if (!$CpuOnly -and !$BuildOnly -and $Backend -contains 'gles') {
+    if (!$AngleDirectory -or !$AngleRenderer) { throw 'Set AngleDirectory and AngleRenderer to run OpenGL ES conformance.' }
+    $angle = Get-Item -LiteralPath $AngleDirectory
+    if (!$angle.PSIsContainer) { throw 'AngleDirectory must be a directory.' }
 }
 
 $artifacts = (New-Item -ItemType Directory -Force "$source/artifacts/ga/$SystemId").FullName
@@ -60,6 +69,10 @@ $environment = @{
     DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
     Path = if ($CpuOnly) { $env:Path } else { "$env:VULKAN_SDK/Bin;$env:Path" }
     VK_INSTANCE_LAYERS = $env:VK_INSTANCE_LAYERS
+}
+if ($angle) {
+    $environment.SKECS_GA_ANGLE_DIRECTORY = $angle.FullName
+    $environment.SKECS_GA_ANGLE_RENDERER = $AngleRenderer
 }
 $previous = @{}
 foreach ($setting in $environment.GetEnumerator()) {
@@ -115,7 +128,7 @@ try {
             workgroupX = $WorkgroupX
             dxcDirectory = if ($target -eq 'd3d12') { $nativeTools }
             fxcDirectory = if ($target -eq 'd3d11') { $FxcDirectory }
-            spirvCrossExecutable = if ($target -eq 'opengl') { $SpirvCrossExecutable }
+            spirvCrossExecutable = if ($target -in 'opengl', 'gles') { $SpirvCrossExecutable }
         } | ConvertTo-Json | Set-Content -LiteralPath $request -Encoding utf8
         $report = & $dotnet "$cli/Ga.Build.dll" $request
         if ($LASTEXITCODE) { throw "GA bundle build failed for $target. $report" }
@@ -147,6 +160,7 @@ try {
     }
 
     foreach ($target in $Backend) {
+        $nativeTarget = if ($target -eq 'gles') { 'opengl' } else { $target }
         $env:VK_INSTANCE_LAYERS = if ($target -eq 'vulkan' -and $VulkanValidation) {
             'VK_LAYER_KHRONOS_validation'
         } else {
@@ -154,7 +168,7 @@ try {
         }
         foreach ($index in $DeviceIndex) {
             foreach ($run in $Profile) {
-                $arguments = @($target, $bundles[$target], "$binaries/ga-$target-native.dll", $index)
+                $arguments = @($target, $bundles[$target], "$binaries/ga-$nativeTarget-native.dll", $index)
                 if ($run) { $arguments += $run }
                 & $dotnet $assembly @arguments
                 if ($LASTEXITCODE) { throw "$SystemId $run failed on $target device $index." }

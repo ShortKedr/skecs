@@ -61,6 +61,16 @@ internal sealed unsafe class GaOpenGlNative : SafeHandle
         return TakeLease(context, _close);
     }
 
+    internal Lease OpenEsContext(string angleDirectory, GaAngleRenderer renderer)
+    {
+        var openEs = (delegate* unmanaged[Cdecl]<char*, uint, nint*, byte*, uint, int>)Export("open_es");
+        nint context;
+        byte* error = stackalloc byte[ErrorCapacity];
+        fixed (char* directory = angleDirectory)
+            Check(openEs(directory, (uint)renderer, &context, error, ErrorCapacity), error, "open the ANGLE OpenGL ES runtime");
+        return TakeLease(context, _close);
+    }
+
     internal uint GetDeviceCount(Lease context)
     {
         uint count;
@@ -157,7 +167,12 @@ internal sealed unsafe class GaOpenGlNative : SafeHandle
         public fixed byte Renderer[256];
         public fixed byte Version[256];
 
-        public readonly bool SupportsCompute => (GlMajor > 4 || GlMajor == 4 && GlMinor >= 3) && MaxStorageBindings >= 3;
+        public readonly bool SupportsCompute(bool isEs)
+        {
+            uint major = isEs ? 3u : 4u;
+            uint minor = isEs ? 1u : 3u;
+            return (GlMajor > major || GlMajor == major && GlMinor >= minor) && MaxStorageBindings >= 3;
+        }
 
         public string GetVendor()
         {

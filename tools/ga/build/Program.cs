@@ -23,8 +23,8 @@ if (args is ["--help"] or ["-h"])
 
         Optional properties
           sourceRoot (.), adapterClass (GaCpuAdapter), policy (auto), slangAdapter
-          target (vulkan, d3d12, d3d11, opengl, or webgpu)
-          dxcDirectory (d3d12), fxcDirectory (d3d11), spirvCrossExecutable (opengl)
+          target (vulkan, d3d12, d3d11, opengl, gles, or webgpu)
+          dxcDirectory (d3d12), fxcDirectory (d3d11), spirvCrossExecutable (opengl or gles)
           OpenGL also uses the pinned spirv-opt.exe in the SPIRV-Cross directory.
           slangCompilerExecutable (webgpu) uses the pinned slangc.exe and adjacent slang.dll.
           workgroupX (64)          One-dimensional GPU workgroup width
@@ -204,12 +204,14 @@ static async Task<GpuBuildResult> BuildGpu(
         return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "FxcMissing",
             Detail: "Supply the directory containing the pinned d3dcompiler_47.dll to build a D3D11 package.");
     string? cross = null;
-    if (request.Target == "opengl")
+    if (request.Target is "opengl" or "gles")
     {
         cross = request.SpirvCrossExecutable is null ? null : Path.GetFullPath(request.SpirvCrossExecutable, requestDirectory);
         if (cross is null || !File.Exists(cross))
             return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SpirvCrossMissing",
-                Detail: "Supply the pinned SPIRV-Cross executable to build an OpenGL package.");
+                Detail: request.Target == "gles"
+                    ? "Supply the pinned SPIRV-Cross executable to build an OpenGL ES package."
+                    : "Supply the pinned SPIRV-Cross executable to build an OpenGL package.");
         if (!File.Exists(Path.Combine(Path.GetDirectoryName(cross)!, "spirv-opt.exe")))
             return new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SpirvOptMissing",
                 Detail: "Supply the pinned spirv-opt.exe beside the SPIRV-Cross executable.");
@@ -222,6 +224,8 @@ static async Task<GpuBuildResult> BuildGpu(
             "webgpu" => await GaWebGpuPackager.Build(program, request.SimulationContractId, slang,
                 staging, request.ArtifactName, request.WorkgroupX),
             "opengl" => await GaOpenGlPackager.Build(program, request.SimulationContractId, slang, cross!,
+                staging, request.ArtifactName, request.WorkgroupX),
+            "gles" => await GaOpenGlPackager.BuildEs(program, request.SimulationContractId, slang, cross!,
                 staging, request.ArtifactName, request.WorkgroupX),
             "d3d11" => await GaD3D11Packager.Build(program, request.SimulationContractId, slang,
                 Path.GetFullPath(request.FxcDirectory!, requestDirectory), staging, request.ArtifactName, request.WorkgroupX),

@@ -17,9 +17,9 @@ if (args is ["cpu", var cpuProfile])
     return;
 }
 
-if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
+if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index> <profile>'.");
+    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index> <profile>'.");
 #endif
 
 var contract = new GaContractIdentity(CarrierAdapterRowCodec.SystemId, "carrier-capacity/1",
@@ -47,7 +47,7 @@ var device = backend.Info;
 string stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 using IDisposable backend = Open(args[0], args[2], out var devices);
 Require(deviceIndex < devices.Count, $"Only {devices.Count} devices are available.");
@@ -330,9 +330,11 @@ static IDisposable Open(string api, string library, out IReadOnlyList<IGaDevice>
         devices = d3d11.Devices;
         return d3d11;
     }
-    if (api == "opengl")
+    if (api is "opengl" or "gles")
     {
-        var gl = GaOpenGlBackend.Open(library);
+        var gl = api == "gles"
+            ? GaOpenGlBackend.OpenEsFromEnvironment(library)
+            : GaOpenGlBackend.Open(library);
         devices = gl.Devices;
         return gl;
     }

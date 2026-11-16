@@ -86,7 +86,7 @@ public sealed class ArtifactStartupTests
     }
 
     [Fact]
-    public void GlslRequiresDesktopProfileAndExplicitStorageNamespace()
+    public void GlslRequiresMatchingProfileAndExplicitStorageNamespace()
     {
         var fixture = new Fixture();
         var manifest = fixture.Manifest with
@@ -100,8 +100,12 @@ public sealed class ArtifactStartupTests
         Assert.NotNull(Load(manifest, "#version 430\nvoid main() {}\n"u8).Bundle);
         Assert.Null(Load(manifest, "#version 310 es\nvoid main() {}\n"u8).Bundle);
         Assert.Null(Load(manifest, "#version 430\n\0"u8).Bundle);
-        Assert.Null(Load(manifest with { Toolchain = manifest.Toolchain with { TargetProfile = "glsl_es_310" } },
-            "#version 430\nvoid main() {}\n"u8).Bundle);
+        var esManifest = manifest with { Toolchain = manifest.Toolchain with { TargetProfile = "glsl_es_310" } };
+        Assert.NotNull(Load(esManifest, "#version 310 es\nvoid main() {}\n"u8).Bundle);
+        Assert.Null(Load(esManifest, "#version 430\nvoid main() {}\n"u8).Bundle);
+        Assert.Null(Load(esManifest, "#version 310 es\n\0"u8).Bundle);
+        Assert.Null(Load(esManifest with { Toolchain = esManifest.Toolchain with { TargetProfile = "glsl_es_320" } },
+            "#version 320 es\nvoid main() {}\n"u8).Bundle);
         Assert.Throws<InvalidDataException>(() => (manifest with
         {
             DeclaredBindings = [manifest.DeclaredBindings[0] with { Space = 1 }, manifest.DeclaredBindings[1]]

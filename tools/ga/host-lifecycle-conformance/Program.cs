@@ -23,9 +23,9 @@ await ExerciseDevice("webgpu", browserDevice, browserStartup, browserContract, c
 #else
 if (args.Length != 1 || args[0] != "cpu")
 {
-    if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
+    if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
         !int.TryParse(args[3], out int index) || index < 0)
-        throw new ArgumentException("Usage: HostLifecycleConformance cpu | <vulkan|d3d12|d3d11|opengl> <bundle> <native bridge> <device index>");
+        throw new ArgumentException("Usage: HostLifecycleConformance cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index>");
     await RunDevice(args[0], args[1], args[2], index);
 }
 else
@@ -62,7 +62,7 @@ static async Task RunDevice(string backend, string bundle, string native, int in
     var stem = Path.Combine(bundle, contract.SystemId);
     var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
         File.ReadAllText(stem + ".content-id").Trim(),
-        File.ReadAllBytes(stem + (backend switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
+        File.ReadAllBytes(stem + (backend switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
         File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
     var devices = Open(backend, native, out var owner);
     using var nativeOwner = owner;
@@ -301,9 +301,11 @@ static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposabl
         owner = d3d11;
         return d3d11.Devices;
     }
-    if (backend == "opengl")
+    if (backend is "opengl" or "gles")
     {
-        var gl = GaOpenGlBackend.Open(path);
+        var gl = backend == "gles"
+            ? GaOpenGlBackend.OpenEsFromEnvironment(path)
+            : GaOpenGlBackend.Open(path);
         owner = gl;
         return gl.Devices;
     }

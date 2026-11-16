@@ -12,9 +12,9 @@ if (args is ["cpu"])
     return;
 }
 
-if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl") ||
+if (args.Length != 4 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Usage: ServiceContinuationConformance cpu | <vulkan|d3d12|d3d11|opengl> <bundle> <bridge> <index>");
+    throw new ArgumentException("Usage: ServiceContinuationConformance cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <bridge> <index>");
 #endif
 
 var contract = new GaContractIdentity(ServiceAdapterRowCodec.SystemId, "service-continuation/1",
@@ -44,7 +44,7 @@ const string lane = "webgpu";
 string stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" => ".glsl", _ => ".dxil" })),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
 using var nativeBackend = owner;
@@ -117,9 +117,11 @@ static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDispos
         owner = d3d11;
         return d3d11.Devices;
     }
-    if (backend == "opengl")
+    if (backend is "opengl" or "gles")
     {
-        var gl = GaOpenGlBackend.Open(library);
+        var gl = backend == "gles"
+            ? GaOpenGlBackend.OpenEsFromEnvironment(library)
+            : GaOpenGlBackend.Open(library);
         owner = gl;
         return gl.Devices;
     }

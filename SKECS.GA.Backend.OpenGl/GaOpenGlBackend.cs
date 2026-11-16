@@ -4,6 +4,8 @@ using System.Text.Json;
 
 namespace SKECS.GA.Backend.OpenGl;
 
+public enum GaAngleRenderer { D3D11 = 0, Vulkan = 1, OpenGl = 2 }
+
 public sealed class GaOpenGlBackend : IDisposable
 {
     private const string PinnedToolchain = "SPIRV-Tools v2025.1 v2025.1.rc1-0-gf289d047 " +
@@ -14,13 +16,15 @@ public sealed class GaOpenGlBackend : IDisposable
     private readonly object _gate = new();
     private readonly GaOpenGlNative _api;
     private readonly GaOpenGlNative.Lease _context;
+    private readonly bool _isEs;
     private readonly HashSet<uint> _probed = new();
     private bool _disposed;
 
-    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context)
+    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context, bool isEs)
     {
         _api = api;
         _context = context;
+        _isEs = isEs;
         var devices = new IGaDevice[api.GetDeviceCount(context)];
         for (uint i = 0; i < devices.Length; i++)
             devices[i] = new Device(this, i, api.GetDevice(context, i));
@@ -29,17 +33,43 @@ public sealed class GaOpenGlBackend : IDisposable
 
     public IReadOnlyList<IGaDevice> Devices { get; }
 
-    public static GaOpenGlBackend Open(string nativeLibraryPath)
+    public static GaOpenGlBackend Open(string nativeLibraryPath) =>
+        OpenCore(nativeLibraryPath, null, default);
+
+    public static GaOpenGlBackend OpenEs(string nativeLibraryPath, string angleDirectory, GaAngleRenderer renderer)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(angleDirectory);
+        if (!Enum.IsDefined(renderer))
+            throw new ArgumentOutOfRangeException(nameof(renderer));
+        return OpenCore(nativeLibraryPath, Path.GetFullPath(angleDirectory), renderer);
+    }
+
+    public static GaOpenGlBackend OpenEsFromEnvironment(string nativeLibraryPath)
+    {
+        var directory = Environment.GetEnvironmentVariable("SKECS_GA_ANGLE_DIRECTORY");
+        if (string.IsNullOrWhiteSpace(directory))
+            throw new InvalidOperationException("Set SKECS_GA_ANGLE_DIRECTORY to the local ANGLE directory.");
+        var renderer = Environment.GetEnvironmentVariable("SKECS_GA_ANGLE_RENDERER")?.ToLowerInvariant() switch
+        {
+            "d3d11" => GaAngleRenderer.D3D11,
+            "vulkan" => GaAngleRenderer.Vulkan,
+            "opengl" => GaAngleRenderer.OpenGl,
+            _ => throw new InvalidOperationException("Set SKECS_GA_ANGLE_RENDERER to D3D11, Vulkan or OpenGl.")
+        };
+        return OpenEs(nativeLibraryPath, directory, renderer);
+    }
+
+    private static GaOpenGlBackend OpenCore(string nativeLibraryPath, string? angleDirectory, GaAngleRenderer renderer)
     {
         if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
-            throw new PlatformNotSupportedException("The GA WGL adapter requires a Windows x64 process.");
+            throw new PlatformNotSupportedException("The GA OpenGL adapters require a Windows x64 process.");
 
         var api = new GaOpenGlNative(nativeLibraryPath);
         GaOpenGlNative.Lease? context = null;
         try
         {
-            context = api.OpenContext();
-            return new GaOpenGlBackend(api, context);
+            context = angleDirectory is null ? api.OpenContext() : api.OpenEsContext(angleDirectory, renderer);
+            return new GaOpenGlBackend(api, context, angleDirectory is not null);
         }
         catch
         {
@@ -86,26 +116,28 @@ public sealed class GaOpenGlBackend : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             var manifest = artifact.Manifest;
             var requirements = manifest.Requirements;
-            if (manifest.Toolchain.Format != GaArtifactFormat.Glsl || manifest.Toolchain.TargetProfile != "glsl_430" ||
+            if (manifest.Toolchain.Format != GaArtifactFormat.Glsl ||
+                manifest.Toolchain.TargetProfile != (_isEs ? "glsl_es_310" : "glsl_430") ||
                 manifest.EntryPoint != "main" || requirements.WorkgroupY != 1 || requirements.WorkgroupZ != 1 ||
                 requirements.ComputeProfile is not (GaComputeProfiles.Portable32 or GaComputeProfiles.WideFixedEmulated))
                 return new(null, GaStartupReason.IncompatibleManifest,
-                    "OpenGL requires the main entry of a one-dimensional GLSL 430 GA kernel.");
+                    "The graphics context requires a matching one-dimensional GLSL GA kernel.");
 
             if (manifest.Toolchain is not
                 {
                     SlangVersion: "2025.6.1",
                     DownstreamVersion: PinnedToolchain,
-                    Options: ["GenerateSpirvDirectly", "VulkanUseEntryPointName", "--target-env=vulkan1.1", "-O", "--version 430", "--no-es"],
+                    Options: ["GenerateSpirvDirectly", "VulkanUseEntryPointName", "--target-env=vulkan1.1", var optimization, var version, var dialect],
                     Defines.Count: 0,
                     Specializations.Count: 0
-                })
+                } || optimization != (_isEs ? "-O without --if-conversion" : "-O") ||
+                version != (_isEs ? "--version 310" : "--version 430") || dialect != (_isEs ? "--es" : "--no-es"))
                 return new(null, GaStartupReason.IncompatibleManifest,
                     "OpenGL requires the verified Slang, SPIRV-Tools and SPIRV-Cross compiler options.");
 
-            if (!device.SupportsCompute || requirements.RequiredFeatures.Count != 0)
+            if (!device.SupportsCompute(_isEs) || requirements.RequiredFeatures.Count != 0)
                 return new(null, GaStartupReason.MissingCapability,
-                    "The OpenGL adapter requires OpenGL 4.3 compute with three shader storage bindings.");
+                    "The adapter requires compute with three shader storage bindings.");
 
             if (requirements.WorkgroupX > device.MaxWorkgroupX || requirements.WorkgroupX > device.MaxWorkgroupInvocations ||
                 requirements.SharedMemoryBytes != 0 || requirements.StorageBytes > 3L * device.MaxStorageBufferRange ||
@@ -202,12 +234,13 @@ public sealed class GaOpenGlBackend : IDisposable
             _backend = backend;
             _index = index;
             _properties = properties;
-            Info = new GaDeviceInfo("SKECS.GA WGL", "OpenGL", $"{properties.GlMajor}.{properties.GlMinor}",
+            Info = new GaDeviceInfo(backend._isEs ? "SKECS.GA EGL/ANGLE" : "SKECS.GA WGL",
+                backend._isEs ? "OpenGL ES" : "OpenGL", $"{properties.GlMajor}.{properties.GlMinor}",
                 $"{properties.GetVendor()} {properties.GetRenderer()}", properties.GetVersion());
             var portable = new GaDeviceProfile(GaComputeProfiles.Portable32, GaQualification.Experimental, [],
                 ToInt(properties.MaxWorkgroupX), 1, 1, ToInt(properties.MaxWorkgroupInvocations), 0,
                 3L * properties.MaxStorageBufferRange);
-            Profiles = properties.SupportsCompute
+            Profiles = properties.SupportsCompute(backend._isEs)
                 ? Array.AsReadOnly(new[] { portable, portable with { Profile = GaComputeProfiles.WideFixedEmulated } })
                 : [];
         }
