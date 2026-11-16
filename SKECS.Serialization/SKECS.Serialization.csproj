@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net8.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <PackageId>ShortKedr.SKECS.Serialization</PackageId>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Versioned binary and JSON world checkpoints for SKECS.</Description>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeBundledGenerator</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../SKECS/SKECS.csproj" />
+    <ProjectReference Include="../SKECS.Serialization.Generator/SKECS.Serialization.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <PackageReference Include="System.Text.Json" Version="9.0.9" />
+  </ItemGroup>
+  <Target Name="IncludeBundledGenerator" DependsOnTargets="ResolveProjectReferences" Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(Analyzer)" Condition="'%(Analyzer.Filename)' == 'SKECS.Serialization.Generator'" PackagePath="analyzers/dotnet/cs/" />
+    </ItemGroup>
+  </Target>
+</Project>

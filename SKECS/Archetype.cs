@@ -51,6 +51,15 @@ internal sealed unsafe class Archetype : IDisposable
 
     public ComponentType[] ComponentTypes { get; }
 
+    internal int DiagnosticId { get; set; }
+
+    internal long DiagnosticRowBytes { get; set; }
+
+    internal int ChunkAllocationSize => _allocationSize;
+
+    internal long NextCheckpointChunkBytes => _availableChunks.Count != 0
+        ? 0 : _allocationSize + 8L * _world.ChunkCapacity + 128;
+
     public List<Chunk> Chunks => _chunks;
 
     public bool HasComponent(int componentTypeId) => (uint)componentTypeId < (uint)_columnByType.Length && _columnByType[componentTypeId] >= 0;
@@ -96,6 +105,9 @@ internal sealed unsafe class Archetype : IDisposable
                 newChunk?.Dispose();
                 throw;
             }
+
+            _world.DiagnosticsBuffer?.AllocateChunk(DiagnosticId, _chunks.Count - 1, _allocationSize,
+                (long)_world.ChunkCapacity * 2 * sizeof(int));
         }
 
         var chunkIndex = _availableChunks.Peek();
@@ -159,6 +171,7 @@ internal sealed unsafe class Archetype : IDisposable
         for (var i = 0; i < _chunks.Count; i++)
         {
             _chunks[i].Dispose();
+            _world.DiagnosticsBuffer?.ReleaseChunk(DiagnosticId, i);
         }
     }
 
@@ -169,6 +182,7 @@ internal sealed unsafe class Archetype : IDisposable
         private readonly Archetype _source;
         private readonly CopyColumn[] _columns;
         public Archetype Destination { get; }
+        internal long DiagnosticCopiedBytes { get; }
 
         public Transition(Archetype source, Archetype destination)
         {
@@ -182,6 +196,10 @@ internal sealed unsafe class Archetype : IDisposable
                     columns.Add(new CopyColumn(source._offsets[i], destination._offsets[destination._columnByType[type.Id]], type.Size));
             }
             _columns = columns.ToArray();
+            if (source._world.DiagnosticsBuffer != null)
+            {
+                foreach (var column in _columns) DiagnosticCopiedBytes += column.Size;
+            }
         }
 
         public void Copy(int sourceChunkIndex, int sourceRowIndex, World.EntitySlot destinationSlot)
