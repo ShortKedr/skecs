@@ -71,7 +71,7 @@ internal static class GaOpenGlCompiler
             embeddedProfile ? "-O without --if-conversion" : "-O", $"--version {version}", esFlag
         ];
         if (embeddedProfile)
-            options = [.. options, "SKECS.GA GLSL ES codegen=2"];
+            options = [.. options, "SKECS.GA GLSL ES codegen=3"];
         return new GaToolchain("2025.6.1", downstream, GaArtifactFormat.Glsl,
             embeddedProfile ? "glsl_es_310" : "glsl_430", options, [], []);
     }

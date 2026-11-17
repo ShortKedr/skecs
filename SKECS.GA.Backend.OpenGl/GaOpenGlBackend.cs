@@ -18,16 +18,16 @@ public sealed class GaOpenGlBackend : IDisposable
     private readonly GaOpenGlNative _api;
     private readonly GaOpenGlNative.Lease _context;
     private readonly bool _isEs;
-    private readonly bool _requiresCurrentEsCodegen;
+    private readonly int _minimumEsCodegen;
     private readonly HashSet<uint> _probed = new();
     private bool _disposed;
 
-    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context, bool isEs, bool requiresCurrentEsCodegen)
+    private GaOpenGlBackend(GaOpenGlNative api, GaOpenGlNative.Lease context, bool isEs, int minimumEsCodegen)
     {
         _api = api;
         _context = context;
         _isEs = isEs;
-        _requiresCurrentEsCodegen = requiresCurrentEsCodegen;
+        _minimumEsCodegen = minimumEsCodegen;
         var devices = new IGaDevice[api.GetDeviceCount(context)];
         for (uint i = 0; i < devices.Length; i++)
             devices[i] = new Device(this, i, api.GetDevice(context, i));
@@ -44,7 +44,7 @@ public sealed class GaOpenGlBackend : IDisposable
     {
         if (!OperatingSystem.IsAndroid() || RuntimeInformation.ProcessArchitecture is not (Architecture.Arm64 or Architecture.X64))
             throw new PlatformNotSupportedException("The GA system OpenGL ES adapter requires an Android ARM64 or x64 process.");
-        return OpenCore(nativeLibraryPath, isEs: true, requiresCurrentEsCodegen: true);
+        return OpenCore(nativeLibraryPath, isEs: true, minimumEsCodegen: 2);
     }
 
     public static GaOpenGlBackend OpenEs(string nativeLibraryPath, string angleDirectory, GaAngleRenderer renderer)
@@ -96,10 +96,10 @@ public sealed class GaOpenGlBackend : IDisposable
             throw new PlatformNotSupportedException("The GA OpenGL adapters require a Windows x64 process.");
 
         bool isEs = angleDirectory is not null;
-        return OpenCore(nativeLibraryPath, isEs, isEs && renderer == GaAngleRenderer.D3D11, angleDirectory, renderer, pciId);
+        return OpenCore(nativeLibraryPath, isEs, isEs && renderer == GaAngleRenderer.D3D11 ? 3 : 0, angleDirectory, renderer, pciId);
     }
 
-    private static GaOpenGlBackend OpenCore(string nativeLibraryPath, bool isEs, bool requiresCurrentEsCodegen,
+    private static GaOpenGlBackend OpenCore(string nativeLibraryPath, bool isEs, int minimumEsCodegen,
         string? angleDirectory = null, GaAngleRenderer renderer = default, (ushort Vendor, ushort Device)? pciId = null)
     {
         var api = new GaOpenGlNative(nativeLibraryPath);
@@ -107,7 +107,7 @@ public sealed class GaOpenGlBackend : IDisposable
         try
         {
             context = angleDirectory is null ? api.OpenContext(isEs) : api.OpenEsContext(angleDirectory, renderer, pciId);
-            return new GaOpenGlBackend(api, context, isEs, requiresCurrentEsCodegen);
+            return new GaOpenGlBackend(api, context, isEs, minimumEsCodegen);
         }
         catch
         {
@@ -169,7 +169,12 @@ public sealed class GaOpenGlBackend : IDisposable
                     "The graphics context requires a matching one-dimensional GLSL GA kernel.");
 
             var options = manifest.Toolchain.Options;
-            bool currentEsCodegen = _isEs && options is [_, _, _, _, _, _, "SKECS.GA GLSL ES codegen=2"];
+            int esCodegen = _isEs ? options switch
+            {
+                [_, _, _, _, _, _, "SKECS.GA GLSL ES codegen=2"] => 2,
+                [_, _, _, _, _, _, "SKECS.GA GLSL ES codegen=3"] => 3,
+                _ => 0
+            } : 0;
             if (manifest.Toolchain is not
                 {
                     SlangVersion: "2025.6.1",
@@ -179,13 +184,13 @@ public sealed class GaOpenGlBackend : IDisposable
                     Specializations.Count: 0
                 } || optimization != (_isEs ? "-O without --if-conversion" : "-O") ||
                 version != (_isEs ? "--version 310" : "--version 430") || dialect != (_isEs ? "--es" : "--no-es") ||
-                (options.Count != 6 && !currentEsCodegen))
+                (options.Count != 6 && esCodegen == 0))
                 return new(null, GaStartupReason.IncompatibleManifest,
                     "OpenGL requires the verified Slang, SPIRV-Tools and SPIRV-Cross compiler options.");
 
-            if (_requiresCurrentEsCodegen && !currentEsCodegen)
+            if (esCodegen < _minimumEsCodegen)
                 return new(null, GaStartupReason.IncompatibleManifest,
-                    "Rebuild this GLSL ES bundle with the current Ga.Build. This route requires GLSL ES codegen version 2.");
+                    $"Rebuild this GLSL ES bundle with the current Ga.Build. This route requires GLSL ES codegen version {_minimumEsCodegen}.");
 
             if (!device.SupportsCompute(_isEs) || requirements.RequiredFeatures.Count != 0)
                 return new(null, GaStartupReason.MissingCapability,

@@ -21,6 +21,9 @@ public static class GaSlangEmitter
     public static GaSlangModule EmitWebGpu(GaProgram program, int workgroupX) =>
         Emit(program, workgroupX, vulkan: true, webGpu: true);
 
+    internal static GaSlangModule EmitOpenGlEs(GaProgram program, int workgroupX) =>
+        Emit(program, workgroupX, vulkan: true, openGlEs: true);
+
     public static GaSlangModule EmitD3D12(GaProgram program) => EmitD3D12(program, GaSlangModule.ThreadsPerGroup);
 
     public static GaSlangModule EmitD3D12(GaProgram program, int workgroupX)
@@ -29,15 +32,18 @@ public static class GaSlangEmitter
         return Emit(program, workgroupX, vulkan: false);
     }
 
-    private static GaSlangModule Emit(GaProgram program, int workgroupX, bool vulkan, bool webGpu = false)
+    private static GaSlangModule Emit(GaProgram program, int workgroupX, bool vulkan, bool webGpu = false,
+        bool openGlEs = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(workgroupX);
-        return new Emitter(program, webGpu).Emit(vulkan, workgroupX);
+        return new Emitter(program, webGpu, openGlEs).Emit(vulkan, workgroupX);
     }
 
-    private sealed class Emitter(GaProgram program, bool webGpu)
+    private sealed class Emitter(GaProgram program, bool webGpu, bool openGlEs)
     {
+        private const string InvalidLayout = "0xffffffffu";
+        private string LayoutExit => openGlEs ? $"return uint4({InvalidLayout}, 0u, 0u, 0u);" : "return;";
         private readonly StringBuilder _code = new();
         private readonly List<GaSourceSpan> _sources = new();
         private readonly HashSet<int> _snapshotKeyWrites = program.UsesSnapshot
@@ -85,14 +91,19 @@ public static class GaSlangEmitter
                 Line("RWStructuredBuffer<uint> gaFaults : register(u1);");
             }
             Line("");
-            Line("[shader(\"compute\")]");
-            Line(FormattableString.Invariant($"[numthreads({workgroupX}, 1, 1)]"));
-            Line("void main(uint3 id : SV_DispatchThreadID)");
-            Open();
-            Line("if (id.x >= gaInput[0]) return;");
+            if (openGlEs)
+            {
+                Line("uint4 gaExecute(uint3 id)");
+                Open();
+            }
+            else
+            {
+                OpenEntryPoint(workgroupX);
+            }
             int stride = Math.Max(1, program.WordCount);
             Line($"uint gaRow = id.x * {Word(stride)};");
-            Line($"uint gaFault = id.x * {Word(GaSlangModule.FaultStride)};");
+            if (!openGlEs)
+                Line($"uint gaFault = id.x * {Word(GaSlangModule.FaultStride)};");
             Line("uint2 gaOrdinal = uint2(0u, 0u);");
             if (program.TickResourceWords != 0)
                 TickResourceLayout(stride);
@@ -151,12 +162,37 @@ public static class GaSlangEmitter
                 if (presence >= 0)
                     Line($"gaOutput[gaRow + {Word(presence)}] = {Presence(i)};");
             }
-            for (int i = 0; i < GaSlangModule.FaultStride; i++)
-                Line($"gaFaults[gaFault + {Word(i)}] = 0u;");
+            if (!openGlEs)
+                for (int i = 0; i < GaSlangModule.FaultStride; i++)
+                    Line($"gaFaults[gaFault + {Word(i)}] = 0u;");
             if (_eventCapacity != 0)
                 Line("gaOutput[gaEventRow] = gaEventCount;");
+            if (openGlEs)
+                Line("return uint4(0u, 0u, 0u, 0u);");
             Close();
+            if (openGlEs)
+            {
+                // Keep fault-buffer writes outside the nested control flow translated for GLES.
+                Line("");
+                OpenEntryPoint(workgroupX);
+                Line("uint4 result = gaExecute(id);");
+                if (program.TickResourceWords != 0 || program.BufferSchema is not null)
+                    Line($"if (result.x == {InvalidLayout}) return;");
+                Line($"uint gaFault = id.x * {Word(GaSlangModule.FaultStride)};");
+                for (int i = 0; i < GaSlangModule.FaultStride; i++)
+                    Line($"gaFaults[gaFault + {Word(i)}] = result.{"xyzw"[i]};");
+                Close();
+            }
             return new GaSlangModule(_code.ToString(), Array.AsReadOnly(_sources.ToArray()));
+        }
+
+        private void OpenEntryPoint(int workgroupX)
+        {
+            Line("[shader(\"compute\")]");
+            Line(FormattableString.Invariant($"[numthreads({workgroupX}, 1, 1)]"));
+            Line("void main(uint3 id : SV_DispatchThreadID)");
+            Open();
+            Line("if (id.x >= gaInput[0]) return;");
         }
 
         private string ReadSnapshotLibrary()
@@ -199,7 +235,7 @@ public static class GaSlangEmitter
             GuardRowDimensions(stride);
             Line($"uint gaTickResourceStart = 1u + gaInput[0] * {Word(stride)};");
             string comparison = program.UsesSnapshot || program.BufferSchema is not null ? "<" : "!=";
-            Line($"if (gaInputWords - gaTickResourceStart {comparison} {Word(program.TickResourceWords)}) return;");
+            Line($"if (gaInputWords - gaTickResourceStart {comparison} {Word(program.TickResourceWords)}) {LayoutExit}");
             for (int i = 0; i < program.TickResourceFields.Count; i++)
             {
                 int offset = program.TickResourceOffsets[i];
@@ -226,7 +262,7 @@ public static class GaSlangEmitter
         private void GuardRowDimensions(int stride)
         {
             ReadInputLength();
-            Line($"if (gaInputWords < 1u || gaInput[0] > (gaInputWords - 1u) / {Word(stride)}) return;");
+            Line($"if (gaInputWords < 1u || gaInput[0] > (gaInputWords - 1u) / {Word(stride)}) {LayoutExit}");
         }
 
         private void BufferLayout(int stride)
@@ -237,15 +273,15 @@ public static class GaSlangEmitter
                 ? $"1u + gaInput[0] * {Word(stride)}"
                 : $"gaTickResourceStart + {Word(program.TickResourceWords)}";
             Line($"uint gaBufferStart = {bufferStart};");
-            Line("if (gaBufferStart >= gaInputWords) return;");
+            Line($"if (gaBufferStart >= gaInputWords) {LayoutExit}");
             Line("uint gaBufferCount = gaInput[gaBufferStart];");
-            Line("if (gaBufferCount > 0x7fffffffu) return;");
+            Line($"if (gaBufferCount > 0x7fffffffu) {LayoutExit}");
             Line("uint gaBufferData = gaBufferStart + 1u;");
             string width = Word(program.BufferRowWords);
             if (program.BufferRowWords != 0)
-                Line($"if (gaBufferCount > (gaInputWords - gaBufferData) / {width}) return;");
+                Line($"if (gaBufferCount > (gaInputWords - gaBufferData) / {width}) {LayoutExit}");
             if (!program.UsesSnapshot)
-                Line($"if (gaBufferData + gaBufferCount * {width} != gaInputWords) return;");
+                Line($"if (gaBufferData + gaBufferCount * {width} != gaInputWords) {LayoutExit}");
         }
 
         private void EventLayout(int stride)
@@ -790,11 +826,16 @@ public static class GaSlangEmitter
             _sources.Add(span);
             Line($"if ({condition})");
             Open();
-            Line($"gaFaults[gaFault] = {Word((uint)kind)};");
-            Line($"gaFaults[gaFault + 1u] = {ordinal}.x;");
-            Line($"gaFaults[gaFault + 2u] = {ordinal}.y;");
-            Line($"gaFaults[gaFault + 3u] = {Word(site)};");
-            Line("return;");
+            if (openGlEs)
+                Line($"return uint4({Word((uint)kind)}, {ordinal}.x, {ordinal}.y, {Word(site)});");
+            else
+            {
+                Line($"gaFaults[gaFault] = {Word((uint)kind)};");
+                Line($"gaFaults[gaFault + 1u] = {ordinal}.x;");
+                Line($"gaFaults[gaFault + 2u] = {ordinal}.y;");
+                Line($"gaFaults[gaFault + 3u] = {Word(site)};");
+                Line("return;");
+            }
             Close();
         }
 

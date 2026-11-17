@@ -30,7 +30,8 @@ if ($GlesBundle -or $GlesNativeArm64 -or $GlesNativeX64) {
     $glesManifest = Get-Content -LiteralPath "$glesPath/movement.manifest.json" -Raw | ConvertFrom-Json
     $shaderHash = (Get-FileHash -LiteralPath "$glesPath/movement.glsl").Hash
     if ($glesManifest.Toolchain.TargetProfile -ne 'glsl_es_310' -or
-        $glesManifest.Toolchain.Options -notcontains 'SKECS.GA GLSL ES codegen=2' -or
+        ($glesManifest.Toolchain.Options -cnotcontains 'SKECS.GA GLSL ES codegen=2' -and
+         $glesManifest.Toolchain.Options -cnotcontains 'SKECS.GA GLSL ES codegen=3') -or
         $glesManifest.ArtifactDigest -ne $shaderHash) {
         throw 'GLES packaging requires a current Movement GLSL ES 310 bundle with a matching shader digest.'
     }

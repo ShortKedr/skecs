@@ -67,6 +67,7 @@ internal static class GaArtifactPackager
         // DXBC and DXIL use the same explicit storage registers.
         var module = format switch
         {
+            GaArtifactFormat.Glsl when embeddedProfile => GaSlangEmitter.EmitOpenGlEs(program, workgroupX),
             GaArtifactFormat.SpirV or GaArtifactFormat.Glsl => GaSlangEmitter.EmitVulkan(program, workgroupX),
             GaArtifactFormat.Wgsl => GaSlangEmitter.EmitWebGpu(program, workgroupX),
             _ => GaSlangEmitter.EmitD3D12(program, workgroupX)
