@@ -4,9 +4,11 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -84,24 +86,71 @@ bool testDevice(uint32_t index, const std::vector<uint32_t>& spirv, bool softwar
             throw std::runtime_error("native persistent pipeline modified data beyond the logical rows");
     }
     std::cout << info.name << " native ABI startup and repeated dispatch passed"
-        << " deviceType=" << (software ? "software" : "physical") << '\n';
+        << " deviceType=" << (software ? "software" : "physical")
+        << " deviceIndex=" << index << " vkDeviceType=" << info.deviceType
+        << std::hex << std::setfill('0')
+        << " pci=" << std::setw(4) << info.vendorId << ':' << std::setw(4) << info.deviceId
+        << " uuid=";
+    for (uint8_t byte : info.deviceUuid)
+        std::cout << std::setw(2) << static_cast<unsigned>(byte);
+    std::cout << " apiVersionRaw=0x" << std::setw(8) << info.apiVersion
+        << " driverVersionRaw=0x" << std::setw(8) << info.driverVersion
+        << std::dec << std::setfill(' ') << '\n';
     return true;
 }
 
-int run(int argc, const std::filesystem::path& artifact, bool software)
+template<class Char>
+uint32_t parseIndex(std::basic_string_view<Char> value)
+{
+    constexpr auto invalid = "device index must be an unsigned decimal uint32";
+    if (value.empty())
+        throw std::runtime_error(invalid);
+    uint32_t result = 0;
+    for (auto character : value)
+    {
+        if (character < '0' || character > '9')
+            throw std::runtime_error(invalid);
+        const auto digit = static_cast<uint32_t>(character - '0');
+        if (result > (UINT32_MAX - digit) / 10)
+            throw std::runtime_error(invalid);
+        result = result * 10 + digit;
+    }
+    return result;
+}
+
+template<class Char>
+int run(int argc, Char** argv, const Char* softwareFlag, const Char* indexFlag)
 {
     try
     {
-        if (argc != (software ? 3 : 2))
-            throw std::runtime_error("usage: ga-native-probe <startup.spv> [--software]");
-        const auto spirv = ga::readWords(artifact, UINT32_MAX);
+        constexpr auto usage = "usage: ga-native-probe <startup.spv> [--software] [--device-index N]";
+        if (argc < 2)
+            throw std::runtime_error(usage);
+        bool software = false;
+        std::optional<uint32_t> index;
+        for (int i = 2; i < argc; ++i)
+        {
+            const std::basic_string_view<Char> argument(argv[i]);
+            if (argument == softwareFlag && !software)
+                software = true;
+            else if (argument == indexFlag && !index && i + 1 < argc)
+                index = parseIndex(std::basic_string_view<Char>(argv[++i]));
+            else
+                throw std::runtime_error(usage);
+        }
+        const auto spirv = ga::readWords(std::filesystem::path(argv[1]), UINT32_MAX);
 
         auto context = openContext();
         uint32_t count = 0;
         check(skecs_ga_vk_device_count(context.get(), &count, error, sizeof(error)));
+        if (index && *index >= count)
+            throw std::runtime_error("Vulkan device index is out of range");
         uint32_t tested = 0;
-        for (uint32_t i = 0; i < count; ++i)
-            tested += testDevice(i, spirv, software);
+        if (index)
+            tested = testDevice(*index, spirv, software);
+        else
+            for (uint32_t i = 0; i < count; ++i)
+                tested += testDevice(i, spirv, software);
         if (tested == 0)
             throw std::runtime_error(software ? "no Vulkan software CPU device was tested" :
                 "no Vulkan integrated or discrete physical GPU was tested");
@@ -118,13 +167,11 @@ int run(int argc, const std::filesystem::path& artifact, bool software)
 #if defined(_WIN32)
 int wmain(int argc, wchar_t** argv)
 {
-    return run(argc, argc >= 2 ? std::filesystem::path(argv[1]) : std::filesystem::path{},
-        argc == 3 && std::wstring_view(argv[2]) == L"--software");
+    return run(argc, argv, L"--software", L"--device-index");
 }
 #else
 int main(int argc, char** argv)
 {
-    return run(argc, argc >= 2 ? std::filesystem::path(argv[1]) : std::filesystem::path{},
-        argc == 3 && std::string_view(argv[2]) == "--software");
+    return run(argc, argv, "--software", "--device-index");
 }
 #endif
