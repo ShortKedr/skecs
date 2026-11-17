@@ -904,17 +904,19 @@ public static partial class GaSemanticAnalysis
                     or SpecialType.System_Int64 or SpecialType.System_UInt64))
                 return false;
 
-            int direction = LoopStepDirection(step, counter.Local);
+            int direction = GaIntRange.UnitStepDirection(step, counter.Local);
             if (direction == 0 && trailingStep is IExpressionStatementOperation trailing)
             {
                 step = trailing.Operation;
-                direction = LoopStepDirection(step, counter.Local);
+                direction = GaIntRange.UnitStepDirection(step, counter.Local);
             }
             var comparisonMovesTowardLimit = (direction, compare.OperatorKind) switch
             {
                 (1, BinaryOperatorKind.LessThan) or (-1, BinaryOperatorKind.GreaterThan) => true,
                 (1, BinaryOperatorKind.LessThanOrEqual) or (-1, BinaryOperatorKind.GreaterThanOrEqual) =>
-                    IsSafeInclusiveLimit(compare.RightOperand.ConstantValue, direction),
+                    IsSafeInclusiveLimit(compare.RightOperand.ConstantValue, direction) ||
+                    GaIntRange.TryGetFrozen(compare.RightOperand, loop, compilation, cancellationToken, out var range) &&
+                    (direction > 0 ? range.Max < int.MaxValue : range.Min > int.MinValue),
                 _ => false
             };
             if (!comparisonMovesTowardLimit)
@@ -942,29 +944,6 @@ public static partial class GaSemanticAnalysis
             }
             return true;
         }
-
-        private static int LoopStepDirection(IOperation? step, ILocalSymbol counter) => step switch
-        {
-            IIncrementOrDecrementOperation { OperatorMethod: null, Target: ILocalReferenceOperation target }
-                when Equal(counter, target.Local) => step.Kind == OperationKind.Increment ? 1 : -1,
-            ICompoundAssignmentOperation { OperatorMethod: null, Target: ILocalReferenceOperation target } compound
-                when Equal(counter, target.Local) && IsOne(compound.Value.ConstantValue) => compound.OperatorKind switch
-                {
-                    BinaryOperatorKind.Add => 1,
-                    BinaryOperatorKind.Subtract => -1,
-                    _ => 0
-                },
-            _ => 0
-        };
-
-        private static bool IsOne(Optional<object?> constant) => constant.HasValue && constant.Value switch
-        {
-            int value => value == 1,
-            uint value => value == 1,
-            long value => value == 1,
-            ulong value => value == 1,
-            _ => false
-        };
 
         private static bool IsSafeInclusiveLimit(Optional<object?> constant, int direction) => constant.HasValue && constant.Value switch
         {

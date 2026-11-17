@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
+using SKECS.GA.Analysis;
 
 namespace SKECS.GA;
 
@@ -650,19 +651,17 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         if (_insideLoop || loop.Before.Length != 1 || loop.AtLoopBottom.Length != 1
             || loop.Before[0] is not IVariableDeclarationGroupOperation { Declarations.Length: 1 } group
             || group.Declarations[0].Declarators.Length != 1
-            || group.Declarations[0].Declarators[0] is not { Initializer.Value.ConstantValue.Value: int start } init
+            || group.Declarations[0].Declarators[0] is not { Initializer.Value: { } start } init
             || init.Symbol.Type.SpecialType != SpecialType.System_Int32
-            || loop.Condition is not IBinaryOperation { LeftOperand: ILocalReferenceOperation conditionLocal,
-                RightOperand.ConstantValue.Value: int end } comparison
+            || loop.Condition is not IBinaryOperation { LeftOperand: ILocalReferenceOperation conditionLocal } comparison
             || !SymbolEqualityComparer.Default.Equals(init.Symbol, conditionLocal.Local)
-            || loop.AtLoopBottom[0] is not IExpressionStatementOperation
-                { Operation: IIncrementOrDecrementOperation
-                    { Target: ILocalReferenceOperation incrementLocal } step }
-            || !SymbolEqualityComparer.Default.Equals(init.Symbol, incrementLocal.Local))
-            throw Unsupported(loop, "This profile requires a single int loop with constant bounds and a unit step.");
+            || loop.AtLoopBottom[0] is not IExpressionStatementOperation { Operation: { } step })
+            throw Unsupported(loop, "This profile requires a single int loop with proven bounds and a unit step.");
 
-        int direction = step.Kind == OperationKind.Increment ? 1 : -1;
-        int iterations = ProveLoopBound(loop, init.Symbol, start, end, comparison, step, direction);
+        int direction = GaIntRange.UnitStepDirection(step, init.Symbol);
+        if (direction == 0)
+            throw Unsupported(step, "Advance the int induction variable by exactly one in each iteration.");
+        int iterations = ProveLoopBound(loop, init.Symbol, start, comparison, step, direction);
         _insideLoop = true;
         return LowerProvenLoop(loop, LowerStatement(loop.Before[0]), comparison, loop.AtLoopBottom[0], iterations);
     }
@@ -672,21 +671,20 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         if (_insideLoop || !loop.ConditionIsTop || loop.ConditionIsUntil
             || previous is not IVariableDeclarationGroupOperation { Declarations.Length: 1 } group
             || group.Declarations[0].Declarators is not
-                [{ Symbol.RefKind: RefKind.None, Initializer.Value.ConstantValue.Value: int start } init]
+                [{ Symbol.RefKind: RefKind.None, Initializer.Value: { } start } init]
             || init.Symbol.Type.SpecialType != SpecialType.System_Int32
-            || loop.Condition is not IBinaryOperation { LeftOperand: ILocalReferenceOperation conditionLocal,
-                RightOperand.ConstantValue.Value: int end } comparison
+            || loop.Condition is not IBinaryOperation { LeftOperand: ILocalReferenceOperation conditionLocal } comparison
             || !SymbolEqualityComparer.Default.Equals(init.Symbol, conditionLocal.Local))
-            throw Unsupported(loop, "Use a top-tested while preceded by an int declaration with a constant initializer and a constant comparison.");
+            throw Unsupported(loop, "Use a top-tested while preceded by a bounded int declaration and a comparison with a proven bound.");
 
         var operations = loop.Body is IBlockOperation block ? block.Operations : [loop.Body];
         var step = operations.Length == 0 ? null : UnwrapStep(operations[0]);
-        int direction = UnitDirection(step);
+        int direction = GaIntRange.UnitStepDirection(step, init.Symbol);
         bool leadingStep = direction != 0;
         if (!leadingStep && operations.Length > 1)
         {
             step = UnwrapStep(operations[^1]);
-            direction = UnitDirection(step);
+            direction = GaIntRange.UnitStepDirection(step, init.Symbol);
         }
         if (step is null || direction == 0)
             throw Unsupported(loop, "Put an unconditional unit step at the beginning or end of the while body.");
@@ -694,53 +692,46 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             branch.BranchKind == BranchKind.Continue && SymbolEqualityComparer.Default.Equals(branch.Target, loop.ContinueLabel)))
             throw Unsupported(loop, "A while loop with continue requires its unit step at the beginning of the body.");
 
-        int iterations = ProveLoopBound(loop, init.Symbol, start, end, comparison, step, direction);
+        int iterations = ProveLoopBound(loop, init.Symbol, start, comparison, step, direction);
         _insideLoop = true;
         return LowerProvenLoop(loop, null, comparison, null, iterations);
 
         static IOperation? UnwrapStep(IOperation operation) => (operation as IExpressionStatementOperation)?.Operation;
-
-        int UnitDirection(IOperation? operation) => operation switch
-        {
-            IIncrementOrDecrementOperation { Target: ILocalReferenceOperation target }
-                when SymbolEqualityComparer.Default.Equals(target.Local, init.Symbol) =>
-                    operation.Kind == OperationKind.Increment ? 1 : -1,
-            ICompoundAssignmentOperation { Target: ILocalReferenceOperation target, Value.ConstantValue.Value: 1 } compound
-                when SymbolEqualityComparer.Default.Equals(target.Local, init.Symbol) => compound.OperatorKind switch
-                {
-                    BinaryOperatorKind.Add => 1,
-                    BinaryOperatorKind.Subtract => -1,
-                    _ => 0
-                },
-            _ => 0
-        };
     }
 
-    private int ProveLoopBound(ILoopOperation loop, ILocalSymbol counter, int start, int end,
+    private int ProveLoopBound(ILoopOperation loop, ILocalSymbol counter, IOperation startValue,
         IBinaryOperation comparison, IOperation step, int direction)
     {
         const int maximumTripCount = 65536;
+        if (!(GaIntRange.TryGet(startValue, out var initial) || TryGetFrozenBound(startValue, out initial)) ||
+            !TryGetFrozenBound(comparison.RightOperand, out var bound))
+            throw Unsupported(loop, "Use a proven int start and a constant or frozen value local as the end bound.");
+
         long iterations = (direction, comparison.OperatorKind) switch
         {
-            (1, BinaryOperatorKind.LessThan) => Math.Max(0, (long)end - start),
-            (1, BinaryOperatorKind.LessThanOrEqual) => Math.Max(0, (long)end - start + 1),
-            (-1, BinaryOperatorKind.GreaterThan) => Math.Max(0, (long)start - end),
-            (-1, BinaryOperatorKind.GreaterThanOrEqual) => Math.Max(0, (long)start - end + 1),
+            (1, BinaryOperatorKind.LessThan) => Math.Max(0, (long)bound.Max - initial.Min),
+            (1, BinaryOperatorKind.LessThanOrEqual) => Math.Max(0, (long)bound.Max - initial.Min + 1),
+            (-1, BinaryOperatorKind.GreaterThan) => Math.Max(0, (long)initial.Max - bound.Min),
+            (-1, BinaryOperatorKind.GreaterThanOrEqual) => Math.Max(0, (long)initial.Max - bound.Min + 1),
             _ => throw Unsupported(loop, "The loop condition must match the direction of its unit step.")
         };
-        long finalCounter = start + direction * iterations;
-        if (finalCounter < int.MinValue || finalCounter > int.MaxValue || iterations > maximumTripCount
-            || loop.Body.DescendantsAndSelf().Any(op => !ReferenceEquals(op, step) && op switch
-            {
-                IAssignmentOperation { Target: ILocalReferenceOperation target } =>
-                    SymbolEqualityComparer.Default.Equals(target.Local, counter),
-                IIncrementOrDecrementOperation { Target: ILocalReferenceOperation target } =>
-                    SymbolEqualityComparer.Default.Equals(target.Local, counter),
-                _ => false
-            }))
+        bool canOverflow = (comparison.OperatorKind == BinaryOperatorKind.LessThanOrEqual && bound.Max == int.MaxValue) ||
+            (comparison.OperatorKind == BinaryOperatorKind.GreaterThanOrEqual && bound.Min == int.MinValue);
+        if (canOverflow || iterations > maximumTripCount ||
+            loop.Body.DescendantsAndSelf().Any(operation => !ReferenceEquals(operation, step) && GaIntRange.WritesLocal(operation, counter)))
             throw Unsupported(loop, "Cannot prove the loop's iteration range and induction-variable ownership.");
 
         return (int)iterations;
+        bool TryGetFrozenBound(IOperation expression, out (int Min, int Max) range)
+        {
+            if (UnwrapIdentity(expression) is ILocalReferenceOperation reference &&
+                SymbolEqualityComparer.Default.Equals(reference.Local, counter))
+            {
+                range = default;
+                return false;
+            }
+            return GaIntRange.TryGetFrozen(expression, loop, compilation, cancellationToken, out range);
+        }
     }
 
     private GaStatement LowerProvenLoop(ILoopOperation loop, GaStatement? before, IBinaryOperation comparison,

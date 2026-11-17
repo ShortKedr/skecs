@@ -578,6 +578,72 @@ public sealed class CompilerTests
     }
 
     [Fact]
+    public void IntLoopsUseTheCapturedRangeAndRetainRuntimeStartAndEnd()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                int upper = v.X & 7;
+                p.Point.X = 1;
+                for (int i = v.Y & 3; i <= upper; i += 1)
+                    p.Point.X = unchecked(p.Point.X + i);
+
+                int lower = v.Flag ? v.X % 5 : 3 & v.X;
+                int j = v.Y & 7;
+                while (j >= lower)
+                {
+                    --j;
+                    p.Point.Y = unchecked(p.Point.Y + j);
+                }
+                upper = 123;
+                p.Point.X = unchecked(p.Point.X + upper);
+            }
+            """);
+
+        uint[] row = program.Fields.Select(field => field.Path switch
+        {
+            "X" => unchecked((uint)-2), "Y" => 5u, "Flag" => 1u, _ => 0u
+        }).ToArray();
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(145u, row[Array.FindIndex(program.Fields.ToArray(), field => field.Path == "Point.X")]);
+        Assert.Equal(4u, row[Array.FindIndex(program.Fields.ToArray(), field => field.Path == "Point.Y")]);
+    }
+
+    [Fact]
+    public void ProvesTheInclusiveMaximumOf65536Trips()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                int limit = v.X & 65535;
+                for (int i = 0; i <= limit; ++i)
+                    ++p.Point.X;
+            }
+            """);
+
+        Assert.Equal(new[] { "X", "Point.X" }, program.Fields.Select(field => field.Path));
+        uint[] row = [uint.MaxValue, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(65536u, row[1]);
+    }
+
+    [Theory]
+    [InlineData("int limit = v.X; for (int i = 0; i < limit; ++i) ++p.Point.X;", "GA0100")]
+    [InlineData("int limit = v.X & 7; if (v.Flag) limit = v.Y; for (int i = 0; i < limit; ++i) ++p.Point.X;", "GA0100")]
+    [InlineData("int limit = v.X & 65536; for (int i = 0; i <= limit; ++i) ++p.Point.X;", "GA0100")]
+    [InlineData("int limit = v.X & int.MaxValue; for (int i = 0; i <= limit; ++i) ++p.Point.X;", "GA0004")]
+    [InlineData("int limit = v.X & int.MinValue; for (int i = 0; i < limit; ++i) ++p.Point.X;", "GA0100")]
+    [InlineData("int limit = v.Flag ? (v.X & 7) : v.Y; for (int i = 0; i < limit; ++i) ++p.Point.X;", "GA0100")]
+    public void RejectsLoopBoundsThatCannotBeProvenFrozenAndWithinTheTripCap(string body, string id)
+    {
+        var result = Analyze($$"""
+            public void Execute(ref Position p, in Velocity v) { {{body}} }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == id);
+    }
+
+    [Fact]
     public void IntEventsAreBoundedAndPublishOnlyForSuccessfulRows()
     {
         var program = Compile("""
