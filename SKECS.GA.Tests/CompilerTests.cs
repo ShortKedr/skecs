@@ -222,6 +222,93 @@ public sealed class CompilerTests
     }
 
     [Fact]
+    public void ReadonlyGetterOperatorsAndConversionReadTheNestedValueByCopy()
+    {
+        const string execute = """
+            public void Execute(ref Position p, in MemberEnvelope envelope)
+            {
+                p.Point.X = Knobs.Offset + envelope.Nested.Ratio + (int)envelope.Nested + -envelope.Nested;
+                p.Point.Y = checked(envelope.Nested + 3);
+            }
+            """;
+        const string helpers = """
+            public struct Counts
+            {
+                public int Value;
+                public int Divisor;
+                public readonly int Ratio => 100 / Divisor;
+                public static explicit operator int(Counts count) => count.Value;
+                public static int operator -(Counts count) => unchecked(-count.Value);
+                public static int operator +(Counts count, int amount) => unchecked(count.Value + amount);
+                public static int operator checked +(Counts count, int amount) => checked(count.Value + amount);
+            }
+            public struct MemberEnvelope { public Counts Nested; }
+            public static class Knobs { public static int Offset => unchecked(1 + 1); }
+            """;
+        var compile = Analyze(execute, helpers);
+        Assert.True(compile.Program != null, string.Join("\n", compile.Diagnostics));
+        var program = compile.Program!;
+        var revised = Analyze(execute, helpers.Replace("1 + 1", "1 + 2", StringComparison.Ordinal));
+        Assert.NotEqual(program.SourceDigest, Assert.IsType<GaProgram>(revised.Program).SourceDigest);
+
+        uint[] Row(int value, int divisor) => program.Fields.Select(field => field.Path switch
+        {
+            "Nested.Value" => (uint)value, "Nested.Divisor" => (uint)divisor, _ => 0u
+        }).ToArray();
+        int Column(string path) => Array.FindIndex(program.Fields.ToArray(), field => field.Path == path);
+
+        var row = Row(7, 4);
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(27u, row[Column("Point.X")]);
+        Assert.Equal(10u, row[Column("Point.Y")]);
+
+        row = Row(int.MaxValue, 4);
+        var before = row.ToArray();
+        var overflow = GaInterpreter.Execute(program, row)!.Value;
+        Assert.Equal(GaFaultKind.Overflow, overflow.Kind);
+        Assert.Equal(1ul, overflow.EvaluationOrdinal);
+        Assert.Equal("Helper.cs", overflow.Source.File);
+        Assert.Equal("count.Value + amount", helpers.Substring(overflow.Source.Start, overflow.Source.Length));
+        Assert.Equal(helpers.LastIndexOf("count.Value + amount", StringComparison.Ordinal), overflow.Source.Start);
+        Assert.Equal(before, row);
+
+        var zero = GaInterpreter.Execute(program, Row(int.MaxValue, 0))!.Value;
+        Assert.Equal(GaFaultKind.DivideByZero, zero.Kind);
+        Assert.Equal(0ul, zero.EvaluationOrdinal);
+        Assert.Equal("100 / Divisor", helpers.Substring(zero.Source.Start, zero.Source.Length));
+    }
+
+    [Fact]
+    public void ExplicitValueCopyKeepsItsFieldsAfterTheSourceChanges()
+    {
+        const string execute = """
+            public void Execute(ref Position p, ref MemberEnvelope envelope)
+            {
+                var copy = envelope.Nested;
+                envelope.Nested.Value = 99;
+                p.Point.X = copy.Value + (int)copy;
+                p.Point.Y = (int)envelope.Nested;
+            }
+            """;
+        const string helpers = """
+            public struct Counts
+            {
+                public int Value;
+                public int Offset;
+                public static explicit operator int(Counts count) => count.Value + count.Offset;
+            }
+            public struct MemberEnvelope { public Counts Nested; }
+            """;
+        var result = Analyze(execute, helpers);
+        Assert.True(result.Program != null, string.Join("\n", result.Diagnostics));
+        var program = result.Program!;
+        Assert.Equal(new[] { "Nested.Offset", "Nested.Value", "Point.X", "Point.Y" }, program.Fields.Select(field => field.Path));
+        uint[] row = [2, 7, 0, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(new uint[] { 2, 99, 16, 101 }, row);
+    }
+
+    [Fact]
     public void EnumSwitchAndDescendingLoopUseExactControlFlow()
     {
         var program = Compile("""

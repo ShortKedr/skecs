@@ -73,6 +73,30 @@ public sealed class GaSystemAnalyzerTests
     }
 
     [Fact]
+    public async Task TraversesSourceGettersOperatorsAndConversions()
+    {
+        const string source = """
+            struct Counts
+            {
+                public int Value;
+                public readonly int Doubled => unchecked(Value + Value);
+                public readonly int Clock { get => checked(System.DateTime.UtcNow.Second + 1); }
+                public static int operator +(Counts count, int value) => checked(count.Value + value);
+                public static explicit operator int(Counts count) => unchecked(count.Value - 1);
+            }
+            [SKECS.GA.SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(ref int value, in Counts counts) => value = counts.Doubled + (counts + 1) + (int)counts + counts.Clock;
+            }
+            """;
+
+        var diagnostics = await Analyze(source);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Id == "GA0004");
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0003" && Text(diagnostic) == "System.DateTime.UtcNow");
+    }
+
+    [Fact]
     public async Task AdmitsBoundedLoopsReadonlyGetterSpecializationAndNestedInlineArray()
     {
         const string source = """

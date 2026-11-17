@@ -216,21 +216,32 @@ public static partial class GaSemanticAnalysis
 
         private IOperation? GetBody(SyntaxNode? declaration)
         {
-            if (declaration is MethodDeclarationSyntax methodDeclaration &&
-                compilation.GetSemanticModel(methodDeclaration.SyntaxTree).GetOperation(methodDeclaration, cancellationToken)
-                    is IMethodBodyOperation methodBody)
+            if (declaration == null)
+                return null;
+            var model = compilation.GetSemanticModel(declaration.SyntaxTree);
+            if (declaration is BaseMethodDeclarationSyntax or AccessorDeclarationSyntax &&
+                model.GetOperation(declaration, cancellationToken) is IMethodBodyOperation methodBody)
                 return methodBody.BlockBody ?? methodBody.ExpressionBody;
 
             SyntaxNode? body = declaration switch
             {
-                BaseMethodDeclarationSyntax method => (SyntaxNode?)method.Body ?? method.ExpressionBody?.Expression,
-                LocalFunctionStatementSyntax local => (SyntaxNode?)local.Body ?? local.ExpressionBody?.Expression,
-                AccessorDeclarationSyntax accessor => (SyntaxNode?)accessor.Body ?? accessor.ExpressionBody?.Expression,
-                PropertyDeclarationSyntax property => property.ExpressionBody?.Expression,
-                ArrowExpressionClauseSyntax expression => expression.Expression,
+                BaseMethodDeclarationSyntax method => (SyntaxNode?)method.Body ?? method.ExpressionBody,
+                LocalFunctionStatementSyntax local => (SyntaxNode?)local.Body ?? local.ExpressionBody,
+                AccessorDeclarationSyntax accessor => (SyntaxNode?)accessor.Body ?? accessor.ExpressionBody,
+                PropertyDeclarationSyntax property => property.ExpressionBody,
+                ArrowExpressionClauseSyntax expression => expression,
                 _ => null
             };
-            return body == null ? null : compilation.GetSemanticModel(body.SyntaxTree).GetOperation(body, cancellationToken);
+            if (body == null)
+                return null;
+            var operation = model.GetOperation(body, cancellationToken);
+            if (operation != null || body is not ArrowExpressionClauseSyntax arrow)
+                return operation;
+
+            var value = arrow.Expression;
+            while (value is CheckedExpressionSyntax or ParenthesizedExpressionSyntax)
+                value = value is CheckedExpressionSyntax arithmetic ? arithmetic.Expression : ((ParenthesizedExpressionSyntax)value).Expression;
+            return model.GetOperation(value, cancellationToken);
         }
 
         private static bool HasUnsafeModifier(SyntaxNode declaration) => declaration switch
