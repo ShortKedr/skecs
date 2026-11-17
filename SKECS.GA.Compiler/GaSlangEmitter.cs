@@ -469,6 +469,9 @@ public static class GaSlangEmitter
                     return StoreAndRead(bound.Slot, bound.Value, bound.Body);
                 case GaStoredValue stored:
                     return StoreAndRead(stored.Slot, stored.Value, stored.Body);
+                case GaBlockValue block:
+                    Statement(block.Body);
+                    return Temp(Value(block.Result), Type(block.Type));
                 case GaArrayRead array:
                     string index = CheckedArrayIndex(array.Field, array.Index, array.Source);
                     string element = Temp(Literal(array.Type, 0), Type(array.Type));
@@ -630,6 +633,7 @@ public static class GaSlangEmitter
         private static bool MayStoreLocal(GaValue value) => value switch
         {
             GaStoredValue => true,
+            GaBlockValue => true,
             GaBoundValue bound => MayStoreLocal(bound.Value) || MayStoreLocal(bound.Body),
             GaCast cast => MayStoreLocal(cast.Operand),
             GaUnary unary => MayStoreLocal(unary.Operand),

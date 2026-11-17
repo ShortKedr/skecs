@@ -45,6 +45,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
     private const int MaximumLoopEntries = 65536;
     private bool _hasLoopBranches;
     private LoopControl? _loopControl;
+    private HelperReturn? _helperReturn;
+    private int _helperLoopBaseDepth;
 
     private sealed record HelperFrame(GaSlot[] Parameters, Dictionary<ILocalSymbol, GaSlot> Locals,
         Dictionary<ITypeParameterSymbol, ITypeSymbol> Types)
@@ -55,6 +57,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
     private const int ReceiverInput = -1;
 
     private sealed record LoopControl(ILabelSymbol Exit, ILabelSymbol Continue, GaSlot State);
+    private sealed record HelperReturn(GaSlot Completed, GaSlot Result);
     private const uint LoopRunning = 0;
     private const uint LoopContinue = 1;
     private const uint LoopBreak = 2;
@@ -237,6 +240,14 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 return LowerBlock(block.Operations);
             case IExpressionStatementOperation expression:
                 return LowerStatement(expression.Operation);
+            case IReturnOperation { ReturnedValue: { } returned } when _helperReturn is { } exit:
+                return new GaBlock([new GaStore(exit.Result, LowerValue(returned)),
+                    new GaStore(exit.Completed, new GaConstant(GaScalar.Bool, 1, Source(operation)))]);
+            case IInvocationOperation invocation when _helperReturn != null:
+                if (invocation.TargetMethod.ReturnsVoid)
+                    throw Unsupported(invocation, "Use a scalar-return call in a portable helper body.");
+                var helperValue = LowerValue(invocation);
+                return new GaStore(AddLocal(helperValue.Type), helperValue);
             case IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
                 invocation.TargetMethod.Name is ("Has" or "TryRead"):
                 return new GaStore(AddLocal(GaScalar.Bool), LowerOptionalAccess(invocation));
@@ -252,6 +263,10 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 return new GaBlock(group.Declarations.Select(LowerStatement).ToArray());
             case IVariableDeclarationOperation declaration:
                 return new GaBlock(declaration.Declarators.Select(LowerStatement).ToArray());
+            case IVariableDeclaratorOperation declarator when _helperReturn != null:
+                var helperLocal = DeclareHelperLocal(_helper!, declarator);
+                return declarator.Initializer?.Value is { } helperInitializer
+                    ? new GaStore(helperLocal, LowerValue(helperInitializer)) : new GaBlock([]);
             case IVariableDeclaratorOperation declarator:
                 if (declarator.Symbol.RefKind != RefKind.None)
                 {
@@ -299,7 +314,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 _scalarDefaults.Add(new GaStore(local, new GaConstant(type, 0, Source(declarator))));
                 return new GaBlock([]);
             case ISimpleAssignmentOperation assignment when !assignment.IsRef:
-                if (FindInlineAccess(assignment.Target) is { } assignmentAccess)
+                if (_helperReturn == null && FindInlineAccess(assignment.Target) is { } assignmentAccess)
                 {
                     var array = LowerArrayAccess(assignment.Target, assignmentAccess, writable: true);
                     return new GaArrayStore(array.Field, array.Index, null, LowerValue(assignment.Value), array.Source);
@@ -307,7 +322,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 return new GaStore(WritableSlot(assignment.Target), LowerValue(assignment.Value));
             case ICompoundAssignmentOperation compound when IsBuiltinOrFixed(compound.OperatorMethod) &&
                 !compound.IsLifted && compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
-                if (FindInlineAccess(compound.Target) is { } compoundAccess)
+                if (_helperReturn == null && FindInlineAccess(compound.Target) is { } compoundAccess)
                 {
                     var array = LowerArrayAccess(compound.Target, compoundAccess, writable: true);
                     var previous = AddLocal(array.Type);
@@ -315,8 +330,9 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 }
                 var slot = WritableSlot(compound.Target);
                 return new GaStore(slot, LowerCompound(compound, slot));
-            case IIncrementOrDecrementOperation change when change.OperatorMethod == null && !change.IsLifted:
-                if (FindInlineAccess(change.Target) is { } incrementAccess)
+            case IIncrementOrDecrementOperation change when !change.IsLifted &&
+                (change.OperatorMethod == null || _helperReturn != null && IsBuiltinOrFixed(change.OperatorMethod)):
+                if (_helperReturn == null && FindInlineAccess(change.Target) is { } incrementAccess)
                 {
                     var array = LowerArrayAccess(change.Target, incrementAccess, writable: true);
                     var previous = AddLocal(array.Type);
@@ -378,11 +394,21 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             statements.Add(operation is IWhileLoopOperation loop
                 ? LowerWhile(loop, i == 0 ? null : operations[i - 1])
                 : LowerStatement(operation));
-            if (_loopControl != null && i < operations.Count - 1 &&
-                operation.DescendantsAndSelf().OfType<IBranchOperation>().Any(branch => LoopBranch(branch).HasValue))
+            if (i == operations.Count - 1)
+                continue;
+            GaValue? guard = _loopControl != null && operation.DescendantsAndSelf().OfType<IBranchOperation>()
+                .Any(branch => LoopBranch(branch).HasValue)
+                ? TestLoopState(LoopRunning, GaBinaryOperator.Equal, Source(operation)) : null;
+            if (_helperReturn is { } exit && ContainsReturn(operation))
+            {
+                var source = Source(operation);
+                var notReturned = new GaUnary(GaScalar.Bool, GaUnaryOperator.Not, new GaLoad(exit.Completed, source), false, source);
+                guard = guard == null ? notReturned : new GaBinary(GaScalar.Bool, GaBinaryOperator.AndAlso, guard, notReturned, false, source);
+            }
+            if (guard != null)
             {
                 // Keep declarations and their uses together in the guarded tail.
-                tails.Push((statements, TestLoopState(LoopRunning, GaBinaryOperator.Equal, Source(operation))));
+                tails.Push((statements, guard));
                 statements = [];
             }
         }
@@ -394,6 +420,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         }
         return new GaBlock(statements);
     }
+
+    private static bool ContainsReturn(IOperation operation) => operation.DescendantsAndSelf().OfType<IReturnOperation>().Any();
 
     private GaValue LowerCompound(ICompoundAssignmentOperation compound, GaSlot previous) =>
         Binary(previous.Type, compound.OperatorKind, new GaLoad(previous, Source(compound.Target)),
@@ -785,34 +813,81 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             _loopControl = outerControl;
             _loopCounters.Remove(counter);
         }
+        if (_helperReturn is { } exit && ContainsReturn(loop.Body))
+        {
+            var source = Source(comparison);
+            var notReturned = new GaUnary(GaScalar.Bool, GaUnaryOperator.Not, new GaLoad(exit.Completed, source), false, source);
+            condition = new GaBinary(GaScalar.Bool, GaBinaryOperator.AndAlso, notReturned, condition, false, source);
+            if (incrementOperation != null)
+                increment = new GaIf(notReturned, increment, null);
+        }
         var repeated = new GaLoop(condition, body, increment, proof.Iterations);
-        if (_loopCounters.Count == 0 && LoopEntries(repeated) > MaximumLoopEntries)
+        GaStatement lowered = before == null ? repeated : new GaBlock([before, repeated]);
+        if (_loopCounters.Count == _helperLoopBaseDepth && LoopEntries(lowered) > MaximumLoopEntries)
             throw Unsupported(loop, "A loop and its nested loops must have at most 65536 total proven body entries.");
-        return before == null ? repeated : new GaBlock([before, repeated]);
+        return lowered;
     }
+
+    private const long SaturatedLoopEntries = MaximumLoopEntries + 1L;
 
     private static long LoopEntries(GaStatement statement)
     {
-        const long saturated = MaximumLoopEntries + 1L;
         switch (statement)
         {
             case GaLoop loop:
-                return Math.Min(saturated, loop.MaximumIterations * (1 + LoopEntries(loop.Body) + LoopEntries(loop.Increment)));
+                return Math.Min(SaturatedLoopEntries,
+                    loop.MaximumIterations * (1 + LoopEntries(loop.Body) + LoopEntries(loop.Increment)) +
+                    (loop.MaximumIterations + 1L) * LoopEntries(loop.Condition));
             case GaIf branch:
-                return Math.Max(LoopEntries(branch.Then), branch.Else == null ? 0 : LoopEntries(branch.Else));
+                return Math.Min(SaturatedLoopEntries, LoopEntries(branch.Condition) +
+                    Math.Max(LoopEntries(branch.Then), branch.Else == null ? 0 : LoopEntries(branch.Else)));
             case GaBlock block:
                 long visits = 0;
                 foreach (var child in block.Statements)
                 {
                     visits += LoopEntries(child);
-                    if (visits >= saturated)
-                        return saturated;
+                    if (visits >= SaturatedLoopEntries)
+                        return SaturatedLoopEntries;
                 }
                 return visits;
+            case GaStore store:
+                return LoopEntries(store.Value);
+            case GaArrayStore store:
+                return Math.Min(SaturatedLoopEntries, LoopEntries(store.Index) + LoopEntries(store.Value));
+            case GaEmit emit:
+                return LoopEntries(emit.Value);
+            case GaEmitTyped emit:
+                return Math.Min(SaturatedLoopEntries, emit.Values.Sum(item => LoopEntries(item.Value)));
+            case GaSetDomainOrder order:
+                return Math.Min(SaturatedLoopEntries, LoopEntries(order.Primary) + LoopEntries(order.Secondary));
+            case GaDestroy destroy:
+                return Math.Min(SaturatedLoopEntries, LoopEntries(destroy.EntityId) + LoopEntries(destroy.Generation));
+            case GaRemove remove:
+                return Math.Min(SaturatedLoopEntries, LoopEntries(remove.EntityId) + LoopEntries(remove.Generation));
+            case GaAdd add:
+                return Math.Min(SaturatedLoopEntries, LoopEntries(add.EntityId) + LoopEntries(add.Generation) +
+                    add.Values.Sum(item => LoopEntries(item.Value)));
+            case GaAddTicket add:
+                return Math.Min(SaturatedLoopEntries, add.Values.Sum(item => LoopEntries(item.Value)));
             default:
                 return 0;
         }
     }
+
+    private static long LoopEntries(GaValue value) => Math.Min(SaturatedLoopEntries, value switch
+    {
+        GaBlockValue block => LoopEntries(block.Body) + LoopEntries(block.Result),
+        GaBoundValue bound => LoopEntries(bound.Value) + LoopEntries(bound.Body),
+        GaStoredValue stored => LoopEntries(stored.Value) + LoopEntries(stored.Body),
+        GaCast cast => LoopEntries(cast.Operand),
+        GaUnary unary => LoopEntries(unary.Operand),
+        GaBinary binary => LoopEntries(binary.Left) + LoopEntries(binary.Right),
+        GaSelect choose => LoopEntries(choose.Condition) + Math.Max(LoopEntries(choose.True), LoopEntries(choose.False)),
+        GaSnapshotRead snapshot => LoopEntries(snapshot.EntityId) + LoopEntries(snapshot.Generation) + LoopEntries(snapshot.Fallback),
+        GaArrayRead array => LoopEntries(array.Index),
+        GaBufferRead buffer => LoopEntries(buffer.Index),
+        _ => 0
+    });
 
     private GaStatement LowerSwitch(ISwitchOperation match)
     {
@@ -1134,7 +1209,9 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         if (!_activeHelpers.Add(definition))
             throw Unsupported(site, "Recursive GA helpers and value members are not supported.");
         var previous = _helper;
+        var previousReturn = _helperReturn;
         _helper = frame;
+        _helperReturn = null;
         try
         {
             if (operations.Count != 0 && operations[^1] is IReturnOperation { ReturnedValue: { } result } &&
@@ -1151,9 +1228,10 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 expression = result;
             }
 
-            GaValue lowered = expression == null
-                ? LowerHelperFlow(operations, resultType, Source(site), frame)
-                : LowerValue(expression);
+            GaValue lowered = expression != null ? LowerValue(expression) :
+                operations.Any(operation => operation.DescendantsAndSelf().Any(part => part is ILoopOperation or ISwitchOperation))
+                    ? LowerHelperStatements(operations, resultType, Source(site), frame)
+                    : LowerHelperFlow(operations, resultType, Source(site), frame);
             for (int i = bindings.Count - 1; i >= 0; i--)
             {
                 var binding = bindings[i];
@@ -1166,6 +1244,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         finally
         {
             _helper = previous;
+            _helperReturn = previousReturn;
             _activeHelpers.Remove(definition);
         }
     }
@@ -1180,6 +1259,31 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         var slot = AddLocal(Scalar(ResolveHelperType(declaration.Symbol.Type), declaration));
         frame.Locals.Add(declaration.Symbol, slot);
         return slot;
+    }
+
+    private GaValue LowerHelperStatements(IReadOnlyList<IOperation> operations, GaScalar type, GaSourceSpan source, HelperFrame frame)
+    {
+        var state = new HelperReturn(AddLocal(GaScalar.Bool), AddLocal(type));
+        var outerControl = _loopControl;
+        int outerDepth = _helperLoopBaseDepth;
+        _helperReturn = state;
+        _loopControl = null;
+        _helperLoopBaseDepth = _loopCounters.Count;
+        try
+        {
+            GaValue value = new GaBlockValue(LowerBlock(operations), new GaLoad(state.Result, source), source);
+            // The source compilation already checked definite assignment through early returns.
+            foreach (var local in frame.Locals.Values.Reverse())
+                value = new GaBoundValue(local, new GaConstant(local.Type, 0, source), value, source);
+            value = new GaBoundValue(state.Result, new GaConstant(type, 0, source), value, source);
+            return new GaBoundValue(state.Completed, new GaConstant(GaScalar.Bool, 0, source), value, source);
+        }
+        finally
+        {
+            _helperReturn = null;
+            _loopControl = outerControl;
+            _helperLoopBaseDepth = outerDepth;
+        }
     }
 
     private GaValue LowerHelperFlow(IReadOnlyList<IOperation> operations, GaScalar type, GaSourceSpan source, HelperFrame frame)
@@ -1206,7 +1310,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             for (int i = effects.Length - 1; i >= 0; i--)
             {
                 var position = Source(statements[i]);
-                if (i < effects.Length - 1 && statements[i].DescendantsAndSelf().OfType<IReturnOperation>().Any())
+                if (i < effects.Length - 1 && ContainsReturn(statements[i]))
                     next = new GaSelect(GaScalar.Bool, flag, empty, next, position);
                 next = new GaStoredValue(discarded, effects[i], next, position);
             }
@@ -1241,13 +1345,13 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 case IExpressionStatementOperation expression:
                     return LowerEffect(expression.Operation);
                 case ISimpleAssignmentOperation { IsRef: false } assign:
-                    return new GaStoredValue(WritableLocal(assign.Target), LowerValue(assign.Value), empty, position);
+                    return new GaStoredValue(WritableHelperLocal(frame, assign.Target), LowerValue(assign.Value), empty, position);
                 case ICompoundAssignmentOperation compound when IsBuiltinOrFixed(compound.OperatorMethod) &&
                     !compound.IsLifted && compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
-                    var destination = WritableLocal(compound.Target);
+                    var destination = WritableHelperLocal(frame, compound.Target);
                     return new GaStoredValue(destination, LowerCompound(compound, destination), empty, position);
                 case IIncrementOrDecrementOperation change when IsBuiltinOrFixed(change.OperatorMethod) && !change.IsLifted:
-                    var counter = WritableLocal(change.Target);
+                    var counter = WritableHelperLocal(frame, change.Target);
                     return new GaStoredValue(counter, LowerIncrement(change, counter), empty, position);
                 case IInvocationOperation { TargetMethod.ReturnsVoid: false } invocation:
                     var value = LowerValue(invocation);
@@ -1259,14 +1363,15 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             }
         }
 
-        GaSlot WritableLocal(IOperation target) => Unwrap(target) switch
-        {
-            ILocalReferenceOperation local when frame.Locals.TryGetValue(local.Local, out var slot) => slot,
-            IParameterReferenceOperation parameter when !frame.AggregateInputs.ContainsKey(parameter.Parameter.Ordinal) =>
-                frame.Parameters[parameter.Parameter.Ordinal],
-            _ => throw Unsupported(target, "Write only a scalar helper local or by-value scalar parameter.")
-        };
     }
+
+    private static GaSlot WritableHelperLocal(HelperFrame frame, IOperation target) => Unwrap(target) switch
+    {
+        ILocalReferenceOperation local when frame.Locals.TryGetValue(local.Local, out var slot) => slot,
+        IParameterReferenceOperation parameter when !frame.AggregateInputs.ContainsKey(parameter.Parameter.Ordinal) =>
+            frame.Parameters[parameter.Parameter.Ordinal],
+        _ => throw Unsupported(target, "Write only a scalar helper local or by-value scalar parameter.")
+    };
 
     private bool IsResourcePath(IOperation operation)
     {
@@ -1531,6 +1636,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
 
     private GaSlot WritableSlot(IOperation operation)
     {
+        if (_helperReturn != null)
+            return WritableHelperLocal(_helper!, operation);
         var slot = Slot(operation);
         if (slot.IsField && _schema[slot.Index].Access != GaFieldAccess.ReadWrite)
             throw Unsupported(operation, "The target field was declared read-only.");

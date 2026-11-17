@@ -438,6 +438,9 @@ public static class GaInterpreter
                     return StoreAndRead(bound.Slot, bound.Value, bound.Body);
                 case GaStoredValue stored:
                     return StoreAndRead(stored.Slot, stored.Value, stored.Body);
+                case GaBlockValue block:
+                    Run(block.Body);
+                    return Read(block.Result);
                 case GaHasOwn present:
                     return _row[_presenceOffsets[present.ComponentIndex]];
                 case GaResourceRead resource:

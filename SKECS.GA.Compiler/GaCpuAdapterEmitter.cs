@@ -33,6 +33,8 @@ public static class GaCpuAdapterEmitter
         private readonly List<GaSourceSpan> _sources = new();
         private readonly Dictionary<string, FaultHelper> _helpers = new(StringComparer.Ordinal);
         private readonly List<GaTryRead> _optionalReads = new();
+        private readonly List<GaBlockValue> _blockValues = new();
+        private string _faultState = "faults";
         private int _loop;
         private int _arrayStore;
         private int _indent;
@@ -52,6 +54,8 @@ public static class GaCpuAdapterEmitter
             // Emit the row body first to find the exact field writes and fault paths it uses.
             _indent = UsesBatch || BindsReductions ? 4 : 5;
             Statement(program.Body);
+            for (int index = 0; index < _blockValues.Count; index++)
+                EmitBlockValue(index, _blockValues[index]);
             var body = _code.ToString();
             _code.Clear();
             _indent = 0;
@@ -87,7 +91,7 @@ public static class GaCpuAdapterEmitter
             Processor(body);
             for (int index = 0; index < _optionalReads.Count; index++)
                 EmitOptionalRead(index, _optionalReads[index]);
-            if (_sources.Count != 0)
+            if (_sources.Count != 0 || _blockValues.Count != 0)
                 FaultInfrastructure();
             Close();
             return _code.ToString();
@@ -236,7 +240,8 @@ public static class GaCpuAdapterEmitter
                 Line("bool hasDomainOrder = false;");
                 Line("int domainPrimary = 0, domainSecondary = 0;");
             }
-            if (_sources.Count != 0 || program.Components.Any(component => component.Origin == GaComponentOrigin.Own))
+            if (_sources.Count != 0 || _blockValues.Count != 0 ||
+                program.Components.Any(component => component.Origin == GaComponentOrigin.Own))
                 Line($"var faults = new __GaFaultState<{InputType}>(job, row);");
             LoadComponents();
             for (int index = 0; index < program.Locals.Count; index++)
@@ -401,7 +406,7 @@ public static class GaCpuAdapterEmitter
                     Line($"for (int {counter} = 0; {Expression(loop.Condition)}; {counter}++)");
                     Open();
                     Line($"if ({counter} == {Number(loop.MaximumIterations)})");
-                    Line($"    throw faults.Exception(global::SKECS.GA.GaFaultKind.IterationLimit, faults.EvaluationOrdinal, {Site(loop.Condition.Source)});");
+                    Line($"    throw {_faultState}.Exception(global::SKECS.GA.GaFaultKind.IterationLimit, {_faultState}.EvaluationOrdinal, {Site(loop.Condition.Source)});");
                     Statement(loop.Body);
                     Statement(loop.Increment);
                     Close();
@@ -487,6 +492,7 @@ public static class GaCpuAdapterEmitter
             GaLoad load => Load(load.Slot),
             GaBoundValue bound => StoreAndRead(bound.Slot, bound.Value, bound.Body),
             GaStoredValue stored => StoreAndRead(stored.Slot, stored.Value, stored.Body),
+            GaBlockValue block => BlockValue(block),
             GaArrayRead read => ArrayRead(read),
             GaBufferRead read => BufferRead(read),
             GaBufferCount => "buffer.Count",
@@ -500,6 +506,24 @@ public static class GaCpuAdapterEmitter
             GaSelect select => $"({Expression(select.Condition)} ? {Expression(select.True)} : {Expression(select.False)})",
             _ => throw new InvalidOperationException("Unknown GA IR value.")
         };
+
+        private string BlockValue(GaBlockValue block)
+        {
+            int index = _blockValues.Count;
+            _blockValues.Add(block);
+            return $"__GaBlock{Number(index)}(ref {_faultState})";
+        }
+
+        private void EmitBlockValue(int index, GaBlockValue block)
+        {
+            _faultState = "__GaBlockFaults";
+            Line($"{Scalar(block.Type)} __GaBlock{Number(index)}(ref __GaFaultState<{InputType}> {_faultState})");
+            Open();
+            Statement(block.Body);
+            Line($"return {Expression(block.Result)};");
+            Close();
+            _faultState = "faults";
+        }
 
         private string ReadResource(GaResourceRead read)
         {
@@ -677,7 +701,7 @@ public static class GaCpuAdapterEmitter
             GaSourceSpan source)
         {
             _helpers.TryAdd(name, new FaultHelper(type, parameters, lines));
-            return $"__Ga{name}({arguments}, ref faults, {Site(source)})";
+            return $"__Ga{name}({arguments}, ref {_faultState}, {Site(source)})";
         }
 
         private string FixedFaultCall(string name, string parameters, string arguments, string calculation, GaSourceSpan source)

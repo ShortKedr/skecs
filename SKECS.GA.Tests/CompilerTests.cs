@@ -149,9 +149,7 @@ public sealed class CompilerTests
             }
             private static int Add(int a, int b)
             {
-                for (int i = 0; i < 2; ++i)
-                    a += b;
-                return a;
+                return a + ++b;
             }
             """);
         Assert.Null(result.Program);
@@ -387,6 +385,105 @@ public sealed class CompilerTests
         row[2] = 1;
         Assert.Null(GaInterpreter.Execute(program, row));
         Assert.Equal(7u, row[0]);
+    }
+
+    [Fact]
+    public void EarlyReturnFromAHelperLoopSkipsItsCheckedStepAndKeepsCallerEvaluation()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                p.Point.X = Pick(v.X);
+                p.Point.Y = 100 / v.Y;
+            }
+            private static int Pick(int stop)
+            {
+                checked
+                {
+                    for (int i = 0; i < 4; ++i)
+                    {
+                        if (i == stop) return unchecked(i + 10);
+                    }
+                }
+                return 50;
+            }
+            """);
+
+        uint[] Row(uint stop, uint divisor) => program.Fields.Select(field => field.Path switch
+        {
+            "X" => stop, "Y" => divisor, _ => 0u
+        }).ToArray();
+        int Index(string path) => Array.FindIndex(program.Fields.ToArray(), field => field.Path == path);
+
+        var completed = Row(2, 4);
+        Assert.Null(GaInterpreter.Execute(program, completed));
+        Assert.Equal(12u, completed[Index("Point.X")]);
+        Assert.Equal(25u, completed[Index("Point.Y")]);
+
+        var earlyFault = GaInterpreter.Execute(program, Row(0, 0))!.Value;
+        var laterFault = GaInterpreter.Execute(program, Row(2, 0))!.Value;
+        var fullFault = GaInterpreter.Execute(program, Row(4, 0))!.Value;
+        Assert.Equal(GaFaultKind.DivideByZero, earlyFault.Kind);
+        Assert.Equal(0ul, earlyFault.EvaluationOrdinal);
+        Assert.Equal(2ul, laterFault.EvaluationOrdinal);
+        Assert.Equal(4ul, fullFault.EvaluationOrdinal);
+        Assert.Equal(earlyFault.Source, laterFault.Source);
+        Assert.Equal(earlyFault.Source, fullFault.Source);
+    }
+
+    [Fact]
+    public void HelperSwitchReturnsOnlyFromTheSelectedArm()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v) => p.Point.X = Pick(v.X);
+            private static int Pick(int value)
+            {
+                switch (value)
+                {
+                    case 0: return 12;
+                    case 1: value += 6; break;
+                    default: return 98;
+                }
+                return value;
+            }
+            """);
+
+        Assert.Equal(new[] { "Point.X", "X" }, program.Fields.Select(field => field.Path));
+        foreach (var (input, output) in new[] { (0u, 12u), (1u, 7u), (2u, 98u) })
+        {
+            uint[] row = [0, input];
+            Assert.Null(GaInterpreter.Execute(program, row));
+            Assert.Equal(output, row[0]);
+        }
+    }
+
+    [Theory]
+    [InlineData(255, true)]
+    [InlineData(256, false)]
+    public void LoopBudgetIncludesLoopsInsideCalledHelpers(int helperIterations, bool accepted)
+    {
+        var result = Analyze($$"""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 256; ++i)
+                    p.Point.X += Count(i);
+            }
+            private static int Count(int value)
+            {
+                for (int j = 0; j < {{helperIterations}}; ++j)
+                    ++value;
+                return value;
+            }
+            """);
+
+        if (accepted)
+            Assert.True(result.Program != null, string.Join("\n", result.Diagnostics));
+        else
+        {
+            Assert.Null(result.Program);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0100" &&
+                diagnostic.GetMessage().Contains("65536 total", StringComparison.Ordinal));
+        }
     }
 
     [Fact]

@@ -79,6 +79,8 @@ internal sealed record GaBoundValue(GaSlot Slot, GaValue Value, GaValue Body, Ga
     : GaValue(Body.Type, Source);
 internal sealed record GaStoredValue(GaSlot Slot, GaValue Value, GaValue Body, GaSourceSpan Source)
     : GaValue(Body.Type, Source);
+internal sealed record GaBlockValue(GaStatement Body, GaValue Result, GaSourceSpan Source)
+    : GaValue(Result.Type, Source);
 internal sealed record GaCast(GaScalar Type, GaValue Operand, bool Checked, GaSourceSpan Source) : GaValue(Type, Source);
 internal sealed record GaUnary(GaScalar Type, GaUnaryOperator Operator, GaValue Operand, bool Checked, GaSourceSpan Source)
     : GaValue(Type, Source);

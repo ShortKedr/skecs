@@ -280,6 +280,11 @@ internal static class GaIrDigest
                 WriteValue(writer, stored.Value);
                 WriteValue(writer, stored.Body);
                 break;
+            case GaBlockValue block:
+                writer.Write((byte)15);
+                WriteStatement(writer, block.Body);
+                WriteValue(writer, block.Result);
+                break;
             default:
                 throw new InvalidOperationException("Unknown GA IR value.");
         }

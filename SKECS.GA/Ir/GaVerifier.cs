@@ -127,14 +127,16 @@ internal static class GaVerifier
             Require(index.Type == GaScalar.Int32);
         }
 
-        int CheckStatement(GaStatement statement, HashSet<int> assigned, HashSet<int> assignedTickets)
+        int CheckStatement(GaStatement statement, HashSet<int> assigned, HashSet<int> assignedTickets, bool localOnly = false)
         {
+            if (localOnly)
+                Require(statement is GaBlock or GaIf or GaLoop or GaStore { Slot.IsField: false });
             switch (statement)
             {
                 case GaBlock block:
                     int blockCapacity = 0;
                     foreach (var child in block.Statements)
-                        blockCapacity = Bound((long)blockCapacity + CheckStatement(child, assigned, assignedTickets));
+                        blockCapacity = Bound((long)blockCapacity + CheckStatement(child, assigned, assignedTickets, localOnly));
                     return blockCapacity;
                 case GaStore store:
                     CheckSlot(store.Slot);
@@ -221,8 +223,8 @@ internal static class GaVerifier
                     var elseAssigned = new HashSet<int>(assigned);
                     var thenTickets = new HashSet<int>(assignedTickets);
                     var elseTickets = new HashSet<int>(assignedTickets);
-                    int thenCapacity = CheckStatement(branch.Then, thenAssigned, thenTickets);
-                    int elseCapacity = branch.Else == null ? 0 : CheckStatement(branch.Else, elseAssigned, elseTickets);
+                    int thenCapacity = CheckStatement(branch.Then, thenAssigned, thenTickets, localOnly);
+                    int elseCapacity = branch.Else == null ? 0 : CheckStatement(branch.Else, elseAssigned, elseTickets, localOnly);
                     thenAssigned.IntersectWith(elseAssigned);
                     assigned.UnionWith(thenAssigned);
                     thenTickets.IntersectWith(elseTickets);
@@ -233,8 +235,8 @@ internal static class GaVerifier
                     Require(loop.Condition.Type == GaScalar.Bool && loop.MaximumIterations >= 0);
                     var loopAssigned = new HashSet<int>(assigned);
                     var loopTickets = new HashSet<int>(assignedTickets);
-                    int loopCapacity = CheckStatement(loop.Body, loopAssigned, loopTickets) +
-                        CheckStatement(loop.Increment, loopAssigned, loopTickets);
+                    int loopCapacity = CheckStatement(loop.Body, loopAssigned, loopTickets, localOnly) +
+                        CheckStatement(loop.Increment, loopAssigned, loopTickets, localOnly);
                     return Bound((long)loopCapacity * loop.MaximumIterations);
                 default:
                     throw new InvalidDataException("Unknown GA IR statement.");
@@ -304,6 +306,11 @@ internal static class GaVerifier
                         assigned.Contains(stored.Slot.Index));
                     CheckValue(stored.Value, assigned);
                     CheckValue(stored.Body, assigned);
+                    break;
+                case GaBlockValue block:
+                    var blockAssigned = new HashSet<int>(assigned);
+                    CheckStatement(block.Body, blockAssigned, new HashSet<int>(), localOnly: true);
+                    CheckValue(block.Result, blockAssigned);
                     break;
                 case GaHasOwn present:
                     CheckOptional(present.ComponentIndex);
