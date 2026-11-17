@@ -274,6 +274,12 @@ internal static class GaIrDigest
                 WriteValue(writer, bound.Value);
                 WriteValue(writer, bound.Body);
                 break;
+            case GaStoredValue stored:
+                writer.Write((byte)14);
+                WriteSlot(writer, stored.Slot);
+                WriteValue(writer, stored.Value);
+                WriteValue(writer, stored.Body);
+                break;
             default:
                 throw new InvalidOperationException("Unknown GA IR value.");
         }

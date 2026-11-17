@@ -466,8 +466,9 @@ public static class GaSlangEmitter
                 case GaLoad load:
                     return Slot(load.Slot);
                 case GaBoundValue bound:
-                    Line($"{Slot(bound.Slot)} = {Value(bound.Value)};");
-                    return Temp(Value(bound.Body), Type(bound.Type));
+                    return StoreAndRead(bound.Slot, bound.Value, bound.Body);
+                case GaStoredValue stored:
+                    return StoreAndRead(stored.Slot, stored.Value, stored.Body);
                 case GaArrayRead array:
                     string index = CheckedArrayIndex(array.Field, array.Index, array.Source);
                     string element = Temp(Literal(array.Type, 0), Type(array.Type));
@@ -527,6 +528,12 @@ public static class GaSlangEmitter
                 default:
                     throw new InvalidOperationException("Unknown GA IR value.");
             }
+        }
+
+        private string StoreAndRead(GaSlot slot, GaValue value, GaValue body)
+        {
+            Line($"{Slot(slot)} = {Value(value)};");
+            return Temp(Value(body), Type(body.Type));
         }
 
         private string SnapshotRead(GaSnapshotRead read)
@@ -620,6 +627,20 @@ public static class GaSlangEmitter
             Close();
         }
 
+        private static bool MayStoreLocal(GaValue value) => value switch
+        {
+            GaStoredValue => true,
+            GaBoundValue bound => MayStoreLocal(bound.Value) || MayStoreLocal(bound.Body),
+            GaCast cast => MayStoreLocal(cast.Operand),
+            GaUnary unary => MayStoreLocal(unary.Operand),
+            GaBinary binary => MayStoreLocal(binary.Left) || MayStoreLocal(binary.Right),
+            GaSelect select => MayStoreLocal(select.Condition) || MayStoreLocal(select.True) || MayStoreLocal(select.False),
+            GaArrayRead array => MayStoreLocal(array.Index),
+            GaBufferRead buffer => MayStoreLocal(buffer.Index),
+            GaSnapshotRead read => MayStoreLocal(read.EntityId) || MayStoreLocal(read.Generation) || MayStoreLocal(read.Fallback),
+            _ => false
+        };
+
         private string Binary(GaBinary binary)
         {
             var op = binary.Operator;
@@ -634,7 +655,7 @@ public static class GaSlangEmitter
                 return result;
             }
 
-            if (_usesOptional)
+            if (_usesOptional || MayStoreLocal(binary.Right))
                 left = Temp(left, Type(binary.Left.Type));
             string right = Value(binary.Right);
             if (binary.Left.Type == GaScalar.Fixed)

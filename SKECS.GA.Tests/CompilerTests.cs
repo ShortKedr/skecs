@@ -149,7 +149,8 @@ public sealed class CompilerTests
             }
             private static int Add(int a, int b)
             {
-                a += b;
+                for (int i = 0; i < 2; ++i)
+                    a += b;
                 return a;
             }
             """);
@@ -306,6 +307,86 @@ public sealed class CompilerTests
         uint[] row = [2, 7, 0, 0];
         Assert.Null(GaInterpreter.Execute(program, row));
         Assert.Equal(new uint[] { 2, 99, 16, 101 }, row);
+    }
+
+    [Fact]
+    public void HelperReturnsSkipOnlyTheirOwnBodyAndPreserveLocalAssignment()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                p.Point.X = Choose(v.X, v.Y, v.Flag);
+                p.Point.Y = checked(p.Point.Y + 11);
+            }
+            private static int Choose(int value, int divisor, bool alternate)
+            {
+                int selected;
+                if (alternate)
+                {
+                    if (divisor == 0)
+                        return 5;
+                    selected = 24 / divisor;
+                }
+                else
+                {
+                    value++;
+                    selected = value;
+                }
+                selected = checked(selected + 1);
+                return selected;
+            }
+            """);
+
+        uint[] Row(int value, int divisor, bool alternate, int output) => program.Fields.Select(field => field.Path switch
+        {
+            "X" => (uint)value, "Y" => (uint)divisor, "Flag" => alternate ? 1u : 0u,
+            "Point.Y" => (uint)output, _ => 0u
+        }).ToArray();
+        int Column(string path) => Array.FindIndex(program.Fields.ToArray(), field => field.Path == path);
+
+        var early = Row(7, 0, true, 0);
+        Assert.Null(GaInterpreter.Execute(program, early));
+        Assert.Equal(5u, early[Column("Point.X")]);
+        Assert.Equal(11u, early[Column("Point.Y")]);
+
+        var then = Row(7, 3, true, 0);
+        Assert.Null(GaInterpreter.Execute(program, then));
+        Assert.Equal(9u, then[Column("Point.X")]);
+
+        var otherwise = Row(7, 0, false, 0);
+        Assert.Null(GaInterpreter.Execute(program, otherwise));
+        Assert.Equal(9u, otherwise[Column("Point.X")]);
+        Assert.Equal(7u, otherwise[Column("X")]);
+
+        var earlyFault = GaInterpreter.Execute(program, Row(7, 0, true, int.MaxValue))!.Value;
+        var fallthroughFault = GaInterpreter.Execute(program, Row(7, 3, true, int.MaxValue))!.Value;
+        Assert.Equal(GaFaultKind.Overflow, earlyFault.Kind);
+        Assert.Equal(0ul, earlyFault.EvaluationOrdinal);
+        Assert.Equal(2ul, fallthroughFault.EvaluationOrdinal);
+        Assert.Equal(earlyFault.Source, fallthroughFault.Source);
+    }
+
+    [Fact]
+    public void HelperCanReturnDirectlyFromBothArms()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v) => p.Point.X = Choose(v.X, v.Flag);
+            private static int Choose(int value, bool useInput)
+            {
+                if (useInput)
+                    return value;
+                else
+                    return 23;
+            }
+            """);
+
+        Assert.Equal(new[] { "Point.X", "X", "Flag" }, program.Fields.Select(field => field.Path));
+        uint[] row = [0, 7, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(23u, row[0]);
+        row[2] = 1;
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(7u, row[0]);
     }
 
     [Fact]

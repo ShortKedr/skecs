@@ -415,6 +415,15 @@ public static class GaInterpreter
             return destination;
         }
 
+        private ulong StoreAndRead(GaSlot slot, GaValue value, GaValue body)
+        {
+            ulong bits = Read(value);
+            if (Fault != null)
+                return 0;
+            Store(slot, bits);
+            return Read(body);
+        }
+
         private ulong Read(GaValue value)
         {
             if (Fault != null)
@@ -426,11 +435,9 @@ public static class GaInterpreter
                 case GaLoad load:
                     return Load(load.Slot);
                 case GaBoundValue bound:
-                    ulong initializer = Read(bound.Value);
-                    if (Fault != null)
-                        return 0;
-                    Store(bound.Slot, initializer);
-                    return Read(bound.Body);
+                    return StoreAndRead(bound.Slot, bound.Value, bound.Body);
+                case GaStoredValue stored:
+                    return StoreAndRead(stored.Slot, stored.Value, stored.Body);
                 case GaHasOwn present:
                     return _row[_presenceOffsets[present.ComponentIndex]];
                 case GaResourceRead resource:

@@ -478,11 +478,15 @@ public static class GaCpuAdapterEmitter
             Close();
         }
 
+        private string StoreAndRead(GaSlot slot, GaValue value, GaValue body) =>
+            $"(({Slot(slot)} = {Expression(value)}), {Expression(body)}).Item2";
+
         private string Expression(GaValue value) => value switch
         {
             GaConstant constant => Constant(constant),
             GaLoad load => Load(load.Slot),
-            GaBoundValue bound => $"(({Slot(bound.Slot)} = {Expression(bound.Value)}), {Expression(bound.Body)}).Item2",
+            GaBoundValue bound => StoreAndRead(bound.Slot, bound.Value, bound.Body),
+            GaStoredValue stored => StoreAndRead(stored.Slot, stored.Value, stored.Body),
             GaArrayRead read => ArrayRead(read),
             GaBufferRead read => BufferRead(read),
             GaBufferCount => "buffer.Count",

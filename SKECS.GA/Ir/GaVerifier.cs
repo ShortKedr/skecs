@@ -298,6 +298,13 @@ internal static class GaVerifier
                     CheckValue(bound.Body, assigned);
                     assigned.Remove(bound.Slot.Index);
                     break;
+                case GaStoredValue stored:
+                    CheckSlot(stored.Slot);
+                    Require(!stored.Slot.IsField && stored.Slot.Type == stored.Value.Type &&
+                        assigned.Contains(stored.Slot.Index));
+                    CheckValue(stored.Value, assigned);
+                    CheckValue(stored.Body, assigned);
+                    break;
                 case GaHasOwn present:
                     CheckOptional(present.ComponentIndex);
                     break;
