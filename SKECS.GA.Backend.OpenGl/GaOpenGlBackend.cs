@@ -286,7 +286,10 @@ public sealed class GaOpenGlBackend : IDisposable
             _backend = backend;
             _index = index;
             _properties = properties;
-            Info = new GaDeviceInfo(backend._isEs ? "SKECS.GA EGL/ANGLE" : "SKECS.GA WGL",
+            string backendName = backend._isEs ? "SKECS.GA EGL/ANGLE" : "SKECS.GA WGL";
+            if (OperatingSystem.IsAndroid())
+                backendName = "SKECS.GA Android EGL";
+            Info = new GaDeviceInfo(backendName,
                 backend._isEs ? "OpenGL ES" : "OpenGL", $"{properties.GlMajor}.{properties.GlMinor}",
                 $"{properties.GetVendor()} {properties.GetRenderer()}", properties.GetVersion());
             var portable = new GaDeviceProfile(GaComputeProfiles.Portable32, GaQualification.Experimental, [],
