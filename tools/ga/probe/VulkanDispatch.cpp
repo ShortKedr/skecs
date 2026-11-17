@@ -13,10 +13,18 @@ namespace ga
 {
 namespace
 {
+struct VulkanCallError final : std::runtime_error
+{
+    VulkanCallError(VkResult result, const char* operation)
+        : std::runtime_error(std::string(operation) + " failed with VkResult " + std::to_string(result)), result(result) {}
+
+    const VkResult result;
+};
+
 void check(VkResult result, const char* operation)
 {
     if (result != VK_SUCCESS)
-        throw std::runtime_error(std::string(operation) + " failed with VkResult " + std::to_string(result));
+        throw VulkanCallError(result, operation);
 }
 
 uint32_t findComputeQueue(VkPhysicalDevice physicalDevice)
@@ -229,6 +237,9 @@ struct VulkanKernel::Impl
     std::vector<VkDescriptorPoolSize> poolSizes;
     std::vector<std::array<uint32_t, 5>> signature;
     std::mutex executeLock;
+    bool deviceLost{};
+
+    void execute(uint32_t groups, std::span<const uint32_t> pushConstants, std::span<BufferBinding> bindings);
 };
 
 namespace
@@ -335,53 +346,75 @@ void VulkanKernel::execute(uint32_t groups, std::span<const uint32_t> pushConsta
     }
 
     std::lock_guard guard(impl->executeLock);
-    const auto& pipeline = impl->resources;
-    if (!impl->dispatch)
+    if (impl->deviceLost)
+        throw std::runtime_error("Vulkan kernel has lost its device (VkResult -4)");
+
+    try
     {
-        auto dispatch = std::make_unique<DispatchResources>(pipeline.device);
-        dispatch->sets.resize(pipeline.setLayouts.size());
-        if (!dispatch->sets.empty())
+        impl->execute(groups, pushConstants, bindings);
+    }
+    catch (const VulkanCallError& failure)
+    {
+        if (failure.result == VK_ERROR_DEVICE_LOST)
+        {
+            impl->deviceLost = true;
+            // Vulkan treats device loss as completion when determining whether resources are in use.
+            if (impl->dispatch)
+                impl->dispatch->pending = false;
+        }
+        throw;
+    }
+}
+
+void VulkanKernel::Impl::execute(uint32_t groups, std::span<const uint32_t> pushConstants, std::span<BufferBinding> bindings)
+{
+    const auto& pipeline = resources;
+    if (!dispatch)
+    {
+        auto fresh = std::make_unique<DispatchResources>(pipeline.device);
+        fresh->sets.resize(pipeline.setLayouts.size());
+        if (!fresh->sets.empty())
         {
             VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-            poolInfo.maxSets = static_cast<uint32_t>(dispatch->sets.size());
-            poolInfo.poolSizeCount = static_cast<uint32_t>(impl->poolSizes.size());
-            poolInfo.pPoolSizes = impl->poolSizes.data();
-            check(vkCreateDescriptorPool(pipeline.device, &poolInfo, nullptr, &dispatch->descriptorPool), "vkCreateDescriptorPool");
+            poolInfo.maxSets = static_cast<uint32_t>(fresh->sets.size());
+            poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+            poolInfo.pPoolSizes = poolSizes.data();
+            check(vkCreateDescriptorPool(pipeline.device, &poolInfo, nullptr, &fresh->descriptorPool), "vkCreateDescriptorPool");
             VkDescriptorSetAllocateInfo setsInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-            setsInfo.descriptorPool = dispatch->descriptorPool;
-            setsInfo.descriptorSetCount = static_cast<uint32_t>(dispatch->sets.size());
+            setsInfo.descriptorPool = fresh->descriptorPool;
+            setsInfo.descriptorSetCount = static_cast<uint32_t>(fresh->sets.size());
             setsInfo.pSetLayouts = pipeline.setLayouts.data();
-            check(vkAllocateDescriptorSets(pipeline.device, &setsInfo, dispatch->sets.data()), "vkAllocateDescriptorSets");
+            check(vkAllocateDescriptorSets(pipeline.device, &setsInfo, fresh->sets.data()), "vkAllocateDescriptorSets");
         }
         VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-        poolInfo.queueFamilyIndex = impl->queueFamily;
-        check(vkCreateCommandPool(pipeline.device, &poolInfo, nullptr, &dispatch->commandPool), "vkCreateCommandPool");
+        poolInfo.queueFamilyIndex = queueFamily;
+        check(vkCreateCommandPool(pipeline.device, &poolInfo, nullptr, &fresh->commandPool), "vkCreateCommandPool");
         VkCommandBufferAllocateInfo commandInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-        commandInfo.commandPool = dispatch->commandPool;
+        commandInfo.commandPool = fresh->commandPool;
         commandInfo.commandBufferCount = 1;
-        check(vkAllocateCommandBuffers(pipeline.device, &commandInfo, &dispatch->command), "vkAllocateCommandBuffers");
+        check(vkAllocateCommandBuffers(pipeline.device, &commandInfo, &fresh->command), "vkAllocateCommandBuffers");
         VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-        check(vkCreateFence(pipeline.device, &fenceInfo, nullptr, &dispatch->fence), "vkCreateFence");
-        dispatch->buffers.resize(bindings.size());
-        impl->dispatch = std::move(dispatch);
+        check(vkCreateFence(pipeline.device, &fenceInfo, nullptr, &fresh->fence), "vkCreateFence");
+        fresh->buffers.resize(bindings.size());
+        dispatch = std::move(fresh);
     }
 
-    auto& resources = *impl->dispatch;
-    if (resources.pending)
+    auto& dispatchState = *dispatch;
+    if (dispatchState.pending)
     {
         const VkResult idle = vkQueueWaitIdle(pipeline.queue);
-        resources.pending = idle != VK_SUCCESS && idle != VK_ERROR_DEVICE_LOST;
+        dispatchState.pending = idle != VK_SUCCESS && idle != VK_ERROR_DEVICE_LOST;
         check(idle, "vkQueueWaitIdle");
     }
     // Release the recorded descriptor references before updating or replacing any buffers.
-    check(vkResetCommandPool(pipeline.device, resources.commandPool, 0), "vkResetCommandPool");
+    check(vkResetCommandPool(pipeline.device, dispatchState.commandPool, 0), "vkResetCommandPool");
     for (size_t index = 0; index < bindings.size(); ++index)
     {
         const auto& binding = bindings[index];
-        auto& allocation = resources.buffers[index];
+        auto& allocation = dispatchState.buffers[index];
         const size_t bytes = binding.words.size() * sizeof(uint32_t);
         if (!allocation || allocation->capacity < bytes)
-            allocation = allocateBuffer(impl->physicalDevice, pipeline.device, binding.type, bytes);
+            allocation = allocateBuffer(physicalDevice, pipeline.device, binding.type, bytes);
         std::memcpy(allocation->mapped, binding.words.data(), bytes);
         if (!allocation->coherent)
         {
@@ -393,7 +426,7 @@ void VulkanKernel::execute(uint32_t groups, std::span<const uint32_t> pushConsta
             // OpArrayLength must see the current logical length even after a larger dispatch.
             VkDescriptorBufferInfo bufferInfo{allocation->buffer, 0, bytes};
             VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-            write.dstSet = resources.sets[binding.set];
+            write.dstSet = dispatchState.sets[binding.set];
             write.dstBinding = binding.binding;
             write.dstArrayElement = binding.arrayElement;
             write.descriptorCount = 1;
@@ -404,42 +437,42 @@ void VulkanKernel::execute(uint32_t groups, std::span<const uint32_t> pushConsta
         }
     }
 
-    const VkCommandBuffer command = resources.command;
+    const VkCommandBuffer command = dispatchState.command;
     VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     check(vkBeginCommandBuffer(command, &beginInfo), "vkBeginCommandBuffer");
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline);
-    if (!resources.sets.empty())
+    if (!dispatchState.sets.empty())
         vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipelineLayout, 0,
-            static_cast<uint32_t>(resources.sets.size()), resources.sets.data(), 0, nullptr);
+            static_cast<uint32_t>(dispatchState.sets.size()), dispatchState.sets.data(), 0, nullptr);
     if (!pushConstants.empty())
-        vkCmdPushConstants(command, pipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, impl->pushConstantBytes, pushConstants.data());
+        vkCmdPushConstants(command, pipeline.pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushConstantBytes, pushConstants.data());
     vkCmdDispatch(command, groups, 1, 1);
     VkMemoryBarrier readback{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT};
     vkCmdPipelineBarrier(command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
         0, 1, &readback, 0, nullptr, 0, nullptr);
     check(vkEndCommandBuffer(command), "vkEndCommandBuffer");
 
-    check(vkResetFences(pipeline.device, 1, &resources.fence), "vkResetFences");
+    check(vkResetFences(pipeline.device, 1, &dispatchState.fence), "vkResetFences");
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &command;
-    check(vkQueueSubmit(pipeline.queue, 1, &submit, resources.fence), "vkQueueSubmit");
-    resources.pending = true;
-    const VkResult wait = vkWaitForFences(pipeline.device, 1, &resources.fence, VK_TRUE, UINT64_MAX);
-    resources.pending = wait != VK_SUCCESS && wait != VK_ERROR_DEVICE_LOST;
+    check(vkQueueSubmit(pipeline.queue, 1, &submit, dispatchState.fence), "vkQueueSubmit");
+    dispatchState.pending = true;
+    const VkResult wait = vkWaitForFences(pipeline.device, 1, &dispatchState.fence, VK_TRUE, UINT64_MAX);
+    dispatchState.pending = wait != VK_SUCCESS && wait != VK_ERROR_DEVICE_LOST;
     check(wait, "vkWaitForFences");
 
     for (size_t index = 0; index < bindings.size(); ++index)
     {
         auto& binding = bindings[index];
-        const auto& allocation = *resources.buffers[index];
+        const auto& allocation = *dispatchState.buffers[index];
         if (!binding.readback)
             continue;
         if (!allocation.coherent)
         {
             VkMappedMemoryRange range{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, allocation.memory, 0, VK_WHOLE_SIZE};
-            check(vkInvalidateMappedMemoryRanges(resources.device, 1, &range), "vkInvalidateMappedMemoryRanges");
+            check(vkInvalidateMappedMemoryRanges(dispatchState.device, 1, &range), "vkInvalidateMappedMemoryRanges");
         }
         std::memcpy(binding.words.data(), allocation.mapped, binding.words.size() * sizeof(uint32_t));
     }
