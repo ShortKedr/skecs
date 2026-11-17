@@ -7,6 +7,7 @@ using System.Runtime.InteropServices.JavaScript;
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
+using SKECS.GA.Backend.Metal;
 using SKECS.GA.Backend.Vulkan;
 #endif
 
@@ -32,9 +33,9 @@ if (args is ["cpu"] or ["cpu", "endurance"])
 }
 else
 {
-    if (args.Length != (endurance ? 5 : 4) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+    if (args.Length != (endurance ? 5 : 4) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
         !int.TryParse(args[3], out int index) || index < 0)
-        throw new ArgumentException("Usage: HostLifecycleConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index>) [endurance]");
+        throw new ArgumentException("Usage: HostLifecycleConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles|metal> <bundle> <native bridge> <device index>) [endurance]");
     await RunDevice(args[0], args[1], args[2], index, cycles);
 }
 #endif
@@ -69,7 +70,7 @@ static async Task RunDevice(string backend, string bundle, string native, int in
     var stem = Path.Combine(bundle, contract.SystemId);
     var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
         File.ReadAllText(stem + ".content-id").Trim(),
-        File.ReadAllBytes(stem + (backend switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
+        File.ReadAllBytes(stem + (backend switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "metal" => ".metallib", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
         File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
     var devices = Open(backend, native, out var owner);
     using var nativeOwner = owner;
@@ -343,6 +344,12 @@ static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposabl
             : GaOpenGlBackend.Open(path);
         owner = gl;
         return gl.Devices;
+    }
+    if (backend == "metal")
+    {
+        var metal = GaMetalBackend.Open(path);
+        owner = metal;
+        return metal.Devices;
     }
     var d3d12 = GaD3D12Backend.Open(path);
     owner = d3d12;

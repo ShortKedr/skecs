@@ -12,6 +12,7 @@
     <ProjectReference Include="$(GaSource)/SKECS.GA.Backend.D3D12/SKECS.GA.Backend.D3D12.csproj" />
     <ProjectReference Include="$(GaSource)/SKECS.GA.Backend.D3D11/SKECS.GA.Backend.D3D11.csproj" />
     <ProjectReference Include="$(GaSource)/SKECS.GA.Backend.OpenGl/SKECS.GA.Backend.OpenGl.csproj" />
+    <ProjectReference Include="$(GaSource)/SKECS.GA.Backend.Metal/SKECS.GA.Backend.Metal.csproj" />
     <Compile Include="HostKernel.cs" />
     <Compile Include="HostSession.cs" />
     <Compile Include="Program.cs" />

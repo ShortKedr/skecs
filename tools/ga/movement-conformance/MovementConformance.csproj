@@ -10,6 +10,7 @@
     <ProjectReference Include="../../../SKECS.GA.Backend.D3D12/SKECS.GA.Backend.D3D12.csproj" />
     <ProjectReference Include="../../../SKECS.GA.Backend.D3D11/SKECS.GA.Backend.D3D11.csproj" />
     <ProjectReference Include="../../../SKECS.GA.Backend.OpenGl/SKECS.GA.Backend.OpenGl.csproj" />
+    <ProjectReference Include="../../../SKECS.GA.Backend.Metal/SKECS.GA.Backend.Metal.csproj" />
     <Compile Include="$(Bundle)/ga-adapter.g.cs" />
     <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
   </ItemGroup>

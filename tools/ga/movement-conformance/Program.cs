@@ -9,6 +9,7 @@ using SKECS.GA.Backend.WebGpu;
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
 using SKECS.GA.Backend.OpenGl;
+using SKECS.GA.Backend.Metal;
 using SKECS.GA.Backend.Vulkan;
 #endif
 using SKECS.Numerics;
@@ -29,9 +30,9 @@ if (args is ["cpu", var cpuProfile])
     return;
 }
 
-if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index> <profile>'.");
+    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl|gles|metal> <bundle> <native bridge> <device index> <profile>'.");
 #endif
 
 var contract = CreateContract();
@@ -86,7 +87,7 @@ using var startup = await GaStartup.SelectAsync(GaPolicy.RequireGpu, [request], 
 #else
 string profile = args[4];
 string stem = Path.Combine(args[1], contract.SystemId);
-string binaryExtension = args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" };
+string binaryExtension = args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "metal" => ".metallib", "opengl" or "gles" => ".glsl", _ => ".dxil" };
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
     File.ReadAllBytes(stem + binaryExtension),
@@ -210,6 +211,12 @@ static IDisposable Open(string target, string library, out IReadOnlyList<IGaDevi
             : GaOpenGlBackend.Open(library);
         devices = backend.Devices;
         return backend;
+    }
+    if (target == "metal")
+    {
+        var metal = GaMetalBackend.Open(library);
+        devices = metal.Devices;
+        return metal;
     }
     var d3d12 = GaD3D12Backend.Open(library);
     devices = d3d12.Devices;
