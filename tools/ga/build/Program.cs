@@ -34,10 +34,12 @@ if (args is ["--help"] or ["-h"])
         Policies: cpuOnly, auto, requireGpu
         Stdout reports the immutable output directory once the CPU adapter and GPU row codec compile.
         If requireGpu is requested and GPU compilation fails, the report is unsuccessful and the command exits 1.
+        SKECS.GA.targets uses --msbuild <request.json> <intermediate-output-directory>.
         """);
     return 0;
 }
-if (args is not [var requestPath])
+bool msbuild = args is ["--msbuild", _, _];
+if (args.Length != 1 && !msbuild)
 {
     Console.Error.WriteLine("Usage: dotnet Ga.Build.dll <request.json>");
     return 2;
@@ -45,13 +47,17 @@ if (args is not [var requestPath])
 
 GaBuildRequest request;
 string requestDirectory;
+string outputRoot;
 try
 {
-    requestPath = Path.GetFullPath(requestPath);
+    string requestPath = Path.GetFullPath(msbuild ? args[1] : args[0]);
     requestDirectory = Path.GetDirectoryName(requestPath)!;
     request = JsonSerializer.Deserialize<GaBuildRequest>(File.ReadAllText(requestPath), GaBuildRequest.JsonOptions)
         ?? throw new ArgumentException("The GA build request is empty.");
     request.Validate();
+    outputRoot = msbuild ? Path.GetFullPath(args[2]) : Path.GetFullPath(request.OutputDirectory, requestDirectory);
+    if (msbuild && outputRoot.Any(char.IsControl))
+        throw new ArgumentException("MSBuild GA output directories cannot contain control characters.");
 }
 catch (Exception failure) when (failure is JsonException or IOException or UnauthorizedAccessException or ArgumentException)
 {
@@ -87,8 +93,18 @@ try
         return 1;
     }
 
-    var output = await Publish(request, requestDirectory, program, cpuSource, codecSource);
-    Console.WriteLine(JsonSerializer.Serialize(output, GaBuildRequest.JsonOptions));
+    var output = await Publish(request, requestDirectory, outputRoot, program, cpuSource, codecSource);
+    if (msbuild && output.Report.Succeeded)
+    {
+        Console.WriteLine($"SKECS_GA_SOURCE={Path.Combine(output.OutputDirectory, output.Report.CpuAdapter)}");
+        Console.WriteLine($"SKECS_GA_SOURCE={Path.Combine(output.OutputDirectory, output.Report.RowCodec)}");
+        Console.WriteLine($"SKECS_GA_BUNDLE={output.OutputDirectory}");
+        var gpu = output.Report.Gpu;
+        if (gpu.Status == GpuBuildStatus.Unavailable)
+            Console.WriteLine($"GA {output.Report.SystemId} uses CPU fallback ({gpu.Code}). {gpu.Detail}");
+    }
+    else
+        Console.WriteLine(JsonSerializer.Serialize(output, GaBuildRequest.JsonOptions));
     return output.Report.Succeeded ? 0 : 1;
 }
 catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException
@@ -104,13 +120,12 @@ static void PrintDiagnostics(IEnumerable<Diagnostic> diagnostics)
         Console.Error.WriteLine(diagnostic);
 }
 
-static async Task<GaBuildOutput> Publish(GaBuildRequest request, string requestDirectory, GaProgram program,
+static async Task<GaBuildOutput> Publish(GaBuildRequest request, string requestDirectory, string outputRoot, GaProgram program,
     string cpuSource, string codecSource)
 {
     const string adapterName = "ga-adapter.g.cs";
     const string codecName = "ga-row-codec.g.cs";
     const string reportName = "build-report.json";
-    string outputRoot = Path.GetFullPath(request.OutputDirectory, requestDirectory);
     Directory.CreateDirectory(outputRoot);
     string staging = Path.Combine(outputRoot, ".ga-build-" + Guid.NewGuid().ToString("N"));
     Directory.CreateDirectory(staging);

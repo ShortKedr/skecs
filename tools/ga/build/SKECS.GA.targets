@@ -1,0 +1,59 @@
+<Project>
+  <Import Project="$(MSBuildThisFileDirectory)../../../SKECS.GA.Analyzers/buildTransitive/ShortKedr.SKECS.GA.Analyzers.props"
+          Condition="'$(SKECSGraphicsAccelerated)' == 'true'" />
+
+  <ItemGroup Condition="'$(SKECSGraphicsAccelerated)' == 'true'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../../../SKECS.GA.Analyzers/SKECS.GA.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false" PrivateAssets="all" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)Ga.Build.csproj"
+                      OutputItemType="_SKECSGaBuildTool" ReferenceOutputAssembly="false" Private="false" PrivateAssets="all"
+                      Condition="'@(SKECSGaBuildRequest)' != '' And '$(DesignTimeBuild)' != 'true'" />
+  </ItemGroup>
+
+  <!-- Make the generated source list part of the SDK incremental compile inputs. -->
+  <Target Name="_SKECSGaBuild" BeforeTargets="_GenerateCompileDependencyCache;CoreCompile" DependsOnTargets="ResolveProjectReferences"
+          Condition="'$(SKECSGraphicsAccelerated)' == 'true' And '@(SKECSGaBuildRequest)' != '' And '$(DesignTimeBuild)' != 'true'">
+    <Error Condition="'@(_SKECSGaBuildTool->Count())' != '1'" Text="Could not resolve the GA build tool." />
+    <PropertyGroup>
+      <_SKECSGaBuildToolPath>@(_SKECSGaBuildTool->'%(FullPath)')</_SKECSGaBuildToolPath>
+      <_SKECSGaDotNetHost Condition="'$(DOTNET_HOST_PATH)' != ''">$(DOTNET_HOST_PATH)</_SKECSGaDotNetHost>
+      <_SKECSGaDotNetHost Condition="'$(_SKECSGaDotNetHost)' == ''">dotnet</_SKECSGaDotNetHost>
+      <!-- Keep emitted C# under the SDK's excluded intermediate path. -->
+      <_SKECSGaOutputPath>$(IntermediateOutputPath)/skecs-ga</_SKECSGaOutputPath>
+      <!-- Expand paths from the environment so the shell does not parse their contents as commands. -->
+      <_SKECSGaCommand Condition="'$(OS)' == 'Windows_NT'">"%_SKECS_GA_DOTNET_HOST%" "%_SKECS_GA_BUILD_TOOL%" --msbuild "%_SKECS_GA_REQUEST%" "%_SKECS_GA_OUTPUT%"</_SKECSGaCommand>
+      <_SKECSGaCommand Condition="'$(OS)' != 'Windows_NT'">"$_SKECS_GA_DOTNET_HOST" "$_SKECS_GA_BUILD_TOOL" --msbuild "$_SKECS_GA_REQUEST" "$_SKECS_GA_OUTPUT"</_SKECSGaCommand>
+    </PropertyGroup>
+    <ItemGroup>
+      <_SKECSGaRequest Include="@(SKECSGaBuildRequest->'%(FullPath)'->DistinctWithCase())" />
+    </ItemGroup>
+    <Exec Command="$(_SKECSGaCommand)" ConsoleToMSBuild="true" WorkingDirectory="$(MSBuildProjectDirectory)"
+          EnvironmentVariables="_SKECS_GA_DOTNET_HOST=$(_SKECSGaDotNetHost);_SKECS_GA_BUILD_TOOL=$(_SKECSGaBuildToolPath);_SKECS_GA_REQUEST=%(_SKECSGaRequest.Identity);_SKECS_GA_OUTPUT=$(_SKECSGaOutputPath)">
+      <Output TaskParameter="ConsoleOutput" ItemName="_SKECSGaBuildOutput" />
+    </Exec>
+
+    <ItemGroup>
+      <_SKECSGaGeneratedSource Include="$([System.String]::Copy('%(_SKECSGaBuildOutput.Identity)').Substring(16))"
+                                Condition="$([System.String]::Copy('%(_SKECSGaBuildOutput.Identity)').StartsWith('SKECS_GA_SOURCE='))" />
+      <_SKECSGaGeneratedBundle Include="$([System.String]::Copy('%(_SKECSGaBuildOutput.Identity)').Substring(16))"
+                                Condition="$([System.String]::Copy('%(_SKECSGaBuildOutput.Identity)').StartsWith('SKECS_GA_BUNDLE='))" />
+      <SKECSGaBundle Include="@(_SKECSGaGeneratedBundle->DistinctWithCase())" />
+    </ItemGroup>
+    <Error Condition="'@(_SKECSGaGeneratedSource)' == ''" Text="The GA build tool did not report generated sources." />
+    <!-- Different artifacts for a single system can share the same generated CPU and row sources. -->
+    <GetFileHash Files="@(_SKECSGaGeneratedSource->DistinctWithCase())" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_SKECSGaHashedSource" />
+    </GetFileHash>
+    <ItemGroup>
+      <_SKECSGaSourceByHash Include="%(_SKECSGaHashedSource.FileHash)">
+        <SourcePath>%(_SKECSGaHashedSource.FullPath)</SourcePath>
+      </_SKECSGaSourceByHash>
+    </ItemGroup>
+    <RemoveDuplicates Inputs="@(_SKECSGaSourceByHash)">
+      <Output TaskParameter="Filtered" ItemName="_SKECSGaUniqueSource" />
+    </RemoveDuplicates>
+    <ItemGroup>
+      <Compile Include="@(_SKECSGaUniqueSource->'%(SourcePath)')" />
+    </ItemGroup>
+  </Target>
+</Project>
