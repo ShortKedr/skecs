@@ -873,17 +873,25 @@ public static partial class GaSemanticAnalysis
         {
             IOperation? condition;
             IOperation? step;
+            IOperation? trailingStep = null;
             switch (loop)
             {
                 case IForLoopOperation forLoop when forLoop.AtLoopBottom.Length == 1:
                     condition = forLoop.Condition;
                     step = forLoop.AtLoopBottom[0];
                     break;
-                case IWhileLoopOperation { ConditionIsTop: true, Body: IBlockOperation block } whileLoop when
-                    block.Operations.Length != 0 && !block.Descendants().OfType<IBranchOperation>().Any(branch =>
-                        branch.BranchKind == BranchKind.Continue && Equal(branch.Target, whileLoop.ContinueLabel)):
+                case IWhileLoopOperation { ConditionIsTop: true, ConditionIsUntil: false } whileLoop:
                     condition = whileLoop.Condition;
-                    step = block.Operations[block.Operations.Length - 1];
+                    step = whileLoop.Body;
+                    if (step is IBlockOperation block)
+                    {
+                        if (block.Operations.Length == 0)
+                            return false;
+                        step = block.Operations[0];
+                        if (block.Operations.Length > 1 && !block.Descendants().OfType<IBranchOperation>().Any(branch =>
+                            branch.BranchKind == BranchKind.Continue && Equal(branch.Target, whileLoop.ContinueLabel)))
+                            trailingStep = block.Operations[block.Operations.Length - 1];
+                    }
                     break;
                 default:
                     return false;
@@ -896,19 +904,12 @@ public static partial class GaSemanticAnalysis
                     or SpecialType.System_Int64 or SpecialType.System_UInt64))
                 return false;
 
-            int direction = step switch
+            int direction = LoopStepDirection(step, counter.Local);
+            if (direction == 0 && trailingStep is IExpressionStatementOperation trailing)
             {
-                IIncrementOrDecrementOperation { OperatorMethod: null, Target: ILocalReferenceOperation target }
-                    when Equal(counter.Local, target.Local) => step.Kind == OperationKind.Increment ? 1 : -1,
-                ICompoundAssignmentOperation { OperatorMethod: null, Target: ILocalReferenceOperation target } compound
-                    when Equal(counter.Local, target.Local) && IsOne(compound.Value.ConstantValue) => compound.OperatorKind switch
-                    {
-                        BinaryOperatorKind.Add => 1,
-                        BinaryOperatorKind.Subtract => -1,
-                        _ => 0
-                    },
-                _ => 0
-            };
+                step = trailing.Operation;
+                direction = LoopStepDirection(step, counter.Local);
+            }
             var comparisonMovesTowardLimit = (direction, compare.OperatorKind) switch
             {
                 (1, BinaryOperatorKind.LessThan) or (-1, BinaryOperatorKind.GreaterThan) => true,
@@ -941,6 +942,20 @@ public static partial class GaSemanticAnalysis
             }
             return true;
         }
+
+        private static int LoopStepDirection(IOperation? step, ILocalSymbol counter) => step switch
+        {
+            IIncrementOrDecrementOperation { OperatorMethod: null, Target: ILocalReferenceOperation target }
+                when Equal(counter, target.Local) => step.Kind == OperationKind.Increment ? 1 : -1,
+            ICompoundAssignmentOperation { OperatorMethod: null, Target: ILocalReferenceOperation target } compound
+                when Equal(counter, target.Local) && IsOne(compound.Value.ConstantValue) => compound.OperatorKind switch
+                {
+                    BinaryOperatorKind.Add => 1,
+                    BinaryOperatorKind.Subtract => -1,
+                    _ => 0
+                },
+            _ => 0
+        };
 
         private static bool IsOne(Optional<object?> constant) => constant.HasValue && constant.Value switch
         {

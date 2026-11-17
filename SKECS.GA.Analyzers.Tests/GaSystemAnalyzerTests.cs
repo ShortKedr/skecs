@@ -84,6 +84,13 @@ public sealed class GaSystemAnalyzerTests
                         if (j == 12) break;
                         --j;
                     }
+                    int k = 0;
+                    while (k < 4)
+                    {
+                        ++k;
+                        if (k == 2) continue;
+                        inventory.Items[k] += 1;
+                    }
                     switch (input.Mode)
                     {
                         case Mode.Move: inventory.Items[0] += j; break;
@@ -110,6 +117,7 @@ public sealed class GaSystemAnalyzerTests
     [InlineData("for (int i = 0; i >= int.MinValue; i--) value++;", "", "GA0004")]
     [InlineData("int bound = 10; for (int i = 0; i < bound; i++) Grow(ref bound);", "static void Grow(ref int input) => input++;", "GA0004")]
     [InlineData("int i = 0; while (i < 10) { if (value == 0) continue; i++; }", "", "GA0004")]
+    [InlineData("int i = 0; while (i < 10) { ++i; if (value == 0) continue; --i; }", "", "GA0004")]
     public async Task RejectsViolation(string body, string helper, string rule)
     {
         string source = $$"""

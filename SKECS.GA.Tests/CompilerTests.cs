@@ -266,6 +266,82 @@ public sealed class CompilerTests
     }
 
     [Fact]
+    public void BoundedWhilePreservesLeadingAndTrailingStepOrder()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                p.Point.X = 0;
+                checked
+                {
+                    int i = 0;
+                    while (i < 4)
+                    {
+                        if (i == v.X) break;
+                        p.Point.X = unchecked(p.Point.X * 10 + i);
+                        ++i;
+                    }
+                    int j = 4;
+                    while (j > 0)
+                    {
+                        j -= 1;
+                        if (j == v.Y) continue;
+                        p.Point.X = unchecked(p.Point.X * 10 + j);
+                    }
+                }
+                p.Point.Y = 100 / v.Y;
+            }
+            """);
+
+        Assert.Equal(new[] { "Point.X", "X", "Y", "Point.Y" }, program.Fields.Select(field => field.Path));
+        uint[] row = [0, 2, 1, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(new uint[] { 1320, 2, 1, 100 }, row);
+
+        row = [12, 2, 0, 34];
+        var fault = GaInterpreter.Execute(program, row)!.Value;
+        Assert.Equal(GaFaultKind.DivideByZero, fault.Kind);
+        Assert.Equal(6ul, fault.EvaluationOrdinal);
+        Assert.Equal(new uint[] { 12, 2, 0, 34 }, row);
+    }
+
+    [Fact]
+    public void BoundedWhileAllowsZeroTripsAndAnUnbracedStep()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                int i = int.MaxValue;
+                while (i < int.MaxValue) ++i;
+                p.Point.X = i;
+                int j = 0;
+                while (j < 4) j += 1;
+                p.Point.Y = j;
+            }
+            """);
+
+        uint[] row = [0, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(new uint[] { int.MaxValue, 4 }, row);
+    }
+
+    [Theory]
+    [InlineData("int i = 0; while (i < 65537) ++i;", "GA0100")]
+    [InlineData("int i = int.MaxValue; while (i <= int.MaxValue) ++i;", "GA0004")]
+    [InlineData("int i = 0; while (i < 4) { if (v.X == 0) continue; ++i; }", "GA0004")]
+    [InlineData("int i = 0; while (i < 4) { ++i; i = v.X; }", "GA0004")]
+    [InlineData("int i = 0; while (i < v.X) ++i;", "GA0100")]
+    [InlineData("int i = 0; p.Point.X = i; while (i < 4) ++i;", "GA0100")]
+    public void WhileRequiresAProvenPortableBound(string body, string diagnosticId)
+    {
+        var result = Analyze($$"""
+            public void Execute(ref Position p, in Velocity v) { {{body}} }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == diagnosticId);
+    }
+
+    [Fact]
     public void IntEventsAreBoundedAndPublishOnlyForSuccessfulRows()
     {
         var program = Compile("""
