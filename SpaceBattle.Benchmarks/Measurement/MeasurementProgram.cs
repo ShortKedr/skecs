@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using SpaceBattle;
+using SKECS.GA;
 
 internal static class MeasurementProgram
 {
@@ -13,13 +14,17 @@ internal static class MeasurementProgram
         try
         {
             string[] switches = ["--validate-deployment", "--validate-squads", "--validate-legacy-tactics", "--validate-damage", "--damage-study", "--validate", "--validate-ports", "--realtime"];
-            string[] values = ["--write-replay-oracle", "--config-json", "--framework", "--output", "--ticks", "--warmup", "--seconds", "--preset", "--seed", "--ships-per-team", "--churn", "--particles"];
+            string[] values = ["--write-replay-oracle", "--config-json", "--framework", "--output", "--ticks", "--warmup", "--seconds", "--preset", "--seed", "--ships-per-team", "--churn", "--particles",
+                .. HeadlessGaOptions.Flags];
             for (var i = 0; i < args.Length; i++)
             {
                 if (switches.Contains(args[i])) continue;
                 if (!values.Contains(args[i])) throw new ArgumentException("Unknown measurement option: " + args[i]);
                 if (++i == args.Length) throw new ArgumentException("Missing value: " + args[i - 1]);
             }
+            if (HeadlessGaOptions.Flags.Any(args.Contains) &&
+                (args.Contains("--write-replay-oracle") || switches.Any(flag => flag != "--realtime" && args.Contains(flag))))
+                throw new ArgumentException("GA options belong to the headless measurement run.");
             if (args.Contains("--write-replay-oracle")) { ReplayOracle.Write(args); return 0; }
             if (args.Contains("--validate-deployment")) { FleetDeploymentValidation.Run(); return 0; }
             if (args.Contains("--validate-squads")) { SquadCompositionValidation.Run(); TacticalScoringValidation.Run(); return 0; }
@@ -43,6 +48,8 @@ internal static class MeasurementProgram
             var options = RunOptions.Parse(args);
             var frameworkIndex = Array.IndexOf(args, "--framework");
             var framework = frameworkIndex < 0 ? "skecs" : args[frameworkIndex + 1];
+            if (options.Ga is not null && framework != "skecs")
+                throw new ArgumentException("Native GA particle expiry requires --framework skecs.");
             switch (framework)
             {
                 case "skecs": SkecsRunner.Run(options); break;
@@ -58,7 +65,8 @@ internal static class MeasurementProgram
     }
 }
 
-internal sealed record RunOptions(string Output, int Ticks, int WarmupTicks, BattleConfig Config, bool Realtime, string Preset)
+internal sealed record RunOptions(string Output, int Ticks, int WarmupTicks, BattleConfig Config, bool Realtime, string Preset,
+    HeadlessGaOptions? Ga = null)
 {
     public static RunOptions Parse(string[] args)
     {
@@ -85,10 +93,34 @@ internal sealed record RunOptions(string Output, int Ticks, int WarmupTicks, Bat
             EndlessReinforcements = game, ReplenishCarriers = !game
         };
         config.Validate();
+        HeadlessGaOptions? ga = null;
+        if (HeadlessGaOptions.Flags.Any(args.Contains))
+        {
+            string backend = Value("--ga-backend", "");
+            string bridge = Value("--ga-bridge", "");
+            string bundle = Value("--ga-bundle", "");
+            if (backend is not ("vulkan" or "d3d12") || string.IsNullOrWhiteSpace(bridge) ||
+                string.IsNullOrWhiteSpace(bundle) || !args.Contains("--output"))
+                throw new ArgumentException("GA measurement requires --ga-backend vulkan|d3d12, --ga-bridge, --ga-bundle, and --output.");
+            if (!int.TryParse(Value("--ga-device", "0"), out int deviceIndex) || deviceIndex < 0)
+                throw new ArgumentException("--ga-device must be a nonnegative device index.");
+            var policy = Value("--ga-policy", "require-gpu") switch
+            {
+                "auto" => GaPolicy.Auto,
+                "require-gpu" => GaPolicy.RequireGpu,
+                _ => throw new ArgumentException("--ga-policy must be auto or require-gpu."),
+            };
+            ga = new(backend, bridge, bundle, deviceIndex, policy);
+        }
         var workspace = new SKECS.BenchmarkTools.Workspace(SKECS.BenchmarkTools.Workspace.FindRoot(null));
         var output = workspace.ArtifactPath(Value("--output", "artifacts/benchmarks/space-battle-single/skecs.json"));
-        return new(output, ticks, warmup, config, args.Contains("--realtime"), preset);
+        return new(output, ticks, warmup, config, args.Contains("--realtime"), preset, ga);
     }
+}
+
+internal sealed record HeadlessGaOptions(string Backend, string Bridge, string Bundle, int DeviceIndex, GaPolicy Policy)
+{
+    internal static readonly string[] Flags = ["--ga-backend", "--ga-bridge", "--ga-bundle", "--ga-device", "--ga-policy"];
 }
 
 internal static class Runner

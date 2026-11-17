@@ -13,13 +13,19 @@ internal static class SkecsRunner
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, IncludeFields = true };
     public static void Run(RunOptions options)
     {
+        var gaSettings = options.Ga;
+        long setupStart = Stopwatch.GetTimestamp();
+        using var ga = gaSettings is null ? null :
+            NativeParticleExpiry.Open(gaSettings.Backend, gaSettings.Bridge, gaSettings.Bundle, gaSettings.DeviceIndex, gaSettings.Policy);
+        double gaSetupMs = Stopwatch.GetElapsedTime(setupStart).TotalMilliseconds;
         var reference = ReplayOracle.Reference(options.Config, options.Ticks);
         // Warmup uses a separate battle so measured gameplay starts at tick zero.
         using (var warmup = new Battle(options.Config))
         {
             for (var i = 0; i < options.WarmupTicks; i++)
             {
-                warmup.Step();
+                if (ga is null) warmup.Step();
+                else ga.Step(warmup);
             }
         }
         using var battle = new Battle(options.Config);
@@ -29,6 +35,7 @@ internal static class SkecsRunner
         ulong currentHash = replay.Capture();
         ReplayHash.RequireMatch(battle.Framework, 0, reference[0], currentHash);
         var timing = new double[options.Ticks]; var hudTiming = new double[options.Ticks]; var allocation = new long[options.Ticks];
+        var deviceRows = ga is null ? null : new int[options.Ticks];
         var stages = Battle.StageNames.Select(_ => new double[options.Ticks]).ToArray();
         var entityCounts = new (int Ships, int Projectiles, int Debris, int Particles, int Turrets)[options.Ticks];
         var structuralCounts = new (long Adds, long Removes)[options.Ticks];
@@ -45,10 +52,12 @@ internal static class SkecsRunner
         {
             var before = GC.GetAllocatedBytesForCurrentThread();
             var start = Stopwatch.GetTimestamp();
-            battle.Step();
+            if (ga is null) battle.Step();
+            else ga.Step(battle);
             timing[i] = (Stopwatch.GetTimestamp() - start) * 1000.0 / Stopwatch.Frequency;
             hudTiming[i] = battle.LastTickMs;
             allocation[i] = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (deviceRows is not null) deviceRows[i] = ga!.LastRows;
             currentHash = hashes[i] = replay.Capture();
             ReplayHash.RequireMatch(battle.Framework, battle.Tick, reference[i + 1], currentHash);
             for (var stage = 0; stage < stages.Length; stage++) stages[stage][i] = battle.LastStageMs[stage];
@@ -124,14 +133,18 @@ internal static class SkecsRunner
         }
         var report = new
         {
-            Metadata = new { Framework = fresh.Name, Implementation = "independent-native-cores-v1",
+            Metadata = new { Framework = fresh.Name, Implementation = ga is null ? "independent-native-cores-v1" : "native-skecs-ga-particle-expiry-v1",
                 ReplayValidation = new { Revision = ReplayHash.Revision, Reference = "SKECS", ReferenceProcess = "separate", ValidatedTicks = options.Ticks, InitialStateValidated = true, InitialStateHash = reference[0].ToString("X16"), TraceSha256 = ReplayHash.TraceDigest(hashes), TimerScope = "outside Step timer and allocation counter" }, Runtime = RuntimeInformation.FrameworkDescription, Os = RuntimeInformation.OSDescription,
                 Machine = BenchmarkMachineLabel.Value, Date = DateTimeOffset.Now, TieredCompilation = Environment.GetEnvironmentVariable("DOTNET_TieredCompilation"),
                 TargetTickRate = 60, BudgetMs = 1000.0 / 60, options.Ticks, options.WarmupTicks, Realtime = options.Realtime,
                 SimulatedSeconds = options.Ticks / 60.0, WallSeconds = elapsed, Options = options.Config, options.Preset,
-                TimingScope = "Outer tickMs includes Battle.Step systems/physics/structural commits; excludes setup, snapshots, validation and telemetry serialization",
+                TimingScope = ga is null
+                    ? "Outer tickMs includes Battle.Step systems/physics/structural commits; excludes setup, snapshots, validation and telemetry serialization"
+                    : "Outer tickMs includes particle expiry classification and the full Battle step, excluding startup, replay capture, comparison and telemetry serialization",
                 HudTimingScope = "Battle.LastTickMs as displayed by desktop HUD; consecutive 600-tick windows, excluding outer call timer overhead",
-                MemoryScope = "Managed tick allocation, managed heap, process working/private bytes; SKECS native storage separately; process includes harness buffers; process-wide GC counts include unmeasured validation/harness work",
+                MemoryScope = ga is null
+                    ? "Managed tick allocation, managed heap, process working/private bytes; SKECS native storage separately; process includes harness buffers; process-wide GC counts include unmeasured validation/harness work"
+                    : "Managed tick allocation on the host thread only; process memory and GC include GA worker and validation activity",
                 Collision = "circle-kernel-v1; homogeneous disk ships; relative-motion analytic disk/rectangle projectile CCD",
                 GameplayRules = new { Revision = ArmamentRules.Revision, TacticalRevision = TacticalRules.Revision, PhysicsRevision = PhysicsSettings.Revision,
                     DamageRevision = DamageRules.Revision, DamageProfiles = options.Config.Damage,
@@ -160,13 +173,29 @@ internal static class SkecsRunner
             Windows = windows, Checkpoints = checkpoints,
             Counters = battle.Counters.Copy(), Tactics = battle.Tactics, Checksum = currentHash.ToString("X16")
         };
-        File.WriteAllText(options.Output, JsonSerializer.Serialize(report, JsonOptions));
+        if (ga is not null && gaSettings is not null && deviceRows is not null)
+        {
+            var payload = JsonSerializer.SerializeToNode(report, JsonOptions)!.AsObject();
+            payload["Ga"] = JsonSerializer.SerializeToNode(new
+            {
+                gaSettings.Backend, gaSettings.DeviceIndex, Policy = gaSettings.Policy.ToString(),
+                Route = ga.Decision.Route.ToString(), Reason = ga.Decision.Reason.ToString(),
+                ga.Decision.Device, ga.Decision.ArtifactId, ga.Decision.Detail,
+                SetupMs = gaSetupMs, DeviceRows = deviceRows.Sum(rows => (long)rows),
+                DeviceTicks = deviceRows.Count(rows => rows > 0),
+            }, JsonOptions);
+            File.WriteAllText(options.Output, payload.ToJsonString(JsonOptions));
+        }
+        else
+            File.WriteAllText(options.Output, JsonSerializer.Serialize(report, JsonOptions));
         using var csv = new StreamWriter(csvPath);
-        csv.WriteLine("tick,simulationSeconds,tickMs,allocatedBytes,gen0,gen1,gen2,ships,projectiles,debris,particles,adds,removes,turrets,hudMs," + string.Join(',', Battle.StageNames) + ",stateHash");
+        csv.WriteLine("tick,simulationSeconds,tickMs,allocatedBytes,gen0,gen1,gen2,ships,projectiles,debris,particles,adds,removes,turrets,hudMs," + string.Join(',', Battle.StageNames) + ",stateHash"
+            + (deviceRows is null ? "" : ",gaDeviceRows"));
         for (var i = 0; i < options.Ticks; i++)
         {
             var c = entityCounts[i]; var s = structuralCounts[i]; var g = collections[i];
-            csv.WriteLine($"{i + 1},{(i + 1) / 60.0:R},{timing[i]:R},{allocation[i]},{g.Gen0},{g.Gen1},{g.Gen2},{c.Ships},{c.Projectiles},{c.Debris},{c.Particles},{s.Adds},{s.Removes},{c.Turrets},{hudTiming[i]:R}," + string.Join(',', stages.Select(stage => stage[i].ToString("R", CultureInfo.InvariantCulture))) + $",{hashes[i]:X16}");
+            csv.WriteLine($"{i + 1},{(i + 1) / 60.0:R},{timing[i]:R},{allocation[i]},{g.Gen0},{g.Gen1},{g.Gen2},{c.Ships},{c.Projectiles},{c.Debris},{c.Particles},{s.Adds},{s.Removes},{c.Turrets},{hudTiming[i]:R}," + string.Join(',', stages.Select(stage => stage[i].ToString("R", CultureInfo.InvariantCulture))) + $",{hashes[i]:X16}"
+                + (deviceRows is null ? "" : $",{deviceRows[i]}"));
         }
         Console.WriteLine($"Wrote {options.Output} and {csvPath}");
     }
