@@ -223,33 +223,56 @@ ComPtr<ID3D11Buffer> createBuffer(ID3D11Device* device, uint32_t words, UINT bin
 
 struct Buffers
 {
-    std::array<uint32_t, 3> lengths;
+    std::array<uint32_t, 3> capacities{}, viewLengths{};
     ComPtr<ID3D11Buffer> input;
     ComPtr<ID3D11ShaderResourceView> srv;
     std::array<ComPtr<ID3D11Buffer>, 2> output, readback;
     std::array<ComPtr<ID3D11UnorderedAccessView>, 2> uav;
 
-    Buffers(ID3D11Device* device, const std::array<uint32_t, 3>& words)
-        : lengths(words), input(createBuffer(device, words[0], D3D11_BIND_SHADER_RESOURCE))
+    void prepare(ID3D11Device* device, const std::array<uint32_t, 3>& words)
     {
-        D3D11_SHADER_RESOURCE_VIEW_DESC inputDesc{};
-        inputDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
-        inputDesc.Buffer.NumElements = words[0];
-        check(device->CreateShaderResourceView(input.Get(), &inputDesc, &srv), "D3D11 CreateShaderResourceView");
+        // Shader GetDimensions must see the live word count, even when a buffer retains its larger allocation.
+        if (viewLengths[0] != words[0])
+        {
+            const bool grow = capacities[0] < words[0];
+            auto buffer = grow ? createBuffer(device, words[0], D3D11_BIND_SHADER_RESOURCE) : input;
+            D3D11_SHADER_RESOURCE_VIEW_DESC description{};
+            description.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+            description.Buffer.NumElements = words[0];
+            ComPtr<ID3D11ShaderResourceView> view;
+            check(device->CreateShaderResourceView(buffer.Get(), &description, &view), "D3D11 CreateShaderResourceView");
+            input = std::move(buffer);
+            srv = std::move(view);
+            capacities[0] = std::max(capacities[0], words[0]);
+            viewLengths[0] = words[0];
+        }
 
-        D3D11_UNORDERED_ACCESS_VIEW_DESC outputDesc{};
-        outputDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
         for (size_t i = 0; i < output.size(); ++i)
         {
             const auto length = words[i + 1];
-            output[i] = createBuffer(device, length, D3D11_BIND_UNORDERED_ACCESS);
-            readback[i] = createBuffer(device, length, 0);
-            outputDesc.Buffer.NumElements = length;
-            check(device->CreateUnorderedAccessView(output[i].Get(), &outputDesc, &uav[i]),
-                "D3D11 CreateUnorderedAccessView");
+            if (viewLengths[i + 1] == length)
+                continue;
+            const bool grow = capacities[i + 1] < length;
+            auto buffer = grow ? createBuffer(device, length, D3D11_BIND_UNORDERED_ACCESS) : output[i];
+            auto staging = grow ? createBuffer(device, length, 0) : readback[i];
+            D3D11_UNORDERED_ACCESS_VIEW_DESC description{};
+            description.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+            description.Buffer.NumElements = length;
+            ComPtr<ID3D11UnorderedAccessView> view;
+            check(device->CreateUnorderedAccessView(buffer.Get(), &description, &view), "D3D11 CreateUnorderedAccessView");
+            output[i] = std::move(buffer);
+            readback[i] = std::move(staging);
+            uav[i] = std::move(view);
+            capacities[i + 1] = std::max(capacities[i + 1], length);
+            viewLengths[i + 1] = length;
         }
     }
 };
+
+D3D11_BOX bufferRange(uint32_t words)
+{
+    return {0, 0, 0, static_cast<UINT>(words * sizeof(uint32_t)), 1, 1};
+}
 
 class MappedReadback
 {
@@ -288,7 +311,7 @@ class Kernel
     ComPtr<ID3D11DeviceContext> immediate;
     ComPtr<ID3D11ComputeShader> shader;
     ComPtr<ID3D11Query> completion;
-    std::unique_ptr<Buffers> cache;
+    Buffers buffers;
     std::mutex dispatchMutex;
     bool unavailable = false;
 
@@ -329,16 +352,12 @@ public:
         require(!unavailable, "D3D11 kernel has a failed dispatch");
         const std::array lengths{static_cast<uint32_t>(input.size()), static_cast<uint32_t>(output.size()),
             static_cast<uint32_t>(faults.size())};
-        if (!cache || cache->lengths != lengths)
-        {
-            cache.reset();
-            cache = std::make_unique<Buffers>(device.Get(), lengths);
-        }
-
-        auto& buffers = *cache;
-        immediate->UpdateSubresource(buffers.input.Get(), 0, nullptr, input.data(), 0, 0);
-        immediate->UpdateSubresource(buffers.output[0].Get(), 0, nullptr, output.data(), 0, 0);
-        immediate->UpdateSubresource(buffers.output[1].Get(), 0, nullptr, faults.data(), 0, 0);
+        buffers.prepare(device.Get(), lengths);
+        const auto inputRange = bufferRange(lengths[0]);
+        const std::array outputRanges{bufferRange(lengths[1]), bufferRange(lengths[2])};
+        immediate->UpdateSubresource(buffers.input.Get(), 0, &inputRange, input.data(), 0, 0);
+        immediate->UpdateSubresource(buffers.output[0].Get(), 0, &outputRanges[0], output.data(), 0, 0);
+        immediate->UpdateSubresource(buffers.output[1].Get(), 0, &outputRanges[1], faults.data(), 0, 0);
 
         ID3D11ShaderResourceView* readable = buffers.srv.Get();
         std::array<ID3D11UnorderedAccessView*, D3D11_PS_CS_UAV_REGISTER_COUNT> writable{};
@@ -353,7 +372,7 @@ public:
         immediate->CSSetUnorderedAccessViews(0, static_cast<UINT>(writable.size()), writable.data(), nullptr);
 
         for (size_t i = 0; i < buffers.output.size(); ++i)
-            immediate->CopyResource(buffers.readback[i].Get(), buffers.output[i].Get());
+            immediate->CopySubresourceRegion(buffers.readback[i].Get(), 0, 0, 0, 0, buffers.output[i].Get(), 0, &outputRanges[i]);
 
         unavailable = true;
         const auto deadline = Clock::now() + dispatchTimeout;
