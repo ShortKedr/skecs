@@ -3,6 +3,7 @@ using SKECS.GA;
 #if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.Metal;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 
@@ -17,9 +18,9 @@ if (args is ["cpu"] or ["cpu", "endurance"])
     return;
 }
 
-if (args.Length != (endurance ? 5 : 4) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+if (args.Length != (endurance ? 5 : 4) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Usage: ServiceContinuationConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <bridge> <index>) [endurance]");
+    throw new ArgumentException("Usage: ServiceContinuationConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles|metal> <bundle> <bridge> <index>) [endurance]");
 #else
 const int cycles = 1;
 #endif
@@ -51,7 +52,7 @@ const string lane = "webgpu";
 string stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "metal" => ".metallib", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
 using var nativeBackend = owner;
@@ -162,6 +163,12 @@ static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDispos
             : GaOpenGlBackend.Open(library);
         owner = gl;
         return gl.Devices;
+    }
+    if (backend == "metal")
+    {
+        var metal = GaMetalBackend.Open(library);
+        owner = metal;
+        return metal.Devices;
     }
     var d3d12 = GaD3D12Backend.Open(library);
     owner = d3d12;

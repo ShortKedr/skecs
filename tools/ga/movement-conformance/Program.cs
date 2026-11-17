@@ -94,7 +94,7 @@ var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 using IDisposable backend = Open(args[0], args[2], out var devices);
 Check(deviceIndex < devices.Count, $"Only {devices.Count} devices are available.");
-if (args[0] is "d3d11" or "opengl" or "gles")
+if (args[0] is "d3d11" or "opengl" or "gles" or "metal")
     VerifyStartup(contract, artifact, devices[deviceIndex]);
 using var startup = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [artifact])], [devices[deviceIndex]], allowExperimental: true);
 var device = devices[deviceIndex].Info;
@@ -154,20 +154,40 @@ static void VerifyStartup(GaContractIdentity contract, GaArtifactCandidate artif
     Check(absent.Decisions.Single() is { Route: GaRoute.Rejected, Reason: GaStartupReason.NoComputeApi },
         $"{api} RequireGpu accepted a missing device.");
 
-    string[] unverifiedOptions = device.Format == GaArtifactFormat.Dxbc
-        ? ["Slang downstream FXC"]
-        : bundle.Manifest.Toolchain.Options.Skip(1).ToArray();
-    var unverifiedCompiler = bundle.Manifest with
+    bool metal = device.Format == GaArtifactFormat.MetalLibrary;
+    if (metal)
     {
-        Toolchain = bundle.Manifest.Toolchain with { Options = unverifiedOptions }
-    };
-    var unverifiedCandidate = GaArtifactCandidate.Load(unverifiedCompiler.GetCanonicalBytes(), unverifiedCompiler.GetContentId(),
-        bundle.Artifact, bundle.Reflection, bundle.SourceMap);
-    Check(unverifiedCandidate.Bundle is not null, $"Invalid {api} compiler-options test fixture: {unverifiedCandidate.Error}");
-    using var unverified = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [unverifiedCandidate])],
-        [device], allowExperimental: true);
-    Check(unverified.Decisions.Single() is { Route: GaRoute.Rejected, Reason: GaStartupReason.IncompatibleManifest },
-        $"{api} accepted unverified compiler options.");
+        using var missing = GaStartup.Select(GaPolicy.Auto, [request], [], allowExperimental: true);
+        Check(missing.Decisions.Single() is { Route: GaRoute.Cpu, Reason: GaStartupReason.NoComputeApi },
+            "Metal Auto did not fall back without a device.");
+
+        var bindings = bundle.Manifest.DeclaredBindings.Select(binding => binding.LogicalResourceId == "gaInput"
+            ? binding with { Index = 29 } : binding).ToArray();
+        var wrongBinding = bundle.Manifest with { DeclaredBindings = bindings };
+        var badBinding = GaArtifactCandidate.Load(wrongBinding.GetCanonicalBytes(), wrongBinding.GetContentId(),
+            bundle.Artifact, bundle.Reflection, bundle.SourceMap);
+        Check(badBinding.Bundle is not null, $"Invalid Metal binding test fixture: {badBinding.Error}");
+        using var rejectedBinding = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [badBinding])], [device], allowExperimental: true);
+        Check(rejectedBinding.Decisions.Single() is { Route: GaRoute.Rejected, Reason: GaStartupReason.IncompatibleManifest },
+            "Metal accepted a binding that disagrees with the artifact layout.");
+    }
+    else
+    {
+        string[] unverifiedOptions = device.Format == GaArtifactFormat.Dxbc
+            ? ["Slang downstream FXC"]
+            : bundle.Manifest.Toolchain.Options.Skip(1).ToArray();
+        var unverifiedCompiler = bundle.Manifest with
+        {
+            Toolchain = bundle.Manifest.Toolchain with { Options = unverifiedOptions }
+        };
+        var unverifiedCandidate = GaArtifactCandidate.Load(unverifiedCompiler.GetCanonicalBytes(), unverifiedCompiler.GetContentId(),
+            bundle.Artifact, bundle.Reflection, bundle.SourceMap);
+        Check(unverifiedCandidate.Bundle is not null, $"Invalid {api} compiler-options test fixture: {unverifiedCandidate.Error}");
+        using var unverified = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [unverifiedCandidate])],
+            [device], allowExperimental: true);
+        Check(unverified.Decisions.Single() is { Route: GaRoute.Rejected, Reason: GaStartupReason.IncompatibleManifest },
+            $"{api} accepted unverified compiler options.");
+    }
 
     var wrongGroup = bundle.Manifest with
     {
@@ -181,11 +201,14 @@ static void VerifyStartup(GaContractIdentity contract, GaArtifactCandidate artif
     Check(candidate.Bundle is not null, $"Invalid {api} workgroup test fixture: {candidate.Error}");
     using var rejected = GaStartup.Select(GaPolicy.RequireGpu, [new(contract, [candidate])], [device], allowExperimental: true);
     using var fallback = GaStartup.Select(GaPolicy.Auto, [new(contract, [candidate])], [device], allowExperimental: true);
-    Check(rejected.Decisions.Single() is { Route: GaRoute.Rejected, Reason: GaStartupReason.PipelineCreationFailed },
+    var expected = metal ? GaStartupReason.IncompatibleManifest : GaStartupReason.PipelineCreationFailed;
+    Check(rejected.Decisions.Single() is { Route: GaRoute.Rejected, Reason: var rejectedReason } && rejectedReason == expected,
         $"{api} RequireGpu accepted a workgroup that disagrees with the shader.");
-    Check(fallback.Decisions.Single() is { Route: GaRoute.Cpu, Reason: GaStartupReason.PipelineCreationFailed },
+    Check(fallback.Decisions.Single() is { Route: GaRoute.Cpu, Reason: var fallbackReason } && fallbackReason == expected,
         $"{api} Auto did not fall back after rejecting a mismatched workgroup.");
-    Console.WriteLine($"{api} startup policies, compiler options, missing device and workgroup mismatch passed.");
+    Console.WriteLine(metal
+        ? "Metal startup policies, missing device, binding and workgroup mismatches passed."
+        : $"{api} startup policies, compiler options, missing device and workgroup mismatch passed.");
 }
 #endif
 

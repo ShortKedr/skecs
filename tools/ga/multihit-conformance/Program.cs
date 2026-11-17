@@ -5,6 +5,7 @@ using SKECS.GA;
 #if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.Metal;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 #endif
@@ -19,9 +20,9 @@ if (args.Length is 1 or 2 && args[0] == "cpu")
     await RunSuite("cpu", profile, null, null);
     return;
 }
-if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Usage: MultiHitConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index>) [profile]");
+    throw new ArgumentException("Usage: MultiHitConformance (cpu | <vulkan|d3d12|d3d11|opengl|gles|metal> <bundle> <native bridge> <device index>) [profile]");
 #endif
 
 var contract = new GaContractIdentity(MultiHitAdapterRowCodec.SystemId, "multi-hit-damage/1",
@@ -51,7 +52,7 @@ string lane = $"WebGPU {device.Device}";
 var stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "metal" => ".metallib", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
 using var backend = owner;
@@ -397,6 +398,12 @@ static IReadOnlyList<IGaDevice> Open(string backend, string library, out IDispos
             : GaOpenGlBackend.Open(library);
         owner = gl;
         return gl.Devices;
+    }
+    if (backend == "metal")
+    {
+        var metal = GaMetalBackend.Open(library);
+        owner = metal;
+        return metal.Devices;
     }
     var dx = GaD3D12Backend.Open(library);
     owner = dx;

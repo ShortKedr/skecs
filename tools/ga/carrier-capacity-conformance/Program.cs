@@ -5,6 +5,7 @@ using SKECS.GA;
 #if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.Metal;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 #endif
@@ -17,9 +18,9 @@ if (args is ["cpu", var cpuProfile])
     return;
 }
 
-if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+if (args.Length != 5 || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
     !int.TryParse(args[3], out int deviceIndex) || deviceIndex < 0)
-    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl|gles> <bundle> <native bridge> <device index> <profile>'.");
+    throw new ArgumentException("Use 'cpu <profile>' or '<vulkan|d3d12|d3d11|opengl|gles|metal> <bundle> <native bridge> <device index> <profile>'.");
 #endif
 
 var contract = new GaContractIdentity(CarrierAdapterRowCodec.SystemId, "carrier-capacity/1",
@@ -47,7 +48,7 @@ var device = backend.Info;
 string stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "metal" => ".metallib", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 using IDisposable backend = Open(args[0], args[2], out var devices);
 Require(deviceIndex < devices.Count, $"Only {devices.Count} devices are available.");
@@ -337,6 +338,12 @@ static IDisposable Open(string api, string library, out IReadOnlyList<IGaDevice>
             : GaOpenGlBackend.Open(library);
         devices = gl.Devices;
         return gl;
+    }
+    if (api == "metal")
+    {
+        var metal = GaMetalBackend.Open(library);
+        devices = metal.Devices;
+        return metal;
     }
     var d3d12 = GaD3D12Backend.Open(library);
     devices = d3d12.Devices;

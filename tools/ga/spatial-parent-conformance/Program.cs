@@ -8,6 +8,7 @@ using SKECS.GA.Backend.WebGpu;
 #else
 using SKECS.GA.Backend.D3D11;
 using SKECS.GA.Backend.D3D12;
+using SKECS.GA.Backend.Metal;
 using SKECS.GA.Backend.OpenGl;
 using SKECS.GA.Backend.Vulkan;
 #endif
@@ -53,14 +54,14 @@ if (args.Length is 1 or 2 && args[0] == "cpu")
     Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
     return;
 }
-if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles") ||
+if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
     !int.TryParse(args[3], out int index) || index < 0)
-    throw new ArgumentException("Usage: SpatialParentConformance cpu [profile] | <vulkan|d3d12|d3d11|opengl|gles> <bundle> <native library> <device index> [profile]");
+    throw new ArgumentException("Usage: SpatialParentConformance cpu [profile] | <vulkan|d3d12|d3d11|opengl|gles|metal> <bundle> <native library> <device index> [profile]");
 
 var stem = Path.Combine(args[1], contract.SystemId);
 var artifact = GaArtifactCandidate.Load(File.ReadAllBytes(stem + ".manifest.json"),
     File.ReadAllText(stem + ".content-id").Trim(),
-    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
+    File.ReadAllBytes(stem + (args[0] switch { "vulkan" => ".spv", "d3d11" => ".dxbc", "metal" => ".metallib", "opengl" or "gles" => ".glsl", _ => ".dxil" })),
     File.ReadAllBytes(stem + ".layout"), File.ReadAllBytes(stem + ".source-map.json"));
 var devices = Open(args[0], args[2], out var owner);
 using var native = owner;
@@ -156,6 +157,12 @@ static IReadOnlyList<IGaDevice> Open(string backend, string path, out IDisposabl
             : GaOpenGlBackend.Open(path);
         owner = gl;
         return gl.Devices;
+    }
+    if (backend == "metal")
+    {
+        var metal = GaMetalBackend.Open(path);
+        owner = metal;
+        return metal.Devices;
     }
     var dx = GaD3D12Backend.Open(path);
     owner = dx;
