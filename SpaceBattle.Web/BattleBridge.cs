@@ -382,7 +382,9 @@ public static unsafe partial class BattleBridge
         return checked((int)(nint)buffer);
     }
 
-    private static Battle Current => battle ?? throw new InvalidOperationException("Reset the battle first.");
+    private static Battle Current => gaStatus == "faulted"
+        ? throw new InvalidOperationException("Reset the battle after a failed GA tick.")
+        : battle ?? throw new InvalidOperationException("Reset the battle first.");
 
     private static void CaptureColliders(Battle current)
     {

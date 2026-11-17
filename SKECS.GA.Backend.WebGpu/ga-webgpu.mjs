@@ -208,11 +208,11 @@ export async function dispatchKernel(handle, groups, input, outputLength, faultL
         // Drain both mappings before releasing buffers, including after a scoped error.
         const [submitted, ...mapped] = await Promise.allSettled([submission, ...mappings]);
         if (submitted.status === 'rejected') throw submitted.reason;
+        requireDevice(owner);
         for (const mapping of mapped) {
             if (mapping.status === 'rejected') throw mapping.reason;
         }
         const buffers = submitted.value;
-        requireDevice(owner);
         const result = new Int32Array(outputLength + faultLength);
         try {
             result.set(new Int32Array(buffers.readback[0].getMappedRange()), 0);

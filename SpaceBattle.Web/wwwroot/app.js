@@ -61,6 +61,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       gaInitializing: "Particle expiry · Starting WebGPU",
       gaWebgpu: "Particle expiry · WebGPU",
       gaCpu: "Particle expiry · CPU",
+      gaFaulted: "WebGPU tick failed · reset to continue",
       error: "Simulation unavailable",
       destroyed: "Ship destroyed",
       ships: "ships",
@@ -149,6 +150,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       gaInitializing: "Срок жизни частиц · Запуск WebGPU",
       gaWebgpu: "Срок жизни частиц · WebGPU",
       gaCpu: "Срок жизни частиц · CPU",
+      gaFaulted: "Сбой тика WebGPU · нужен сброс",
       error: "Симуляция недоступна",
       destroyed: "Корабль уничтожен",
       ships: "кораблей",
@@ -229,6 +231,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     busy = false,
     runtimeStarted = false;
   let gaPending = null;
+  let gaFaulted = false;
   const completedDiagnostics = new Map();
   let diagnosticSnapshot = null, deferredColliders = null, deferredObserver = null;
   let observedPosition = null, observationMain = null, observationTarget = null,
@@ -481,7 +484,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   }
   function showColliders(enabled) {
     if (!ready) return;
-    if (gaPending) {
+    if (gaWorldUnavailable()) {
       deferredColliders = Boolean(enabled);
       return;
     }
@@ -499,9 +502,12 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     const started = performance.now();
     acceptAdvance(bridge.Advance(ticks), started, ticks);
   }
-  const gaLabels = { off: "gaOff", initializing: "gaInitializing", webgpu: "gaWebgpu", cpu: "gaCpu" };
+  const gaLabels = { off: "gaOff", initializing: "gaInitializing", webgpu: "gaWebgpu", cpu: "gaCpu", faulted: "gaFaulted" };
   function gaStatus() {
     return ready && framework === "skecs-ga" ? bridge.GaStatus() : "off";
+  }
+  function gaWorldUnavailable() {
+    return gaPending !== null || gaFaulted;
   }
   function updateGaStatus() {
     const label = $("ga-status");
@@ -545,6 +551,13 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     if (pending.reset) {
       gaPending = null;
       resetBattle(pending.reset);
+      return false;
+    }
+    if (gaStatus() === "faulted") {
+      gaPending = null;
+      gaFaulted = true;
+      setPaused(true);
+      updateGaStatus();
       return false;
     }
     if (ready && (manual || (!paused && !document.hidden))) {
@@ -598,6 +611,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       framework = requested;
       $("framework-name").textContent = frameworks[framework].label;
       let pointer = bridge.Reset(profile, seed);
+      gaFaulted = false;
       if (colliderDebug) pointer = bridge.DebugColliders(true);
       revisions ||= { revision: bridge.Revision(), fleetRevision: bridge.FleetRevision(), deploymentRevision: bridge.DeploymentRevision(),
         physicsRevision: bridge.PhysicsRevision(), damageRevision: bridge.DamageRevision(), tacticalRevision: bridge.TacticalRevision() };
@@ -624,7 +638,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     }
   }
   function setPaused(value) {
-    paused = value;
+    paused = value || gaFaulted;
     accumulator = 0;
     last = 0;
     ticksPerSecond = rateTicks = 0;
@@ -697,7 +711,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   function observe(serial) {
     if (!ready || serial === null || serial < 0) return null;
     const row = snapshot.ships.find(r => r[0] === serial);
-    if (gaPending) return row ? observationRow(row) : null;
+    if (gaWorldUnavailable()) return row ? observationRow(row) : null;
     if (!bridge.ShipObservation(serial, 0)) return null;
     const ship = row ? observationRow(row) : { serial, x: bridge.ShipObservation(serial, 3), y: bridge.ShipObservation(serial, 4),
       radius: bridge.ShipObservation(serial, 5), team: bridge.ShipObservation(serial, 6), kind: bridge.ShipObservation(serial, 7),
@@ -707,7 +721,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     return ship;
   }
   function observeShip(serial) {
-    if (gaPending) deferredObserver = serial;
+    if (gaWorldUnavailable()) deferredObserver = serial;
     else bridge.ObserveShip(serial);
   }
   function stopFollowing(clearNative = true) {
@@ -725,7 +739,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     following = true;
     observationReason = "selected";
     observeShip(selected);
-    if (gaPending) {
+    if (gaWorldUnavailable()) {
       observationMain = ship;
       observationTarget = null;
       observedPosition = { x: ship.x, y: ship.y };
@@ -1383,6 +1397,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
   }
   async function diagnosticSample({ mode, ticks = 1, renders = 1 } = {}) {
     if (!diagnosticMode || !ready || busy || fatalError) throw new Error("Paused diagnostic page required");
+    if (gaWorldUnavailable()) throw new Error("A completed simulation tick is required");
     if (!["simulation", "render", "minimal", "normal"].includes(mode) ||
         !Number.isInteger(ticks) || ticks < 0 || ticks > 120 ||
         !Number.isInteger(renders) || renders < 0 || renders > 120)
@@ -1426,6 +1441,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     if (!ready) throw new Error("Simulation not ready");
     if (busy || (gaPending && !gaPending.prepared)) throw new Error("Simulation advancement already pending");
     if (!Number.isFinite(ms) || ms < 0) throw new Error("Invalid duration");
+    if (gaFaulted) return publishedSnapshot();
     busy = true;
     try {
       let ticks = Math.round((ms * 60) / 1000);
@@ -1455,7 +1471,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
     if (!ready || !snapshot) return null;
     if (framework !== "skecs-ga") return read();
     // Compute expensive diagnostics only on demand at a completed boundary.
-    if (!gaPending && !completedDiagnostics.has(name)) completedDiagnostics.set(name, read());
+    if (!gaWorldUnavailable() && !completedDiagnostics.has(name)) completedDiagnostics.set(name, read());
     return completedDiagnostics.get(name) ?? null;
   }
   function tacticCounters() {
@@ -1587,7 +1603,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
       return { enabled: colliderDebug, ...colliderSummary(colliderRows), rows: colliderDetails(colliderRows) };
     },
     refresh: () => {
-      if (gaPending) return publishedSnapshot();
+      if (gaWorldUnavailable()) return publishedSnapshot();
       accept(bridge.Snapshot());
       updateUI();
       draw();

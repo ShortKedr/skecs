@@ -98,6 +98,12 @@ try {
         }
         return adapter;
       };
+      const requestDevice = GPUAdapter.prototype.requestDevice;
+      GPUAdapter.prototype.requestDevice = async function (...args) {
+        const device = await requestDevice.apply(this, args);
+        probe.device = device;
+        return device;
+      };
       const submit = GPUQueue.prototype.submit, mapAsync = GPUBuffer.prototype.mapAsync;
       GPUQueue.prototype.submit = function (...args) {
         const result = submit.apply(this, args);
@@ -373,9 +379,60 @@ try {
   assert.equal(afterReset.ga.status, "webgpu");
   receipt.deferredReset = { previousTick: beforeReset.tick, newTick: reset.state.tick, seed: reset.state.seed,
     resetChecksum: reset.state.checksum, commitDelta: reset.calls.commits - resetCalls.commits, afterReset };
+
+  await advance(warmTicks - 1);
+  const beforeLoss = await page.evaluate(async () => {
+    const probe = window.publicationProbe;
+    window.spaceBattle.pause(true);
+    const state = probe.state();
+    probe.arm();
+    return { tick: state.tick, checksum: state.checksum, rows: state.ga.deviceRows,
+      digest: await probe.digest(window.spaceBattle.snapshot), calls: probe.calls() };
+  });
+  const interrupted = advance(1);
+  interrupted.catch(() => {});
+  await page.waitForFunction(() => window.publicationProbe.gate?.mapped === 2, undefined, wait);
+  const loss = await page.evaluate(async () => {
+    const probe = window.publicationProbe;
+    probe.device.destroy();
+    const { reason, message } = await probe.device.lost;
+    probe.release();
+    return { reason, message };
+  });
+  assert.equal(loss.reason, "destroyed");
+  const interruptedState = await interrupted;
+  assert.equal(interruptedState.ga.status, "faulted");
+  assert.equal(interruptedState.tick, beforeLoss.tick);
+  assert.equal(interruptedState.checksum, beforeLoss.checksum);
+  assert.equal(interruptedState.ga.deviceRows, beforeLoss.rows);
+  const heldFault = await page.evaluate(async () => {
+    const api = window.spaceBattle, probe = window.publicationProbe;
+    api.pause(false);
+    await window.advanceTime(1000);
+    const snapshot = api.refresh();
+    api.showColliders(false);
+    api.validate();
+    return { calls: probe.calls(), digest: await probe.digest(snapshot) };
+  });
+  assert.equal(heldFault.digest, beforeLoss.digest);
+  assert.equal(heldFault.calls.submits, beforeLoss.calls.submits + 1);
+  assert.equal(heldFault.calls.commits, beforeLoss.calls.commits);
+  assert.deepEqual(heldFault.calls.reads, beforeLoss.calls.reads);
+  assert.match(await page.locator("#ga-status").textContent(), /reset to continue/i);
+
+  await setSeed(resetSeed);
+  const lossReset = await advance(0);
+  assert.equal(lossReset.tick, 0);
+  assert.equal(lossReset.checksum, cpuReset.checksum);
+  const lossRestart = await advance(1);
+  assert.equal(lossRestart.tick, 1);
+  assert.equal(lossRestart.checksum, cpuResetNext.checksum);
+  assert.equal(lossRestart.ga.status, "webgpu");
+  receipt.deviceLoss = { loss, interruptedState, heldFault, lossReset, lossRestart };
+
   assert.deepEqual(errors, []);
   receipt.status = "passed";
-  console.log(`PASS ${channel}: 12-tick backlog, real heap growth, renderer isolation, paused commit, reset and exact CPU replay`);
+  console.log(`PASS ${channel}: frame publication, device loss, explicit reset and exact CPU replay`);
 } catch (error) {
   receipt.status = "failed";
   receipt.error = error.stack || String(error);

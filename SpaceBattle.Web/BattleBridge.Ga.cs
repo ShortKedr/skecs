@@ -64,11 +64,13 @@ public static partial class BattleBridge
                         expired = new(rows.Count);
                         for (int i = 0; i < rows.Count; i++) expired.Add(rows[i].Entity, flags[i]);
                     }
-                    catch (JSException)
+                    catch (Exception failure) when (failure is JSException or InvalidDataException)
                     {
                         if (battle != current) return;
+                        gaStatus = "faulted";
                         ReleaseGaGpu();
-                        gaStatus = "cpu";
+                        Console.WriteLine($"WebGPU particle expiry faulted at tick {tick}: {failure.Message}");
+                        return;
                     }
                 }
             }
