@@ -28,11 +28,19 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private readonly List<GaBufferField> _bufferFields = new();
     private readonly Dictionary<string, int> _bufferFieldIndices = new(StringComparer.Ordinal);
     private readonly List<GaScalar> _localTypes = new();
+    private readonly List<GaStore> _scalarDefaults = new();
     private IParameterSymbol? _context;
     private GaSnapshotLayout? _snapshotLayout;
     private INamedTypeSymbol? _resourceType;
     private INamedTypeSymbol? _bufferType;
     private bool _insideLoop;
+    private bool _hasLoopBranches;
+    private LoopControl? _loopControl;
+
+    private sealed record LoopControl(ILabelSymbol Exit, ILabelSymbol Continue, GaSlot State);
+    private const uint LoopRunning = 0;
+    private const uint LoopContinue = 1;
+    private const uint LoopBreak = 2;
 
     internal GaProgram Lower(string systemId, string sourceDigest, IOperation body)
     {
@@ -66,7 +74,11 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         _bufferType = ReadDeclaredInput("GaReadBuffer", "read buffer element type");
         FindOptionalLocals(body);
         var lowered = LowerStatement(body);
-        var root = new GaBlock([.. _optionalDefaults, lowered]);
+        // The guarded tail excludes paths that exit a loop body. Roslyn already proved
+        // definite assignment on the source paths, so these defaults are unobservable.
+        var root = _hasLoopBranches
+            ? new GaBlock([.. _optionalDefaults, .. _scalarDefaults, lowered])
+            : new GaBlock([.. _optionalDefaults, lowered]);
         try
         {
             return new GaProgram(systemId, sourceDigest, components.ToArray(), _schema.ToArray(), _localTypes.ToArray(),
@@ -200,7 +212,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         switch (operation)
         {
             case IBlockOperation block:
-                return new GaBlock(block.Operations.Select(LowerStatement).ToArray());
+                return LowerBlock(block.Operations);
             case IExpressionStatementOperation expression:
                 return LowerStatement(expression.Operation);
             case IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
@@ -252,9 +264,10 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 var type = Scalar(declarator.Symbol.Type, declarator);
                 var local = AddLocal(type);
                 _locals.Add(declarator.Symbol, local);
-                return declarator.Initializer == null
-                    ? new GaBlock(Array.Empty<GaStatement>())
-                    : new GaStore(local, LowerValue(declarator.Initializer.Value));
+                if (declarator.Initializer != null)
+                    return new GaStore(local, LowerValue(declarator.Initializer.Value));
+                _scalarDefaults.Add(new GaStore(local, new GaConstant(type, 0, Source(declarator))));
+                return new GaBlock([]);
             case ISimpleAssignmentOperation assignment when !assignment.IsRef:
                 if (FindInlineAccess(assignment.Target) is { } assignmentAccess)
                 {
@@ -286,11 +299,68 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                     branch.WhenFalse == null ? null : LowerStatement(branch.WhenFalse));
             case IForLoopOperation loop:
                 return LowerFor(loop);
+            case IBranchOperation branch when LoopBranch(branch) is { } state:
+                return SetLoopState(state, Source(branch));
             case ISwitchOperation match:
                 return LowerSwitch(match);
             default:
                 throw Unsupported(operation);
         }
+    }
+
+    private uint? LoopBranch(IBranchOperation branch)
+    {
+        if (_loopControl is not { } control)
+            return null;
+        return branch.BranchKind switch
+        {
+            BranchKind.Break when SymbolEqualityComparer.Default.Equals(branch.Target, control.Exit) => LoopBreak,
+            BranchKind.Continue when SymbolEqualityComparer.Default.Equals(branch.Target, control.Continue) => LoopContinue,
+            _ => null
+        };
+    }
+
+    private GaStore SetLoopState(uint state, GaSourceSpan source) =>
+        new(_loopControl!.State, new GaConstant(GaScalar.UInt32, state, source));
+
+    private GaValue TestLoopState(uint state, GaBinaryOperator op, GaSourceSpan source) =>
+        new GaBinary(GaScalar.Bool, op, new GaLoad(_loopControl!.State, source),
+            new GaConstant(GaScalar.UInt32, state, source), false, source);
+
+    private GaBlock LowerBlock(IReadOnlyList<IOperation> operations, ILabelSymbol? switchExit = null)
+    {
+        var statements = new List<GaStatement>(operations.Count);
+        var tails = new Stack<(List<GaStatement> Before, GaValue Condition)>();
+        for (int i = 0; i < operations.Count; i++)
+        {
+            var operation = operations[i];
+            if (switchExit != null && i == operations.Count - 1)
+            {
+                if (operation is IBranchOperation { BranchKind: BranchKind.Break } branch &&
+                    SymbolEqualityComparer.Default.Equals(branch.Target, switchExit))
+                    break;
+                if (operation is IBlockOperation block)
+                {
+                    statements.Add(LowerBlock(block.Operations, switchExit));
+                    break;
+                }
+            }
+            statements.Add(LowerStatement(operation));
+            if (_loopControl != null && i < operations.Count - 1 &&
+                operation.DescendantsAndSelf().OfType<IBranchOperation>().Any(branch => LoopBranch(branch).HasValue))
+            {
+                // Keep declarations and their uses together in the guarded tail.
+                tails.Push((statements, TestLoopState(LoopRunning, GaBinaryOperator.Equal, Source(operation))));
+                statements = [];
+            }
+        }
+        while (tails.TryPop(out var tail))
+        {
+            if (statements.Count != 0)
+                tail.Before.Add(new GaIf(tail.Condition, new GaBlock(statements), null));
+            statements = tail.Before;
+        }
+        return new GaBlock(statements);
     }
 
     private GaValue LowerCompound(ICompoundAssignmentOperation compound, GaSlot previous) =>
@@ -584,8 +654,30 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
 
         _insideLoop = true;
         var before = LowerStatement(loop.Before[0]);
-        var repeated = new GaLoop(LowerValue(comparison), LowerStatement(loop.Body),
-            LowerStatement(loop.AtLoopBottom[0]), (int)iterations);
+        var condition = LowerValue(comparison);
+        bool hasBranches = loop.Body.DescendantsAndSelf().OfType<IBranchOperation>().Any(branch =>
+            branch.BranchKind == BranchKind.Break && SymbolEqualityComparer.Default.Equals(branch.Target, loop.ExitLabel) ||
+            branch.BranchKind == BranchKind.Continue && SymbolEqualityComparer.Default.Equals(branch.Target, loop.ContinueLabel));
+        GaStatement body;
+        GaStatement increment;
+        if (hasBranches)
+        {
+            _hasLoopBranches = true;
+            _loopControl = new LoopControl(loop.ExitLabel, loop.ContinueLabel, AddLocal(GaScalar.UInt32));
+            var source = Source(comparison);
+            var notBreaking = TestLoopState(LoopBreak, GaBinaryOperator.NotEqual, source);
+            before = new GaBlock([before, SetLoopState(LoopRunning, source)]);
+            condition = new GaBinary(GaScalar.Bool, GaBinaryOperator.AndAlso, notBreaking, condition, false, source);
+            body = new GaBlock([SetLoopState(LoopRunning, source), LowerStatement(loop.Body)]);
+            increment = new GaIf(notBreaking, LowerStatement(loop.AtLoopBottom[0]), null);
+            _loopControl = null;
+        }
+        else
+        {
+            body = LowerStatement(loop.Body);
+            increment = LowerStatement(loop.AtLoopBottom[0]);
+        }
+        var repeated = new GaLoop(condition, body, increment, (int)iterations);
         _insideLoop = false;
         return new GaBlock(new[] { before, repeated });
     }
@@ -613,7 +705,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                 condition = condition == null ? equals :
                     new GaBinary(GaScalar.Bool, GaBinaryOperator.OrElse, condition, equals, false, source);
             }
-            var body = LowerArm(arm.Body, match.ExitLabel);
+            var body = LowerBlock(arm.Body, match.ExitLabel);
             if (arm.Clauses.Any(clause => clause is IDefaultCaseClauseOperation))
                 otherwise = body;
             if (condition != null)
@@ -627,28 +719,6 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         return new GaBlock(otherwise == null
             ? new GaStatement[] { new GaStore(test, value) }
             : new GaStatement[] { new GaStore(test, value), otherwise });
-    }
-
-    private GaBlock LowerArm(IReadOnlyList<IOperation> operations, ILabelSymbol breakTarget)
-    {
-        var statements = new List<GaStatement>(operations.Count);
-        for (int i = 0; i < operations.Count; i++)
-        {
-            var operation = operations[i];
-            if (i == operations.Count - 1)
-            {
-                if (operation is IBranchOperation { BranchKind: BranchKind.Break } branch &&
-                    SymbolEqualityComparer.Default.Equals(branch.Target, breakTarget))
-                    break;
-                if (operation is IBlockOperation block)
-                {
-                    statements.Add(LowerArm(block.Operations, breakTarget));
-                    break;
-                }
-            }
-            statements.Add(LowerStatement(operation));
-        }
-        return new GaBlock(statements);
     }
 
     private GaSlot AddLocal(GaScalar type)

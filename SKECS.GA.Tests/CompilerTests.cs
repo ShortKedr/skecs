@@ -191,6 +191,81 @@ public sealed class CompilerTests
     }
 
     [Fact]
+    public void LoopBranchesPreserveSwitchTargetsAndCheckedIncrement()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                checked
+                {
+                    for (int i = 0; i < 5; ++i)
+                    {
+                        if (i == 0)
+                            continue;
+                        int value = unchecked(i * 10);
+                        switch (i)
+                        {
+                            case 1:
+                                break;
+                            case 2:
+                                continue;
+                            default:
+                                value = unchecked(value + 1);
+                                break;
+                        }
+                        if (i == 4)
+                            break;
+                        context.Emit(value);
+                    }
+                }
+                p.Point.X = 100 / v.X;
+            }
+            """);
+
+        Assert.Equal(5, program.EventCapacity);
+        uint[] row = [0, 2];
+        int[] events = new int[program.EventCapacity];
+        Assert.Null(GaInterpreter.Execute(program, row, events, out int count));
+        Assert.Equal(2, count);
+        Assert.Equal(new[] { 10, 31 }, events[..count]);
+        Assert.Equal(50u, row[0]);
+
+        row = [0, 0];
+        var fault = GaInterpreter.Execute(program, row, events, out count)!.Value;
+        Assert.Equal(GaFaultKind.DivideByZero, fault.Kind);
+        Assert.Equal(4ul, fault.EvaluationOrdinal);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public void ContinueKeepsDefiniteAssignmentOnTheRemainingPaths()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                int outside;
+                for (int i = 0; i < 4; ++i)
+                {
+                    if (i == v.X)
+                        continue;
+                    else
+                        outside = i;
+                    int inside;
+                    if (i == 3)
+                        break;
+                    else
+                        inside = 10 * outside;
+                    p.Point.X += inside;
+                }
+            }
+            """);
+
+        uint[] row = program.Fields.Select(field => field.Path == "X" ? 1u : 0u).ToArray();
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(20u, row[Array.FindIndex(program.Fields.ToArray(), field => field.Path == "Point.X")]);
+    }
+
+    [Fact]
     public void IntEventsAreBoundedAndPublishOnlyForSuccessfulRows()
     {
         var program = Compile("""
