@@ -55,6 +55,24 @@ public sealed class GaSystemAnalyzerTests
     }
 
     [Fact]
+    public async Task TraversesCheckedAndUncheckedExpressionBodiedHelpers()
+    {
+        const string source = """
+            [SKECS.GA.SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(ref int value) => value = Twice(value) + Clock();
+                static int Twice(int x) => unchecked(x + x);
+                static int Clock() => checked(System.DateTime.UtcNow.Second + 1);
+            }
+            """;
+
+        var diagnostics = await Analyze(source);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Id == "GA0004");
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0003" && Text(diagnostic) == "System.DateTime.UtcNow");
+    }
+
+    [Fact]
     public async Task AdmitsBoundedLoopsReadonlyGetterSpecializationAndNestedInlineArray()
     {
         const string source = """

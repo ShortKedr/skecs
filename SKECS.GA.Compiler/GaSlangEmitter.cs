@@ -465,6 +465,9 @@ public static class GaSlangEmitter
                     return Literal(constant.Type, constant.Bits);
                 case GaLoad load:
                     return Slot(load.Slot);
+                case GaBoundValue bound:
+                    Line($"{Slot(bound.Slot)} = {Value(bound.Value)};");
+                    return Temp(Value(bound.Body), Type(bound.Type));
                 case GaArrayRead array:
                     string index = CheckedArrayIndex(array.Field, array.Index, array.Source);
                     string element = Temp(Literal(array.Type, 0), Type(array.Type));

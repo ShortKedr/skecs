@@ -289,6 +289,15 @@ internal static class GaVerifier
                         ? components[program.Fields[load.Slot.Index].Component].Origin != GaComponentOrigin.Optional
                         : assigned.Contains(load.Slot.Index));
                     break;
+                case GaBoundValue bound:
+                    CheckSlot(bound.Slot);
+                    Require(!bound.Slot.IsField && bound.Slot.Type == bound.Value.Type &&
+                        !assigned.Contains(bound.Slot.Index));
+                    CheckValue(bound.Value, assigned);
+                    Require(assigned.Add(bound.Slot.Index));
+                    CheckValue(bound.Body, assigned);
+                    assigned.Remove(bound.Slot.Index);
+                    break;
                 case GaHasOwn present:
                     CheckOptional(present.ComponentIndex);
                     break;

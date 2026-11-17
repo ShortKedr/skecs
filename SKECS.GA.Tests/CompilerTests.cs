@@ -147,10 +147,78 @@ public sealed class CompilerTests
             {
                 p.Point.X = Add(v.X, v.Y);
             }
-            private static int Add(int a, int b) => a + b;
+            private static int Add(int a, int b)
+            {
+                a += b;
+                return a;
+            }
             """);
         Assert.Null(result.Program);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0100");
+    }
+
+    [Fact]
+    public void ScalarHelpersBindNamedArgumentsAndSpecializeNestedGenerics()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                if (v.Flag)
+                    p.Point.X = Relay(Pick(second: 12 / v.Y, first: 24 / v.X));
+                p.Point.Y = 100 / v.X;
+            }
+            private static int Pick(int first, int second)
+            {
+                int doubled = unchecked(first + first);
+                return doubled;
+            }
+            private static T Relay<T>(T value) where T : unmanaged
+            {
+                T local = value;
+                return Identity(local);
+            }
+            private static T Identity<T>(T value) where T : unmanaged => value;
+            """);
+
+        uint[] Row(int x, int y, bool flag) => program.Fields.Select(field => field.Path switch
+        {
+            "X" => (uint)x, "Y" => (uint)y, "Flag" => flag ? 1u : 0u, _ => 0u
+        }).ToArray();
+
+        var row = Row(3, 2, true);
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(16u, row[Array.FindIndex(program.Fields.ToArray(), field => field.Path == "Point.X")]);
+
+        var first = GaInterpreter.Execute(program, Row(0, 0, true))!.Value;
+        var second = GaInterpreter.Execute(program, Row(0, 2, true))!.Value;
+        var skipped = GaInterpreter.Execute(program, Row(0, 0, false))!.Value;
+        Assert.Equal(0ul, first.EvaluationOrdinal);
+        Assert.Equal(1ul, second.EvaluationOrdinal);
+        Assert.Equal(0ul, skipped.EvaluationOrdinal);
+        Assert.True(first.Source.Start < second.Source.Start && second.Source.Start < skipped.Source.Start);
+    }
+
+    [Fact]
+    public void ExternalHelperChangesSourceIdentityAndKeepsItsFaultSpan()
+    {
+        const string execute = "public void Execute(ref Position p, in Velocity v) => p.Point.X = MathHelper.Divide(v.X);";
+        const string helper = "static class MathHelper { internal static int Divide(int value) => 17 / value; }";
+        var original = Assert.IsType<GaProgram>(Analyze(execute, helper).Program);
+        var changed = Assert.IsType<GaProgram>(Analyze(execute, helper.Replace("17", "19", StringComparison.Ordinal)).Program);
+        Assert.NotEqual(original.SourceDigest, changed.SourceDigest);
+        var fault = GaInterpreter.Execute(original, [0, 0])!.Value;
+        Assert.Equal("Helper.cs", fault.Source.File);
+        Assert.Equal("17 / value", helper.Substring(fault.Source.Start, fault.Source.Length));
+    }
+
+    [Fact]
+    public void RejectsHelperWithStaticInitialization()
+    {
+        var result = Analyze("public void Execute(ref Position p, in Velocity v) => p.Point.X = Utility.Identity(v.X);",
+            "static class Utility { static Utility() { } internal static int Identity(int x) => x; }");
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0100" &&
+            diagnostic.GetMessage().Contains("static initialization", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -855,7 +923,7 @@ public sealed class CompilerTests
         return result.Program!;
     }
 
-    private static GaCompilationResult Analyze(string body)
+    private static GaCompilationResult Analyze(string body, string? helper = null)
     {
         var syntax = CSharpSyntaxTree.ParseText("""
             using SKECS.GA;
@@ -874,7 +942,8 @@ public sealed class CompilerTests
             public partial struct Movement
             {
             """ + "\n" + body + "\n}", path: "Movement.cs");
-        var compilation = CSharpCompilation.Create("Fixtures", [syntax],
+        var trees = helper == null ? new[] { syntax } : new[] { syntax, CSharpSyntaxTree.ParseText(helper, path: "Helper.cs") };
+        var compilation = CSharpCompilation.Create("Fixtures", trees,
             new[]
             {
                 MetadataReference.CreateFromFile(typeof(object).Assembly.Location),

@@ -425,6 +425,12 @@ public static class GaInterpreter
                     return constant.Bits;
                 case GaLoad load:
                     return Load(load.Slot);
+                case GaBoundValue bound:
+                    ulong initializer = Read(bound.Value);
+                    if (Fault != null)
+                        return 0;
+                    Store(bound.Slot, initializer);
+                    return Read(bound.Body);
                 case GaHasOwn present:
                     return _row[_presenceOffsets[present.ComponentIndex]];
                 case GaResourceRead resource:

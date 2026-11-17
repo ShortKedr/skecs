@@ -216,6 +216,11 @@ public static partial class GaSemanticAnalysis
 
         private IOperation? GetBody(SyntaxNode? declaration)
         {
+            if (declaration is MethodDeclarationSyntax methodDeclaration &&
+                compilation.GetSemanticModel(methodDeclaration.SyntaxTree).GetOperation(methodDeclaration, cancellationToken)
+                    is IMethodBodyOperation methodBody)
+                return methodBody.BlockBody ?? methodBody.ExpressionBody;
+
             SyntaxNode? body = declaration switch
             {
                 BaseMethodDeclarationSyntax method => (SyntaxNode?)method.Body ?? method.ExpressionBody?.Expression,

@@ -52,7 +52,7 @@ public static class GaCompiler
                 reference.GetSyntax(cancellationToken).ToFullString().ReplaceLineEndings("\n"))
                 .OrderBy(source => source, StringComparer.Ordinal);
             var sourceDigest = GaArtifactManifest.ComputeDigest(Encoding.UTF8.GetBytes(string.Join("\n", sourceParts)));
-            return new GaCompilationResult(new GaLowerer(compilation.Options.SourceReferenceResolver, method)
+            return new GaCompilationResult(new GaLowerer(compilation, method, cancellationToken)
                 .Lower(systemId, sourceDigest, initial), diagnostics);
         }
         catch (GaLoweringException error)

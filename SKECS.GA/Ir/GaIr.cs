@@ -75,6 +75,8 @@ internal enum GaBinaryOperator
 internal abstract record GaValue(GaScalar Type, GaSourceSpan Source);
 internal sealed record GaConstant(GaScalar Type, ulong Bits, GaSourceSpan Source) : GaValue(Type, Source);
 internal sealed record GaLoad(GaSlot Slot, GaSourceSpan Source) : GaValue(Slot.Type, Source);
+internal sealed record GaBoundValue(GaSlot Slot, GaValue Value, GaValue Body, GaSourceSpan Source)
+    : GaValue(Body.Type, Source);
 internal sealed record GaCast(GaScalar Type, GaValue Operand, bool Checked, GaSourceSpan Source) : GaValue(Type, Source);
 internal sealed record GaUnary(GaScalar Type, GaUnaryOperator Operator, GaValue Operand, bool Checked, GaSourceSpan Source)
     : GaValue(Type, Source);

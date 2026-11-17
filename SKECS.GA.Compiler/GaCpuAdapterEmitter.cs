@@ -482,6 +482,7 @@ public static class GaCpuAdapterEmitter
         {
             GaConstant constant => Constant(constant),
             GaLoad load => Load(load.Slot),
+            GaBoundValue bound => $"(({Slot(bound.Slot)} = {Expression(bound.Value)}), {Expression(bound.Body)}).Item2",
             GaArrayRead read => ArrayRead(read),
             GaBufferRead read => BufferRead(read),
             GaBufferCount => "buffer.Count",

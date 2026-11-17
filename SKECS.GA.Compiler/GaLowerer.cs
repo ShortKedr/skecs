@@ -1,10 +1,13 @@
 using System.Globalization;
+using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace SKECS.GA;
 
-internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol entry)
+internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol entry, CancellationToken cancellationToken)
 {
     private readonly Dictionary<IParameterSymbol, GaComponent> _components = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<ITypeSymbol, (GaComponent Component, int Index)> _declaredAccesses = new(SymbolEqualityComparer.Default);
@@ -28,6 +31,8 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private readonly List<GaBufferField> _bufferFields = new();
     private readonly Dictionary<string, int> _bufferFieldIndices = new(StringComparer.Ordinal);
     private readonly List<GaScalar> _localTypes = new();
+    private readonly HashSet<string> _externalHelperSources = new(StringComparer.Ordinal);
+    private HelperFrame? _helper;
     private readonly List<GaStore> _scalarDefaults = new();
     private IParameterSymbol? _context;
     private GaSnapshotLayout? _snapshotLayout;
@@ -36,6 +41,9 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private bool _insideLoop;
     private bool _hasLoopBranches;
     private LoopControl? _loopControl;
+
+    private sealed record HelperFrame(GaSlot[] Parameters, Dictionary<ILocalSymbol, GaSlot> Locals,
+        Dictionary<ITypeParameterSymbol, ITypeSymbol> Types);
 
     private sealed record LoopControl(ILabelSymbol Exit, ILabelSymbol Continue, GaSlot State);
     private const uint LoopRunning = 0;
@@ -79,6 +87,11 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         var root = _hasLoopBranches
             ? new GaBlock([.. _optionalDefaults, .. _scalarDefaults, lowered])
             : new GaBlock([.. _optionalDefaults, lowered]);
+        if (_externalHelperSources.Count != 0)
+        {
+            string helpers = string.Join("\n", _externalHelperSources.OrderBy(source => source, StringComparer.Ordinal));
+            sourceDigest = GaArtifactManifest.ComputeDigest(Encoding.UTF8.GetBytes(sourceDigest + "\n" + helpers));
+        }
         try
         {
             return new GaProgram(systemId, sourceDigest, components.ToArray(), _schema.ToArray(), _localTypes.ToArray(),
@@ -797,7 +810,7 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
 
     private GaValue LowerValue(IOperation operation)
     {
-        var type = Scalar(operation.Type, operation);
+        var type = Scalar(ResolveHelperType(operation.Type), operation);
         var source = Source(operation);
         if (operation.ConstantValue is { HasValue: true } constant)
             return new GaConstant(type, constant.Value switch
@@ -826,6 +839,10 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
                     "MaxValue" => long.MaxValue,
                     _ => throw Unsupported(operation, "This Fixed member has no GA intrinsic lowering.")
                 }, source),
+            IParameterReferenceOperation parameter when _helper != null =>
+                new GaLoad(_helper.Parameters[parameter.Parameter.Ordinal], source),
+            ILocalReferenceOperation local when _helper != null && _helper.Locals.TryGetValue(local.Local, out var slot) =>
+                new GaLoad(slot, source),
             ILocalReferenceOperation or IFieldReferenceOperation => new GaLoad(Slot(operation), source),
             IParenthesizedOperation parentheses => LowerValue(parentheses.Operand),
             IConversionOperation conversion when conversion.OperatorMethod != null &&
@@ -844,12 +861,91 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
             IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) =>
                 LowerSnapshotRead(invocation),
             IInvocationOperation invocation when IsFixed(invocation.TargetMethod.ContainingType) => LowerFixedCall(invocation),
+            IInvocationOperation invocation => LowerHelper(invocation),
             IConditionalOperation conditional when conditional.WhenFalse != null && !conditional.IsRef =>
                 new GaSelect(type, LowerValue(conditional.Condition), LowerValue(conditional.WhenTrue),
                     LowerValue(conditional.WhenFalse), source),
             IDefaultValueOperation => new GaConstant(type, 0, source),
             _ => throw Unsupported(operation)
         };
+    }
+
+    private GaValue LowerHelper(IInvocationOperation invocation)
+    {
+        var target = invocation.TargetMethod;
+        var definition = target.OriginalDefinition.PartialImplementationPart ?? target.OriginalDefinition;
+        if (target is not { IsStatic: true, MethodKind: MethodKind.Ordinary, ReturnsVoid: false,
+                ReturnsByRef: false, ReturnsByRefReadonly: false, ContainingType.IsGenericType: false } ||
+            definition.DeclaringSyntaxReferences is not [var reference] ||
+            reference.GetSyntax(cancellationToken) is not MethodDeclarationSyntax declaration ||
+            target.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsParams) ||
+            invocation.Arguments.Length != target.Parameters.Length ||
+            invocation.Arguments.Any(argument => argument.ArgumentKind != ArgumentKind.Explicit))
+            throw Unsupported(invocation, "Use a source-defined static scalar helper with explicit by-value arguments.");
+        if (!target.ContainingType.StaticConstructors.IsEmpty)
+            throw Unsupported(invocation, "A GA helper cannot depend on static initialization of its declaring type.");
+
+        var model = compilation.GetSemanticModel(declaration.SyntaxTree);
+        if (model.GetOperation(declaration, cancellationToken) is not IMethodBodyOperation body ||
+            (body.ExpressionBody ?? body.BlockBody) is not { Operations.Length: > 0 } block ||
+            block.Operations[^1] is not IReturnOperation { ReturnedValue: { } result })
+            throw Unsupported(invocation, "Use an expression body or a scalar return preceded by initialized locals.");
+
+        var source = Source(invocation);
+        var parameters = new GaSlot[target.Parameters.Length];
+        var bindings = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
+        // Named arguments still evaluate in source order. Bind each before entering the helper.
+        foreach (var argument in invocation.Arguments.OrderBy(argument => argument.Syntax.SpanStart))
+        {
+            var value = LowerValue(argument.Value);
+            int ordinal = argument.Parameter!.Ordinal;
+            var slot = AddLocal(Scalar(ResolveHelperType(target.Parameters[ordinal].Type), argument));
+            parameters[ordinal] = slot;
+            bindings.Add((slot, value, Source(argument)));
+        }
+
+        var types = new Dictionary<ITypeParameterSymbol, ITypeSymbol>(SymbolEqualityComparer.Default);
+        for (int i = 0; i < definition.TypeParameters.Length; i++)
+        {
+            var type = ResolveHelperType(target.TypeArguments[i])!;
+            _ = Scalar(type, invocation);
+            types.Add(definition.TypeParameters[i], type);
+        }
+
+        var previous = _helper;
+        var frame = new HelperFrame(parameters, new Dictionary<ILocalSymbol, GaSlot>(SymbolEqualityComparer.Default), types);
+        _helper = frame;
+        try
+        {
+            for (int i = 0; i < block.Operations.Length - 1; i++)
+            {
+                if (block.Operations[i] is not IVariableDeclarationGroupOperation group)
+                    throw Unsupported(block.Operations[i], "Use initialized scalar locals before the helper return.");
+                foreach (var declarator in group.Declarations.SelectMany(item => item.Declarators))
+                {
+                    if (declarator.Symbol.RefKind != RefKind.None || declarator.Initializer?.Value is not { } initializer)
+                        throw Unsupported(declarator, "Initialize the helper local by value.");
+                    var value = LowerValue(initializer);
+                    var slot = AddLocal(Scalar(ResolveHelperType(declarator.Symbol.Type), declarator));
+                    frame.Locals.Add(declarator.Symbol, slot);
+                    bindings.Add((slot, value, Source(declarator)));
+                }
+            }
+
+            GaValue lowered = LowerValue(result);
+            for (int i = bindings.Count - 1; i >= 0; i--)
+            {
+                var binding = bindings[i];
+                lowered = new GaBoundValue(binding.Slot, binding.Value, lowered, binding.Source);
+            }
+            if (!SymbolEqualityComparer.Default.Equals(definition.ContainingType, entry.ContainingType))
+                _externalHelperSources.Add(definition.GetDocumentationCommentId() + "\n" + declaration.ToFullString().ReplaceLineEndings("\n"));
+            return lowered;
+        }
+        finally
+        {
+            _helper = previous;
+        }
     }
 
     private bool IsResourcePath(IOperation operation)
@@ -1264,6 +1360,10 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
         attribute.AttributeClass?.ToDisplayString() == "System.Runtime.InteropServices.StructLayoutAttribute" &&
         attribute.ConstructorArguments[0].Value is 2);
 
+    private ITypeSymbol? ResolveHelperType(ITypeSymbol? type) =>
+        type is ITypeParameterSymbol parameter && _helper != null && _helper.Types.TryGetValue(parameter, out var argument)
+            ? argument : type;
+
     private static GaScalar Scalar(ITypeSymbol? type, IOperation operation)
     {
         if (IsFixed(type))
@@ -1297,7 +1397,8 @@ internal sealed class GaLowerer(SourceReferenceResolver? resolver, IMethodSymbol
     private GaSourceSpan Source(SyntaxNode syntax)
     {
         var path = syntax.SyntaxTree.FilePath;
-        return new GaSourceSpan(resolver?.NormalizePath(path, null) ?? path, syntax.SpanStart, syntax.Span.Length);
+        return new GaSourceSpan(compilation.Options.SourceReferenceResolver?.NormalizePath(path, null) ?? path,
+            syntax.SpanStart, syntax.Span.Length);
     }
 
     private static string QualifiedName(ITypeSymbol type) => type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
