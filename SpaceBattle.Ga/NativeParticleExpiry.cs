@@ -13,6 +13,9 @@ internal sealed class NativeParticleExpiry : IDisposable
     private readonly List<Battle.ParticleExpiryRow> _rows = [];
     private readonly Dictionary<EntityKey, bool> _expired = [];
     private uint[] _input = [];
+    private GaPackedSubmission? _pending;
+    private Battle? _pendingBattle;
+    private int _tick;
     private bool _faulted;
     private bool _disposed;
 
@@ -27,6 +30,7 @@ internal sealed class NativeParticleExpiry : IDisposable
 
     internal GaStartupDecision Decision { get; }
     internal int LastRows { get; private set; }
+    internal bool HasPending => _pending is not null;
 
     internal static NativeParticleExpiry Open(string backend, string nativeBridge, string bundleDirectory, int deviceIndex, GaPolicy policy)
     {
@@ -115,32 +119,38 @@ internal sealed class NativeParticleExpiry : IDisposable
 
     internal void Step(Battle battle)
     {
+        if (TryBegin(battle))
+            Complete(wait: true);
+    }
+
+    // A false return means the tick completed inline, including an empty GPU batch.
+    internal bool TryBegin(Battle battle)
+    {
         ArgumentNullException.ThrowIfNull(battle);
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_faulted)
-            throw new InvalidOperationException("Particle expiry GA faulted. Discard the failed host before continuing.");
+        if (_faulted || _pending is not null)
+            throw new InvalidOperationException("Particle expiry requires an idle, healthy host.");
 
         LastRows = 0;
-        if (_kernel is null)
-        {
-            battle.Step();
-            return;
-        }
-
         try
         {
+            if (_kernel is null)
+            {
+                battle.Step();
+                return false;
+            }
+
             battle.CopyParticleExpiryRows(_rows);
             if (_rows.Count == 0)
             {
                 battle.Step();
-                return;
+                return false;
             }
 
-            int tick = unchecked(battle.Tick + 1);
+            _tick = unchecked(battle.Tick + 1);
             const int stride = ParticleExpiryAdapterRowCodec.WordsPerRow;
             const int resourceWords = ParticleExpiryAdapterRowCodec.TickResourceWords;
-            int rowWords = checked(_rows.Count * stride);
-            int inputWords = checked(1 + rowWords + resourceWords);
+            int inputWords = checked(1 + _rows.Count * stride + resourceWords);
             if (_input.Length < inputWords)
                 _input = new uint[inputWords];
             var input = _input.AsSpan(0, inputWords);
@@ -151,11 +161,33 @@ internal sealed class NativeParticleExpiry : IDisposable
                 input[1 + i * stride] = 0;
                 input[2 + i * stride] = unchecked((uint)_rows[i].ExpiresTick);
             }
-            ParticleExpiryAdapterRowCodec.TickResource.Pack(new ParticleExpiryFrame { Tick = tick }, input[^resourceWords..]);
-            var result = _kernel.BeginDispatch(input, stride).Drain();
+            ParticleExpiryAdapterRowCodec.TickResource.Pack(new ParticleExpiryFrame { Tick = _tick }, input[^resourceWords..]);
+            _pending = _kernel.BeginDispatch(input, stride);
+            _pendingBattle = battle;
+            return true;
+        }
+        catch
+        {
+            _faulted = true;
+            throw;
+        }
+    }
+
+    internal bool Complete(bool wait = false)
+    {
+        var pending = _pending ?? throw new InvalidOperationException("Particle expiry has no pending tick.");
+        if (!wait && !pending.IsCompleted)
+            return false;
+        _pending = null;
+        var battle = _pendingBattle!;
+        _pendingBattle = null;
+        try
+        {
+            var result = pending.Drain();
             if (result.FindFirstFault() is { } fault)
                 throw new InvalidDataException($"Particle expiry GA failed at row {fault.Row}: {fault.Fault}.");
-            if (result.RowCount != _rows.Count || result.Output.Length != rowWords)
+            const int stride = ParticleExpiryAdapterRowCodec.WordsPerRow;
+            if (result.RowCount != _rows.Count || result.Output.Length != checked(_rows.Count * stride))
                 throw new InvalidDataException("Particle expiry GA returned an invalid row count.");
 
             _expired.Clear();
@@ -163,18 +195,36 @@ internal sealed class NativeParticleExpiry : IDisposable
             {
                 int offset = i * stride;
                 uint flag = result.Output[offset];
-                if (flag > 1u || result.Output[offset + 1] != input[offset + 2])
+                if (flag > 1u || result.Output[offset + 1] != unchecked((uint)_rows[i].ExpiresTick))
                     throw new InvalidDataException($"Particle expiry GA returned an invalid row at index {i}.");
                 _expired.Add(_rows[i].Entity, flag != 0);
             }
-            battle.StepWithParticleExpiry(tick, _expired);
+            battle.StepWithParticleExpiry(_tick, _expired);
             LastRows = _rows.Count;
+            return true;
         }
         catch
         {
             _faulted = true;
             throw;
         }
+    }
+
+    internal bool TryDiscard()
+    {
+        if (_pending is not { } pending)
+            return true;
+        if (!pending.IsCompleted)
+            return false;
+        _pending = null;
+        _pendingBattle = null;
+        try { pending.Discard(); }
+        catch
+        {
+            _faulted = true;
+            throw;
+        }
+        return true;
     }
 
     public void Dispose()

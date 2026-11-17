@@ -12,6 +12,7 @@
     <ProjectReference Include="../tools/BenchmarkSupport/BenchmarkSupport.csproj" />
     <ProjectReference Include="../SKECS.GA.Backend.Vulkan/SKECS.GA.Backend.Vulkan.csproj" />
     <ProjectReference Include="../SKECS.GA.Backend.D3D12/SKECS.GA.Backend.D3D12.csproj" />
+    <Compile Include="../SpaceBattle.Ga/NativeParticleExpiry.cs" Link="Ga/NativeParticleExpiry.cs" />
     <Compile Include="../SpaceBattle.Web/Ga/ParticleExpiry.cs" Link="Ga/ParticleExpiry.cs" />
     <Compile Include="../SpaceBattle.Web/Ga/Bundle/ga-row-codec.g.cs" Link="Ga/ga-row-codec.g.cs" />
   </ItemGroup>

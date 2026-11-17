@@ -10,7 +10,7 @@ using SimulationBattle = SpaceBattle.Simulations.Skecs.Battle;
 
 namespace SpaceBattle.Game.Skecs;
 
-internal sealed class BattleApp : IDisposable
+internal sealed partial class BattleApp : IDisposable
 {
     private readonly IWindow window;
     private readonly BattleConfig config;
@@ -137,6 +137,7 @@ internal sealed class BattleApp : IDisposable
             EndlessReinforcements=!args.Contains("--finite"), ReplenishCarriers=false,
             FleetComposition=FleetComposition.LightSwarm,
             Deployment=args.Contains("--legacy-deployment")?FleetDeployment.LegacyRandom:FleetDeployment.Tactical };config.Validate();
+        ConfigureGa(args, Value, ProfileNumber);
         battle=new(config);
         var options=WindowOptions.Default;
         int width=Number("--width",1440), height=Number("--height",900);
@@ -145,9 +146,15 @@ internal sealed class BattleApp : IDisposable
         options.Title="Space Battle | Skecs"; options.API=new GraphicsAPI(ContextAPI.OpenGL,ContextProfile.Core,ContextFlags.ForwardCompatible,new APIVersion(3,3));
         options.IsVisible=!hidden&&(!(validateEffects||validateGunTints||validateSceneStyle)||args.Contains("--visible"))&&(capture is null || args.Contains("--visible")); options.VSync=profileFrames==0&&capture is null;
         if(profileFrames>0) {options.FramesPerSecond=profilePaced?config.TickRate:0;options.UpdatesPerSecond=0;}
+        if(gaValidationTicks>0) {options.VSync=false;options.FramesPerSecond=0;options.UpdatesPerSecond=0;}
         window=Window.Create(options);window.Load+=Load;window.Update+=Update;window.Render+=Render;window.Closing+=DisposeGraphics;
     }
-    public void Run()=>window.Run();
+    public void Run()
+    {
+        OpenGa();
+        window.Run();
+        if (gaValidationError is not null) throw gaValidationError;
+    }
     private void Load()
     {
         gl=window.CreateOpenGL();renderer=new(gl);input=window.CreateInput();
@@ -194,6 +201,8 @@ internal sealed class BattleApp : IDisposable
         replayStartTick=battle.Tick;
         ResetRates();
         liveValidationStart=Timestamp();
+        RefreshPresentation();
+        if(gaValidationTicks>0) RecordValidationTick();
         if(profileFrames>0)profiler=new FrontendProfiler(gl,profileFrames,profileWarmup,profileOutput!,profileCsv,profilePaced);
         Console.WriteLine($"OpenGL {gl.GetStringS(StringName.Version)}; atlas={renderer.HasAtlas}; gunAtlas={renderer.HasGunAtlas}; effectsAtlas={renderer.HasEffectsAtlas}; warpAtlas={renderer.HasWarpAtlas}; tick={battle.Tick}");
     }
@@ -218,16 +227,26 @@ internal sealed class BattleApp : IDisposable
         var before=ToWorld(mouse);zoom=Math.Clamp(zoom*MathF.Pow(1.15f,scroll),.25f,24);center+=before-ToWorld(mouse);
     }
     private void PanDelta(Vector2 delta) {StopFollow();center+=new Vector2(-delta.X*window.FramebufferSize.X/window.Size.X,delta.Y*window.FramebufferSize.Y/window.Size.Y)/Scale;}
-    private void StopFollow() {spectator.Stop();battle.ObserveShip(-1);}
+    private void StopFollow()
+    {
+        spectator.Stop();
+        if (WorldLocked) deferredWatch = -1;
+        else battle.ObserveShip(-1);
+    }
     private void StartFollow(int serial)
     {
+        if (WorldLocked)
+        {
+            deferredWatch = serial;
+            return;
+        }
         if(!spectator.Start(serial,battle.TryGetShipObservation))return;
         selected=serial;battle.ObserveShip(serial);UpdateCamera(0,true);
     }
     private void ToggleFollow() {if(spectator.Following)StopFollow();else StartFollow(selected);}
     private void ResolveObserver()
     {
-        if(!spectator.Following)return;
+        if(WorldLocked||!spectator.Following)return;
         if(!battle.TryGetShipObservation(spectator.ObservedSerial,out _))battle.Capture(frame,refreshEntities:false);
         if(spectator.Resolve(battle.TryGetShipObservation,battle.ObservedDeath,frame.Ships))
         {battle.ObserveShip(spectator.ObservedSerial);selected=spectator.ObservedSerial;}
@@ -299,17 +318,27 @@ internal sealed class BattleApp : IDisposable
         controlsVerified=true;Console.WriteLine("Control logic validation PASS (pause, speed, pan, cursor zoom, fit, selection, follow key/button, manual cancellation, paused camera, restart, statistics toggles/counts/reset/window, collider toggles/geometry/checksum).");
     }
     private void ResetRates() {rateStart=Timestamp();wallTicks=wallFrames=0;ticksPerSecond=renderFps=renderCpuMs=0;}
-    private void TogglePause() {paused=!paused;ResetRates();}
+    private void TogglePause() {if(gaFault is not null)return;paused=!paused;ResetRates();}
     private void ToggleColliders() {collidersVisible=!collidersVisible;if(!collidersVisible)colliders.Clear();}
     private void CaptureColliders()
     {
         if(collidersVisible)battle.CaptureColliders(colliders,refreshEntities:false);
         else colliders.Clear();
     }
-    private void Restart() { StopFollow();battle.Dispose();battle=new(config);accumulator=0;selected=-1;statistics.Reset();statisticsRefreshAt=0;ResetRates();battle.Capture(frame); }
+    private void Restart()
+    {
+        if (gaFault is not null) return;
+        if (WorldLocked)
+        {
+            restartPending = true;
+            return;
+        }
+        StopFollow();battle.Dispose();battle=new(config);accumulator=0;selected=-1;statistics.Reset();statisticsRefreshAt=0;ResetRates();battle.Capture(frame);
+        RefreshPresentation();
+    }
     private void Step(bool live=false)
     {
-        battle.Step();
+        if (particleExpiry is { } ga) ga.Step(battle); else battle.Step();
         ResolveObserver();
         if(profileFrames==0)statistics.RecordTick(battle.LastTickMs,battle.LastStageMs);
         if(live)wallTicks++;
@@ -317,6 +346,11 @@ internal sealed class BattleApp : IDisposable
     private void Update(double dt)
     {
         if(profileFrames>0)return;
+        if (gaValidationTicks > 0)
+        {
+            if (validationAwaitingRender || (validationRestartRequested && !restartPending)) return;
+            validationAwaitingRender = true;
+        }
         if(capture is not null && !captured) return;
         if(input is not null) foreach(var k in input.Keyboards)
         {
@@ -324,9 +358,25 @@ internal sealed class BattleApp : IDisposable
             if(k.IsKeyPressed(Key.A)||k.IsKeyPressed(Key.Left))d.X-=1;if(k.IsKeyPressed(Key.D)||k.IsKeyPressed(Key.Right))d.X+=1;
             if(d!=Vector2.Zero) {StopFollow();center+=d*(float)dt*200/zoom;}
         }
+        if (gaFault is not null) return;
+        if (restartPending)
+        {
+            CompleteGaRestart();
+            return;
+        }
         if(paused) return;
+        if (gaValidationTicks > 0) dt = 1.0 / config.TickRate;
+        if (particleExpiry?.Decision.Route == SKECS.GA.GaRoute.Gpu)
+        {
+            UpdateGpu(dt);
+            return;
+        }
         accumulator+=Math.Min(dt,.25)*speed;
-        int steps=0;while(accumulator>=1.0/config.TickRate&&steps++<32) { Step(true);accumulator-=1.0/config.TickRate; }
+        int steps=0;while(accumulator>=1.0/config.TickRate&&steps++<32)
+        {
+            Step(true);accumulator-=1.0/config.TickRate;
+            if (gaValidationTicks > 0) RecordValidationTick();
+        }
         battle.Capture(frame, refreshEntities: false);
     }
     private float BaseScale=>Math.Max(1,Math.Min(window.FramebufferSize.X-40,window.FramebufferSize.Y-240))/(config.ArenaHalfSize*2);
@@ -351,7 +401,7 @@ internal sealed class BattleApp : IDisposable
         long profileStart=profiler is null?0:FrontendProfiler.Timestamp();
         if(renderer is null || window.FramebufferSize.X==0 || window.FramebufferSize.Y==0) return;
         if(profiler is not null) {RenderProfile(profileStart);return;}
-        if(Elapsed(statisticsRefreshAt)>=.25) {statistics.Refresh();storage=battle.Store.Diagnostics();managedBytes=GC.GetTotalMemory(false);statisticsRefreshAt=Timestamp();}
+        if(Elapsed(statisticsRefreshAt)>=.25) {statistics.Refresh();if(!WorldLocked)storage=battle.Store.Diagnostics();managedBytes=GC.GetTotalMemory(false);statisticsRefreshAt=Timestamp();}
         wallFrames++;
         double elapsed=Elapsed(rateStart);
         if(elapsed>=.5)
@@ -366,6 +416,15 @@ internal sealed class BattleApp : IDisposable
         renderCpuMs=Elapsed(renderStart)*1000;
         if(capture is not null&&!captured)SaveCapture(w,h,renderedShips,population);
         if(validateLiveStatistics)CheckLiveStatistics();
+        if(gaValidationTicks>0)
+        {
+            try { ValidateRenderedFrame(); }
+            catch (Exception error)
+            {
+                gaValidationError = error;
+                window.Close();
+            }
+        }
     }
     private void CheckLiveStatistics()
     {
@@ -413,9 +472,9 @@ internal sealed class BattleApp : IDisposable
         var camera=new SceneCamera(w,h,Scale,center,h*.5f+30);
         int renderedShips=BattleSceneRenderer.Draw(renderer,frame,camera,selected,
             spectator.Following?spectator.MainSerial:-1,spectator.Following?spectator.TargetSerial:-1);
-        CaptureColliders();
+        if (!WorldLocked) RefreshPresentation();
         if(collidersVisible)ColliderOverlay.Draw(renderer,colliders,Screen,Scale);
-        var population=new TeamPopulation { Cyan=battle.TeamShipCount(0), Red=battle.TeamShipCount(1) };
+        var population = publishedPopulation;
         Hud(w,h,population);renderer.End();
         return (renderedShips,population);
     }
@@ -494,7 +553,7 @@ internal sealed class BattleApp : IDisposable
             if(count>0){heat/=count;shield/=count;}
             r.Text(14,58+team*22,$"{(team==0?"CYAN":"RED ")} ALIVE {(team==0?population.Cyan:population.Red)}  HEAT {heat*100:0}%  SHIELD {shield*100:0}%",team==0?Cyan:Red);
         }
-        r.Text(14,98,$"ECS ALIVE {AliveEntities}  SHIPS {battle.ShipCount}  DOCKED {battle.ShipCount-frame.Ships.Count}  TURRETS {battle.TurretCount}  PROJECTILES {battle.ProjectileCount}  DEBRIS {battle.DebrisCount}  PARTICLES {battle.ParticleCount}",White,1);
+        r.Text(14,98,$"ECS ALIVE {publishedCounts.Alive}  SHIPS {publishedCounts.Ships}  DOCKED {publishedCounts.Ships-frame.Ships.Count}  TURRETS {publishedCounts.Turrets}  PROJECTILES {publishedCounts.Projectiles}  DEBRIS {publishedCounts.Debris}  PARTICLES {publishedCounts.Particles}",White,1);
         r.Text(14,h-58,$"TICK LAST {statistics.LastMs:0.00} MEAN {statistics.MeanMs:0.00} P99 {statistics.P99Ms:0.00} MS",White);
         r.Text(14,h-36,$"TICKS/S {ticksPerSecond:0.0}  FPS {renderFps:0.0}  RENDER CPU {(renderCpuMs>0?renderCpuMs.ToString("0.00"):"--")} MS",White);
         if(statisticsVisible)
@@ -511,11 +570,12 @@ internal sealed class BattleApp : IDisposable
             r.Text(x+12,y+284,$"SHOTS {frame.Counters.Shots} HITS {frame.Counters.Hits}",White,1);
             r.Text(x+12,y+296,$"HEAVY {frame.Counters.HeavyShots} TURRET {frame.Counters.TurretShots}",White,1);
         }
-        if(r.HasAtlas)r.Text(14,h-16,$"BODIES {battle.PhysicsBodies} FIXTURES {battle.PhysicsFixtures} ARCH {storage.Archetypes} CHUNKS {storage.Chunks} NATIVE {storage.NativeBytes/1048576.0:0.00} MIB ACCESSORS {storage.AccessorBytes/1048576.0:0.00} MIB HEAP {managedBytes/1048576.0:0.00} MIB",White,1);
+        if(r.HasAtlas)r.Text(14,h-16,$"BODIES {publishedCounts.Bodies} FIXTURES {publishedCounts.Fixtures} ARCH {storage.Archetypes} CHUNKS {storage.Chunks} NATIVE {storage.NativeBytes/1048576.0:0.00} MIB ACCESSORS {storage.AccessorBytes/1048576.0:0.00} MIB HEAP {managedBytes/1048576.0:0.00} MIB",White,1);
         else r.Text(14,h-16,"TEMPORARY PROCEDURAL SHIPS - ATLAS PENDING",new(.9f,.73f,.38f,1),1);
+        if (gaFault is not null) r.Text(14,126,"GA DEVICE FAILED. REOPEN SPACE BATTLE TO CONTINUE.",Red,1);
         var selectedShip=frame.Ships.FirstOrDefault(s=>s.Serial==selected);
         if(selected!=-1&&selectedShip.Serial==selected)r.Text(14,110,$"SHIP {selected} {((ShipClass)selectedShip.Kind)} HULL {selectedShip.Hull*100:0}% SHIELD {selectedShip.Shield*100:0}%",White,1);
-        window.Title=$"Space Battle | {battle.Framework} | tick {frame.Tick} | alive {AliveEntities} | p99 {statistics.P99Ms:0.00} ms";
+        window.Title=$"Space Battle | {publishedFramework} | tick {frame.Tick} | alive {publishedCounts.Alive} | p99 {statistics.P99Ms:0.00} ms";
     }
     private void DisposeGraphics() { profiler?.Dispose();profiler=null;renderer?.Dispose();renderer=null;input?.Dispose();input=null;gl?.Dispose();gl=null; }
     private object CameraShip(ShipObservation ship)
@@ -533,5 +593,9 @@ internal sealed class BattleApp : IDisposable
             renderer.Line(corner,corner-new Vector2(0,y*length),1.5f,color);
         }
     }
-    public void Dispose() { DisposeGraphics();battle.Dispose();window.Dispose(); }
+    public void Dispose()
+    {
+        try { particleExpiry?.Dispose(); }
+        finally { DisposeGraphics();battle.Dispose();window.Dispose(); }
+    }
 }

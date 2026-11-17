@@ -8,6 +8,8 @@ try
     if (frameworkIndex >= 0 && frameworkIndex + 1 >= args.Length)
         throw new ArgumentException("Missing value for --framework.");
     string framework = frameworkIndex < 0 ? "skecs" : args[frameworkIndex + 1].ToLowerInvariant();
+    if (framework != "skecs" && args.Any(arg => arg.StartsWith("--ga-", StringComparison.Ordinal)))
+        throw new ArgumentException("Space Battle GA requires --framework skecs.");
     switch (framework)
     {
         case "skecs":
