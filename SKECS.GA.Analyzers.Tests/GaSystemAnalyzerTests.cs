@@ -97,6 +97,47 @@ public sealed class GaSystemAnalyzerTests
     }
 
     [Fact]
+    public async Task TraversesReadonlyIndexerAndFindsForbiddenCallsInItsBody()
+    {
+        const string source = """
+            struct Counts
+            {
+                public int Value;
+                public readonly int this[int index] => unchecked(Value + index);
+                public readonly int this[int first, int second] => checked(System.DateTime.UtcNow.Second + first + second);
+            }
+            [SKECS.GA.SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(ref int value, in Counts counts) => value = counts[1] + counts[second: 2, first: 3];
+            }
+            """;
+
+        var diagnostics = await Analyze(source);
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Id == "GA0004");
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Id == "GA0003" && Text(diagnostic) == "System.DateTime.UtcNow");
+    }
+
+    [Fact]
+    public async Task RejectsIndexedPropertyWrites()
+    {
+        const string source = """
+            struct Counts
+            {
+                public int Value;
+                public int this[int index] { get => Value; set => Value = value; }
+            }
+            [SKECS.GA.SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(ref Counts counts) => counts[1] += 2;
+            }
+            """;
+
+        Assert.Contains(await Analyze(source), diagnostic => diagnostic.Id == "GA0005" && Text(diagnostic) == "counts[1]");
+    }
+
+    [Fact]
     public async Task AdmitsBoundedLoopsReadonlyGetterSpecializationAndNestedInlineArray()
     {
         const string source = """

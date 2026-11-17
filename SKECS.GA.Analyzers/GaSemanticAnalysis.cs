@@ -229,6 +229,7 @@ public static partial class GaSemanticAnalysis
                 LocalFunctionStatementSyntax local => (SyntaxNode?)local.Body ?? local.ExpressionBody,
                 AccessorDeclarationSyntax accessor => (SyntaxNode?)accessor.Body ?? accessor.ExpressionBody,
                 PropertyDeclarationSyntax property => property.ExpressionBody,
+                IndexerDeclarationSyntax indexer => indexer.ExpressionBody,
                 ArrowExpressionClauseSyntax expression => expression,
                 _ => null
             };
@@ -249,6 +250,7 @@ public static partial class GaSemanticAnalysis
             BaseMethodDeclarationSyntax method => method.Modifiers.Any(SyntaxKind.UnsafeKeyword),
             LocalFunctionStatementSyntax local => local.Modifiers.Any(SyntaxKind.UnsafeKeyword),
             PropertyDeclarationSyntax property => property.Modifiers.Any(SyntaxKind.UnsafeKeyword),
+            IndexerDeclarationSyntax indexer => indexer.Modifiers.Any(SyntaxKind.UnsafeKeyword),
             _ => false
         };
 

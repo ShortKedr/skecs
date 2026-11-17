@@ -487,6 +487,130 @@ public sealed class CompilerTests
     }
 
     [Fact]
+    public void ReadonlyIndexersUseSourceOrderForNamedArguments()
+    {
+        const string execute = """
+            public void Execute(ref Position p, in Selector selector, in Velocity v)
+            {
+                p.Point.X = selector[second: 12 / v.Y, first: 24 / v.X];
+                p.Point.Y = selector[3];
+            }
+            """;
+        const string helper = """
+            public struct Selector
+            {
+                public int Weight;
+                public readonly int this[int first, int second] => unchecked(Weight + first * 3 + second);
+                public readonly int this[int value]
+                {
+                    get { return unchecked(Weight - value); }
+                }
+            }
+            """;
+        var result = Analyze(execute, helper);
+        Assert.True(result.Program != null, string.Join("\n", result.Diagnostics));
+        var program = result.Program!;
+
+        uint[] Row(uint x, uint y) => program.Fields.Select(field => field.Path switch
+        {
+            "X" => x, "Y" => y, "Weight" => 4u, _ => 0u
+        }).ToArray();
+        int Index(string path) => Array.FindIndex(program.Fields.ToArray(), field => field.Path == path);
+
+        var row = Row(3, 2);
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(34u, row[Index("Point.X")]);
+        Assert.Equal(1u, row[Index("Point.Y")]);
+
+        var first = GaInterpreter.Execute(program, Row(0, 0))!.Value;
+        var second = GaInterpreter.Execute(program, Row(0, 2))!.Value;
+        Assert.Equal(0ul, first.EvaluationOrdinal);
+        Assert.Equal(1ul, second.EvaluationOrdinal);
+        Assert.Equal("12 / v.Y".Length, first.Source.Length);
+        Assert.Equal("24 / v.X".Length, second.Source.Length);
+        Assert.True(first.Source.Start < second.Source.Start);
+    }
+
+    [Fact]
+    public void CheckedUserCompoundEvaluatesInlineArrayTargetExactlyOnce()
+    {
+        const string execute = """
+            public void Execute(ref Accumulator p, in Delta delta, in Velocity v)
+            {
+                if (v.Flag)
+                    checked { p.Items[100 / v.X] += delta; }
+                else
+                    unchecked { p.Items[100 / v.X] += delta; }
+            }
+            """;
+        const string helper = """
+            using System.Runtime.CompilerServices;
+            [InlineArray(4)] public struct IntSlots { private int element; }
+            public struct Accumulator { public IntSlots Items; }
+            public struct Delta
+            {
+                public int Amount;
+                public static int operator +(int left, Delta right) => unchecked(left + right.Amount);
+                public static int operator checked +(int left, Delta right) => checked(left + right.Amount);
+            }
+            """;
+        var result = Analyze(execute, helper);
+        Assert.True(result.Program != null, string.Join("\n", result.Diagnostics));
+        var program = result.Program!;
+        uint[] Row(uint x, bool useChecked) => program.Fields.Select(field => field.Path switch
+        {
+            "X" => x, "Flag" => useChecked ? 1u : 0u, "Items[2]" => (uint)int.MaxValue, "Amount" => 1u, _ => 0u
+        }).ToArray();
+        int selected = Array.FindIndex(program.Fields.ToArray(), field => field.Path == "Items[2]");
+
+        var division = GaInterpreter.Execute(program, Row(0, true))!.Value;
+        var invalidIndex = GaInterpreter.Execute(program, Row(10, true))!.Value;
+        var overflow = GaInterpreter.Execute(program, Row(50, true))!.Value;
+        Assert.Equal((GaFaultKind.DivideByZero, 0ul), (division.Kind, division.EvaluationOrdinal));
+        Assert.Equal((GaFaultKind.IndexOutOfRange, 1ul), (invalidIndex.Kind, invalidIndex.EvaluationOrdinal));
+        Assert.Equal((GaFaultKind.Overflow, 2ul), (overflow.Kind, overflow.EvaluationOrdinal));
+        Assert.Equal("Helper.cs", overflow.Source.File);
+        Assert.Equal(helper.LastIndexOf("left + right.Amount", StringComparison.Ordinal), overflow.Source.Start);
+
+        var wrapped = Row(50, false);
+        Assert.Null(GaInterpreter.Execute(program, wrapped));
+        Assert.Equal(unchecked((uint)int.MinValue), wrapped[selected]);
+    }
+
+    [Fact]
+    public void HelperScalarLocalCanUseAUserCompoundOperator()
+    {
+        const string execute = "public void Execute(ref Position p, in Holder input) => p.Point.X = input.Sum;";
+        const string helper = """
+            public struct Delta
+            {
+                public int Amount;
+                public static int operator +(int left, Delta right) => unchecked(left + right.Amount);
+            }
+            public struct Holder
+            {
+                public Delta Addition;
+                public readonly int Sum
+                {
+                    get
+                    {
+                        int local = 4;
+                        local += Addition;
+                        return local;
+                    }
+                }
+            }
+            """;
+        var result = Analyze(execute, helper);
+        Assert.True(result.Program != null, string.Join("\n", result.Diagnostics));
+        var program = result.Program!;
+        Assert.Equal(new[] { "Point.X", "Addition.Amount" }, program.Fields.Select(field => field.Path));
+        uint[] row = [0, 6];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(10u, row[0]);
+    }
+
+    [Fact]
     public void EnumSwitchAndDescendingLoopUseExactControlFlow()
     {
         var program = Compile("""

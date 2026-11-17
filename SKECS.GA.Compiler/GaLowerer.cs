@@ -320,8 +320,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                     return new GaArrayStore(array.Field, array.Index, null, LowerValue(assignment.Value), array.Source);
                 }
                 return new GaStore(WritableSlot(assignment.Target), LowerValue(assignment.Value));
-            case ICompoundAssignmentOperation compound when IsBuiltinOrFixed(compound.OperatorMethod) &&
-                !compound.IsLifted && compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
+            case ICompoundAssignmentOperation compound when !compound.IsLifted &&
+                compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
                 if (_helperReturn == null && FindInlineAccess(compound.Target) is { } compoundAccess)
                 {
                     var array = LowerArrayAccess(compound.Target, compoundAccess, writable: true);
@@ -423,9 +423,14 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
 
     private static bool ContainsReturn(IOperation operation) => operation.DescendantsAndSelf().OfType<IReturnOperation>().Any();
 
-    private GaValue LowerCompound(ICompoundAssignmentOperation compound, GaSlot previous) =>
-        Binary(previous.Type, compound.OperatorKind, new GaLoad(previous, Source(compound.Target)),
+    private GaValue LowerCompound(ICompoundAssignmentOperation compound, GaSlot previous)
+    {
+        var oldValue = new GaLoad(previous, Source(compound.Target));
+        if (compound.OperatorMethod is { } method && !IsBuiltinOrFixed(method))
+            return LowerValueMember(compound, method, null, [compound.Value], oldValue: oldValue);
+        return Binary(previous.Type, compound.OperatorKind, oldValue,
             LowerValue(compound.Value), compound.IsChecked, compound);
+    }
 
     private GaValue LowerIncrement(IIncrementOrDecrementOperation change, GaSlot previous)
     {
@@ -991,6 +996,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 LowerValueMember(binary, method, null, [binary.LeftOperand, binary.RightOperand]),
             IPropertyReferenceOperation { Property: { IsIndexer: false, GetMethod: { } getter }, Arguments.Length: 0 } property =>
                 LowerValueMember(property, getter, property.Instance, []),
+            IPropertyReferenceOperation { Property: { IsIndexer: true, GetMethod: { } getter }, Instance: { } } indexer =>
+                LowerIndexer(indexer, getter),
             IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
                 invocation.TargetMethod.Name is ("Has" or "TryRead") => LowerOptionalAccess(invocation),
             IInvocationOperation invocation when IsSystemContext(invocation.TargetMethod.ContainingType) &&
@@ -1053,7 +1060,20 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             Scalar(ResolveHelperType(target.ReturnType), invocation), frame, bindings);
     }
 
-    private GaValue LowerValueMember(IOperation site, IMethodSymbol target, IOperation? receiver, IOperation[] arguments)
+    private GaValue LowerIndexer(IPropertyReferenceOperation indexer, IMethodSymbol getter)
+    {
+        if (getter.IsStatic || indexer.Arguments.Length != getter.Parameters.Length ||
+            indexer.Arguments.Any(argument => argument.Parameter == null || argument.ArgumentKind != ArgumentKind.Explicit) ||
+            getter.Parameters.Any(parameter => parameter.IsParams))
+            throw Unsupported(indexer, "Use an explicit by-value argument for each readonly indexer parameter.");
+        var arguments = indexer.Arguments.OrderBy(argument => argument.Syntax.SpanStart).ToArray();
+        return LowerValueMember(indexer, getter, indexer.Instance,
+            arguments.Select(argument => argument.Value).ToArray(),
+            ordinals: arguments.Select(argument => argument.Parameter!.Ordinal).ToArray());
+    }
+
+    private GaValue LowerValueMember(IOperation site, IMethodSymbol target, IOperation? receiver, IOperation[] arguments,
+        GaLoad? oldValue = null, int[]? ordinals = null)
     {
         var definition = target.OriginalDefinition;
         if (target.ReturnsVoid || target.ReturnsByRef || target.ReturnsByRefReadonly ||
@@ -1061,7 +1081,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             !target.ContainingType.StaticConstructors.IsEmpty ||
             !target.IsStatic && (receiver == null || target.ContainingType.TypeKind != TypeKind.Struct ||
                 !(target.IsReadOnly || target.ContainingType.IsReadOnly)) ||
-            arguments.Length != target.Parameters.Length || target.Parameters.Any(parameter => parameter.RefKind != RefKind.None) ||
+            arguments.Length + (oldValue == null ? 0 : 1) != target.Parameters.Length ||
+            target.Parameters.Any(parameter => parameter.RefKind != RefKind.None) ||
             definition.DeclaringSyntaxReferences is not [var reference])
             throw Unsupported(site, "Use a source-defined scalar operator, conversion, or static or readonly value getter.");
 
@@ -1079,6 +1100,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             ConversionOperatorDeclarationSyntax syntax => (syntax.ExpressionBody, syntax.Body),
             AccessorDeclarationSyntax syntax => (syntax.ExpressionBody, syntax.Body),
             PropertyDeclarationSyntax syntax => (syntax.ExpressionBody, (BlockSyntax?)null),
+            IndexerDeclarationSyntax syntax => (syntax.ExpressionBody, (BlockSyntax?)null),
             ArrowExpressionClauseSyntax syntax => (syntax, (BlockSyntax?)null),
             _ => ((ArrowExpressionClauseSyntax?)null, (BlockSyntax?)null)
         };
@@ -1101,14 +1123,26 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 throw Unsupported(site, "Use a source-defined body returning a portable scalar.");
         }
 
-        var frame = new HelperFrame(new GaSlot[arguments.Length],
+        var frame = new HelperFrame(new GaSlot[target.Parameters.Length],
             new Dictionary<ILocalSymbol, GaSlot>(SymbolEqualityComparer.Default),
             new Dictionary<ITypeParameterSymbol, ITypeSymbol>(SymbolEqualityComparer.Default));
         var bindings = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
         if (receiver != null)
             BindMemberInput(frame, ReceiverInput, target.ContainingType, receiver, bindings);
+        if (oldValue != null)
+        {
+            if (Scalar(target.Parameters[0].Type, site) != oldValue.Type ||
+                Scalar(target.ReturnType, site) != oldValue.Type)
+                throw Unsupported(site, "A user compound operator must preserve the scalar target type.");
+            var slot = AddLocal(oldValue.Type);
+            frame.Parameters[0] = slot;
+            bindings.Add((slot, oldValue, oldValue.Source));
+        }
         for (int i = 0; i < arguments.Length; i++)
-            BindMemberInput(frame, i, target.Parameters[i].Type, arguments[i], bindings);
+        {
+            int ordinal = ordinals == null ? i + (oldValue == null ? 0 : 1) : ordinals[i];
+            BindMemberInput(frame, ordinal, target.Parameters[ordinal].Type, arguments[i], bindings);
+        }
         return LowerHelperBody(site, definition, declaration, operations, expression, resultType, frame, bindings);
     }
 
@@ -1346,8 +1380,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                     return LowerEffect(expression.Operation);
                 case ISimpleAssignmentOperation { IsRef: false } assign:
                     return new GaStoredValue(WritableHelperLocal(frame, assign.Target), LowerValue(assign.Value), empty, position);
-                case ICompoundAssignmentOperation compound when IsBuiltinOrFixed(compound.OperatorMethod) &&
-                    !compound.IsLifted && compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
+                case ICompoundAssignmentOperation compound when !compound.IsLifted &&
+                    compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
                     var destination = WritableHelperLocal(frame, compound.Target);
                     return new GaStoredValue(destination, LowerCompound(compound, destination), empty, position);
                 case IIncrementOrDecrementOperation change when IsBuiltinOrFixed(change.OperatorMethod) && !change.IsLifted:
