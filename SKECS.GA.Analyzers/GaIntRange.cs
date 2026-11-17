@@ -69,9 +69,9 @@ internal static class GaIntRange
         while (root.Parent is { } parent)
         {
             root = parent;
-            // Later mutations in an enclosing loop may run before the next visit to this loop.
-            if (root is ILoopOperation)
-                lastUse = root.Syntax.Span.End;
+            // Later writes can reach the next visit unless the enclosing body initializes a fresh value.
+            if (root is ILoopOperation enclosing && !enclosing.Body.Syntax.Span.Contains(syntax.Span))
+                lastUse = enclosing.Syntax.Span.End;
         }
         foreach (var operation in root.Descendants())
         {

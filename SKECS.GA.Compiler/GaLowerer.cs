@@ -41,7 +41,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
     private GaSnapshotLayout? _snapshotLayout;
     private INamedTypeSymbol? _resourceType;
     private INamedTypeSymbol? _bufferType;
-    private bool _insideLoop;
+    private readonly Dictionary<ILocalSymbol, (int Min, int Max)> _loopCounters = new(SymbolEqualityComparer.Default);
+    private const int MaximumLoopEntries = 65536;
     private bool _hasLoopBranches;
     private LoopControl? _loopControl;
 
@@ -648,7 +649,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
 
     private GaStatement LowerFor(IForLoopOperation loop)
     {
-        if (_insideLoop || loop.Before.Length != 1 || loop.AtLoopBottom.Length != 1
+        if (loop.Before.Length != 1 || loop.AtLoopBottom.Length != 1
             || loop.Before[0] is not IVariableDeclarationGroupOperation { Declarations.Length: 1 } group
             || group.Declarations[0].Declarators.Length != 1
             || group.Declarations[0].Declarators[0] is not { Initializer.Value: { } start } init
@@ -656,19 +657,18 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             || loop.Condition is not IBinaryOperation { LeftOperand: ILocalReferenceOperation conditionLocal } comparison
             || !SymbolEqualityComparer.Default.Equals(init.Symbol, conditionLocal.Local)
             || loop.AtLoopBottom[0] is not IExpressionStatementOperation { Operation: { } step })
-            throw Unsupported(loop, "This profile requires a single int loop with proven bounds and a unit step.");
+            throw Unsupported(loop, "This profile requires an int loop with proven bounds and a unit step.");
 
         int direction = GaIntRange.UnitStepDirection(step, init.Symbol);
         if (direction == 0)
             throw Unsupported(step, "Advance the int induction variable by exactly one in each iteration.");
-        int iterations = ProveLoopBound(loop, init.Symbol, start, comparison, step, direction);
-        _insideLoop = true;
-        return LowerProvenLoop(loop, LowerStatement(loop.Before[0]), comparison, loop.AtLoopBottom[0], iterations);
+        var proof = ProveLoopBound(loop, init.Symbol, start, comparison, step, direction, false);
+        return LowerProvenLoop(loop, LowerStatement(loop.Before[0]), comparison, loop.AtLoopBottom[0], init.Symbol, proof);
     }
 
     private GaStatement LowerWhile(IWhileLoopOperation loop, IOperation? previous)
     {
-        if (_insideLoop || !loop.ConditionIsTop || loop.ConditionIsUntil
+        if (!loop.ConditionIsTop || loop.ConditionIsUntil
             || previous is not IVariableDeclarationGroupOperation { Declarations.Length: 1 } group
             || group.Declarations[0].Declarators is not
                 [{ Symbol.RefKind: RefKind.None, Initializer.Value: { } start } init]
@@ -692,17 +692,16 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             branch.BranchKind == BranchKind.Continue && SymbolEqualityComparer.Default.Equals(branch.Target, loop.ContinueLabel)))
             throw Unsupported(loop, "A while loop with continue requires its unit step at the beginning of the body.");
 
-        int iterations = ProveLoopBound(loop, init.Symbol, start, comparison, step, direction);
-        _insideLoop = true;
-        return LowerProvenLoop(loop, null, comparison, null, iterations);
+        var proof = ProveLoopBound(loop, init.Symbol, start, comparison, step, direction, leadingStep);
+        return LowerProvenLoop(loop, null, comparison, null, init.Symbol, proof);
 
         static IOperation? UnwrapStep(IOperation operation) => (operation as IExpressionStatementOperation)?.Operation;
     }
 
-    private int ProveLoopBound(ILoopOperation loop, ILocalSymbol counter, IOperation startValue,
-        IBinaryOperation comparison, IOperation step, int direction)
+    private (int Iterations, (int Min, int Max) BodyRange) ProveLoopBound(ILoopOperation loop,
+        ILocalSymbol counter, IOperation startValue, IBinaryOperation comparison, IOperation step, int direction,
+        bool leadingStep)
     {
-        const int maximumTripCount = 65536;
         if (!(GaIntRange.TryGet(startValue, out var initial) || TryGetFrozenBound(startValue, out initial)) ||
             !TryGetFrozenBound(comparison.RightOperand, out var bound))
             throw Unsupported(loop, "Use a proven int start and a constant or frozen value local as the end bound.");
@@ -717,25 +716,38 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         };
         bool canOverflow = (comparison.OperatorKind == BinaryOperatorKind.LessThanOrEqual && bound.Max == int.MaxValue) ||
             (comparison.OperatorKind == BinaryOperatorKind.GreaterThanOrEqual && bound.Min == int.MinValue);
-        if (canOverflow || iterations > maximumTripCount ||
+        if (canOverflow || iterations > MaximumLoopEntries ||
             loop.Body.DescendantsAndSelf().Any(operation => !ReferenceEquals(operation, step) && GaIntRange.WritesLocal(operation, counter)))
             throw Unsupported(loop, "Cannot prove the loop's iteration range and induction-variable ownership.");
 
-        return (int)iterations;
+        var bodyRange = initial;
+        if (iterations != 0)
+        {
+            int shift = leadingStep ? direction : 0;
+            bodyRange = direction == 1
+                ? (initial.Min + shift, bound.Max - (comparison.OperatorKind == BinaryOperatorKind.LessThan ? 1 : 0) + shift)
+                : (bound.Min + (comparison.OperatorKind == BinaryOperatorKind.GreaterThan ? 1 : 0) + shift, initial.Max + shift);
+        }
+        return ((int)iterations, bodyRange);
+
         bool TryGetFrozenBound(IOperation expression, out (int Min, int Max) range)
         {
-            if (UnwrapIdentity(expression) is ILocalReferenceOperation reference &&
-                SymbolEqualityComparer.Default.Equals(reference.Local, counter))
+            if (UnwrapIdentity(expression) is ILocalReferenceOperation reference)
             {
-                range = default;
-                return false;
+                if (SymbolEqualityComparer.Default.Equals(reference.Local, counter))
+                {
+                    range = default;
+                    return false;
+                }
+                if (_loopCounters.TryGetValue(reference.Local, out range))
+                    return true;
             }
             return GaIntRange.TryGetFrozen(expression, loop, compilation, cancellationToken, out range);
         }
     }
 
     private GaStatement LowerProvenLoop(ILoopOperation loop, GaStatement? before, IBinaryOperation comparison,
-        IOperation? incrementOperation, int iterations)
+        IOperation? incrementOperation, ILocalSymbol counter, (int Iterations, (int Min, int Max) BodyRange) proof)
     {
         var condition = LowerValue(comparison);
         bool hasBranches = loop.Body.DescendantsAndSelf().OfType<IBranchOperation>().Any(branch =>
@@ -743,29 +755,63 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             branch.BranchKind == BranchKind.Continue && SymbolEqualityComparer.Default.Equals(branch.Target, loop.ContinueLabel));
         GaStatement body;
         GaStatement increment;
-        if (hasBranches)
+        var outerControl = _loopControl;
+        _loopControl = null;
+        _loopCounters.Add(counter, proof.BodyRange);
+        try
         {
-            _hasLoopBranches = true;
-            _loopControl = new LoopControl(loop.ExitLabel, loop.ContinueLabel, AddLocal(GaScalar.UInt32));
-            var source = Source(comparison);
-            var notBreaking = TestLoopState(LoopBreak, GaBinaryOperator.NotEqual, source);
-            var initializeState = SetLoopState(LoopRunning, source);
-            before = before == null ? initializeState : new GaBlock([before, initializeState]);
-            condition = new GaBinary(GaScalar.Bool, GaBinaryOperator.AndAlso, notBreaking, condition, false, source);
-            body = new GaBlock([SetLoopState(LoopRunning, source), LowerStatement(loop.Body)]);
-            increment = incrementOperation == null
-                ? new GaBlock([])
-                : new GaIf(notBreaking, LowerStatement(incrementOperation), null);
-            _loopControl = null;
+            if (hasBranches)
+            {
+                _hasLoopBranches = true;
+                _loopControl = new LoopControl(loop.ExitLabel, loop.ContinueLabel, AddLocal(GaScalar.UInt32));
+                var source = Source(comparison);
+                var notBreaking = TestLoopState(LoopBreak, GaBinaryOperator.NotEqual, source);
+                var initializeState = SetLoopState(LoopRunning, source);
+                before = before == null ? initializeState : new GaBlock([before, initializeState]);
+                condition = new GaBinary(GaScalar.Bool, GaBinaryOperator.AndAlso, notBreaking, condition, false, source);
+                body = new GaBlock([SetLoopState(LoopRunning, source), LowerStatement(loop.Body)]);
+                increment = incrementOperation == null
+                    ? new GaBlock([])
+                    : new GaIf(notBreaking, LowerStatement(incrementOperation), null);
+            }
+            else
+            {
+                body = LowerStatement(loop.Body);
+                increment = incrementOperation == null ? new GaBlock([]) : LowerStatement(incrementOperation);
+            }
         }
-        else
+        finally
         {
-            body = LowerStatement(loop.Body);
-            increment = incrementOperation == null ? new GaBlock([]) : LowerStatement(incrementOperation);
+            _loopControl = outerControl;
+            _loopCounters.Remove(counter);
         }
-        var repeated = new GaLoop(condition, body, increment, iterations);
-        _insideLoop = false;
+        var repeated = new GaLoop(condition, body, increment, proof.Iterations);
+        if (_loopCounters.Count == 0 && LoopEntries(repeated) > MaximumLoopEntries)
+            throw Unsupported(loop, "A loop and its nested loops must have at most 65536 total proven body entries.");
         return before == null ? repeated : new GaBlock([before, repeated]);
+    }
+
+    private static long LoopEntries(GaStatement statement)
+    {
+        const long saturated = MaximumLoopEntries + 1L;
+        switch (statement)
+        {
+            case GaLoop loop:
+                return Math.Min(saturated, loop.MaximumIterations * (1 + LoopEntries(loop.Body) + LoopEntries(loop.Increment)));
+            case GaIf branch:
+                return Math.Max(LoopEntries(branch.Then), branch.Else == null ? 0 : LoopEntries(branch.Else));
+            case GaBlock block:
+                long visits = 0;
+                foreach (var child in block.Statements)
+                {
+                    visits += LoopEntries(child);
+                    if (visits >= saturated)
+                        return saturated;
+                }
+                return visits;
+            default:
+                return 0;
+        }
     }
 
     private GaStatement LowerSwitch(ISwitchOperation match)

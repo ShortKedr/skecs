@@ -916,7 +916,8 @@ public static partial class GaSemanticAnalysis
                 (1, BinaryOperatorKind.LessThanOrEqual) or (-1, BinaryOperatorKind.GreaterThanOrEqual) =>
                     IsSafeInclusiveLimit(compare.RightOperand.ConstantValue, direction) ||
                     GaIntRange.TryGetFrozen(compare.RightOperand, loop, compilation, cancellationToken, out var range) &&
-                    (direction > 0 ? range.Max < int.MaxValue : range.Min > int.MinValue),
+                    (direction > 0 ? range.Max < int.MaxValue : range.Min > int.MinValue) ||
+                    UsesEnclosingIntCounter(loop, StorageRoot(compare.RightOperand)),
                 _ => false
             };
             if (!comparisonMovesTowardLimit)
@@ -943,6 +944,27 @@ public static partial class GaSemanticAnalysis
                     return false;
             }
             return true;
+        }
+
+        // Like a strict comparison, an enclosing counter still needs the compiler's range proof.
+        private static bool UsesEnclosingIntCounter(ILoopOperation loop, ISymbol? bound)
+        {
+            if (bound is not ILocalSymbol { RefKind: RefKind.None, Type.SpecialType: SpecialType.System_Int32 } local)
+                return false;
+
+            for (IOperation? parent = loop.Parent; parent != null; parent = parent.Parent)
+            {
+                var condition = parent switch
+                {
+                    IForLoopOperation enclosing => enclosing.Condition,
+                    IWhileLoopOperation { ConditionIsTop: true, ConditionIsUntil: false } enclosing => enclosing.Condition,
+                    _ => null
+                };
+                if (condition is IBinaryOperation { LeftOperand: ILocalReferenceOperation counter } &&
+                    Equal(counter.Local, local))
+                    return true;
+            }
+            return false;
         }
 
         private static bool IsSafeInclusiveLimit(Optional<object?> constant, int direction) => constant.HasValue && constant.Value switch

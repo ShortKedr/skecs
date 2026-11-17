@@ -644,6 +644,185 @@ public sealed class CompilerTests
     }
 
     [Fact]
+    public void NestedLoopAndSwitchBranchesPreserveTheirOwnTargets()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 4; ++i)
+                {
+                    if (i == 3) break;
+                    int limit = i & 7;
+                    int j = 0;
+                    while (j < limit)
+                    {
+                        ++j;
+                        switch (j)
+                        {
+                            case 1: continue;
+                            case 2: break;
+                        }
+                        if (v.X == j) break;
+                        p.Point.X += i * 10 + j;
+                    }
+                    if (i == 1) continue;
+                    ++p.Point.Y;
+                }
+            }
+            """);
+
+        Assert.Equal(new[] { "X", "Point.X", "Point.Y" }, program.Fields.Select(field => field.Path));
+        uint[] row = [99, 0, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(new uint[] { 99, 22, 2 }, row);
+        row = [2, 0, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(new uint[] { 2, 0, 2 }, row);
+    }
+
+    [Fact]
+    public void NestedLoopsCanReadTheCurrentOuterCounterAsStartOrBound()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 5; ++i)
+                {
+                    for (int j = 0; j < i; ++j) ++p.Point.X;
+                    for (int j = i; j > 0; --j) ++p.Point.X;
+                    for (int j = 0; j <= i; ++j) ++p.Point.Y;
+                }
+                int level = 0;
+                while (level < 5)
+                {
+                    ++level;
+                    for (int j = 0; j < level; ++j) ++p.Point.Y;
+                    for (int j = 6; j >= level; --j) ++p.Point.Y;
+                }
+            }
+            """);
+
+        uint[] row = [0, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(new uint[] { 20, 50 }, row);
+    }
+
+    [Fact]
+    public void RejectsAnInclusiveNestedBoundThatCanOverflowItsCounter()
+    {
+        var result = Analyze("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                int i = int.MaxValue - 1;
+                while (i < int.MaxValue)
+                {
+                    ++i;
+                    for (int j = int.MaxValue - 1; j <= i; ++j) ++p.Point.X;
+                }
+            }
+            """);
+
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0100" &&
+            diagnostic.GetMessage().Contains("iteration range", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NestedBudgetUsesTheMaximumOfExclusiveBranches()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 256; ++i)
+                {
+                    if (v.Flag)
+                    {
+                        for (int j = 0; j < 255; ++j) ++p.Point.X;
+                    }
+                    else
+                    {
+                        for (int j = 0; j < 255; ++j) --p.Point.X;
+                    }
+                }
+            }
+            """);
+
+        uint[] row = [1, 0];
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(65280u, row[1]);
+    }
+
+    [Fact]
+    public void RejectsExcessNestedWorkEvenWhenEachLoopFitsIndividually()
+    {
+        var result = Analyze("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 256; ++i)
+                    for (int j = 0; j < 256; ++j)
+                        ++p.Point.X;
+            }
+            """);
+        Assert.Null(result.Program);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Id == "GA0100" &&
+            diagnostic.GetMessage().Contains("65536 total", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NestedFrozenBoundCanBeReinitializedOnEveryOuterIteration()
+    {
+        var program = Compile("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 4; ++i)
+                {
+                    int limit = i & 7;
+                    for (int j = 0; j <= limit; ++j) ++p.Point.X;
+                    limit = v.X;
+                    p.Point.Y += limit;
+                }
+            }
+            """);
+        uint[] row = program.Fields.Select(field => field.Path == "X" ? 10u : 0u).ToArray();
+        Assert.Null(GaInterpreter.Execute(program, row));
+        Assert.Equal(10u, row[Array.FindIndex(program.Fields.ToArray(), field => field.Path == "Point.X")]);
+        Assert.Equal(40u, row[Array.FindIndex(program.Fields.ToArray(), field => field.Path == "Point.Y")]);
+
+        var rejected = Analyze("""
+            public void Execute(ref Position p, in Velocity v)
+            {
+                int limit = v.X & 7;
+                for (int i = 0; i < 4; ++i)
+                {
+                    for (int j = 0; j < limit; ++j) ++p.Point.X;
+                    limit = v.Y;
+                }
+            }
+            """);
+        Assert.Null(rejected.Program);
+        Assert.Contains(rejected.Diagnostics, diagnostic => diagnostic.Id == "GA0100");
+    }
+
+    [Fact]
+    public void NestedLoopEventCapacityMultipliesThePerIterationBound()
+    {
+        var program = Compile("""
+            public void Execute(in SystemContext context, ref Position p, in Velocity v)
+            {
+                for (int i = 0; i < 2; ++i)
+                    for (int j = 0; j < 3; ++j)
+                        context.Emit(i * 10 + j);
+            }
+            """);
+
+        Assert.Equal(6, program.EventCapacity);
+        int[] events = new int[6];
+        Assert.Null(GaInterpreter.Execute(program, [], events, out int count));
+        Assert.Equal(6, count);
+        Assert.Equal(new[] { 0, 1, 2, 10, 11, 12 }, events);
+    }
+
+    [Fact]
     public void IntEventsAreBoundedAndPublishOnlyForSuccessfulRows()
     {
         var program = Compile("""
