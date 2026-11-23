@@ -323,8 +323,12 @@ internal static class WeaponDamageValidation
 
     private static IList States(Battle battle)  =>
         (IList)typeof(Battle).GetField("states", Hidden)!.GetValue(battle)!;
-    private static void Call(Battle battle, string method)  =>
-        typeof(Battle).GetMethod(method, Hidden)!.Invoke(battle, null);
+    private static void Call(Battle battle, string method)
+    {
+        // Optional inputs (such as prepared GPU particle expiry) take the CPU path when null.
+        var info = typeof(Battle).GetMethod(method, Hidden)!;
+        info.Invoke(battle, new object?[info.GetParameters().Length]);
+    }
     private static List<EntityKey> Mounts(Battle battle)
     { var query = new CollectMounts { Rows = new() }; battle.NativeWorld.Query<MountedTurret>().ForEach(ref query); return query.Rows; }
     private struct CollectMounts : global::SKECS.IQueryProcessor<MountedTurret>
