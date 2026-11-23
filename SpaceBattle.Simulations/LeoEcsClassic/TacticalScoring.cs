@@ -113,12 +113,12 @@ public sealed partial class Battle
                 { participates = true; arrival = MathF.Min(arrival, streams[i].Arrival); }
             if (!participates) continue;
             ref readonly var actor = ref rows[member];
-            targetReady = MathF.Min(targetReady, MemberEngageSeconds(target, actor));
+            targetReady = MathF.Min(targetReady, CachedEngageSeconds(targetIndex, member));
             if (target.Brain.Mode != BrainMode.Attack) continue;
             var exposure = MathF.Min(Config.Tactics.ScoringHorizonSeconds, MathF.Max(0, kill - arrival));
             var focused = target.Brain.Target == actor.Entity ||
                 actor.Combat.LastAttacker == target.Entity && Tick - actor.Combat.LastDamageTick <= 180;
-            losses += CounterLoss(target, actor, exposure) * (focused ? 1 : 1f / Math.Max(1, activeMembers));
+            losses += CounterLoss(targetIndex, member, exposure) * (focused ? 1 : 1f / Math.Max(1, activeMembers));
         }
         var exposureWindow = MathF.Max(1f / Config.TickRate, MathF.Min(kill, Config.Tactics.ScoringHorizonSeconds));
         var heatBudget = MathF.Max(0.01f, target.Heat.Limit - target.Heat.Value +
@@ -211,6 +211,63 @@ public sealed partial class Battle
         return first;
     }
 
+    private float CachedEngageSeconds(int actorIndex, int targetIndex)
+    {
+        var pair = actorIndex * scoringRows + targetIndex;
+        if (engageEpochs[pair] == scoringEpoch) return engageSeconds[pair];
+        var first = float.PositiveInfinity;
+        if (CachedArrival(actorIndex, targetIndex, PrimarySlot, out _, out var arrival, out _)) first = arrival;
+        if (CachedArrival(actorIndex, targetIndex, SecondarySlot, out _, out arrival, out _)) first = MathF.Min(first, arrival);
+        if (ShipCatalog.TurretCount(AiRows[actorIndex].Id.Class) > 0)
+        {
+            if (CachedArrival(actorIndex, targetIndex, CannonSlot, out _, out arrival, out _))
+                first = MathF.Min(first, arrival);
+            if (CachedArrival(actorIndex, targetIndex, PlasmaSlot, out _, out arrival, out _))
+                first = MathF.Min(first, arrival);
+        }
+        engageEpochs[pair] = scoringEpoch; engageSeconds[pair] = first;
+        return first;
+    }
+
+    private const int PrimarySlot = 0, SecondarySlot = 1, CannonSlot = 2, PlasmaSlot = 3, WeaponSlots = 4;
+    private struct ArrivalEntry { public int Epoch; public bool Available; public float Distance, Arrival, Flight; }
+    private ArrivalEntry[] arrivals = [];
+    private float[] engageSeconds = [];
+    private int[] engageEpochs = [];
+    private int scoringEpoch, scoringRows;
+
+    // Snapshot rows keep the fields the arrival reads for the whole tick, so each value is computed once per tick.
+    private void ResetScoringCache()
+    {
+        scoringRows = aiRows.Count;
+        var pairs = scoringRows * scoringRows;
+        if (engageSeconds.Length < pairs)
+        {
+            var capacity = Math.Max(pairs, engageSeconds.Length * 2);
+            engageSeconds = new float[capacity]; engageEpochs = new int[capacity]; arrivals = new ArrivalEntry[capacity * WeaponSlots];
+            scoringEpoch = 0;
+        }
+        if (++scoringEpoch == int.MaxValue) { Array.Clear(engageEpochs); Array.Clear(arrivals); scoringEpoch = 1; }
+    }
+
+    private bool CachedArrival(int actorIndex, int targetIndex, int slot, out float distance, out float arrival, out float flight)
+    {
+        ref var entry = ref arrivals[(actorIndex * scoringRows + targetIndex) * WeaponSlots + slot];
+        if (entry.Epoch != scoringEpoch)
+        {
+            var rows = AiRows; ref readonly var actor = ref rows[actorIndex];
+            var weapon = slot switch
+            {
+                PrimarySlot => actor.Primary, SecondarySlot => actor.Secondary,
+                _ => ShipCatalog.TurretWeapon(actor.Id.Class, slot - CannonSlot)
+            };
+            entry.Available = WeaponArrival(actor, rows[targetIndex], weapon, out entry.Distance, out entry.Arrival, out entry.Flight);
+            entry.Epoch = scoringEpoch;
+        }
+        distance = entry.Distance; arrival = entry.Arrival; flight = entry.Flight;
+        return entry.Available;
+    }
+
     private float HeatReadySeconds(in AiShipSnapshot actor)
     {
         if (actor.Docked || !(actor.Heat.Limit > 0)) return float.PositiveInfinity;
@@ -301,7 +358,7 @@ public sealed partial class Battle
     {
         var primaryFire = float.PositiveInfinity;
         float primaryHeat = 0;
-        if (WeaponArrival(actor, target, actor.Primary, out var distance, out var arrival, out var flight))
+        if (CachedArrival(member, targetIndex, PrimarySlot, out var distance, out var arrival, out var flight))
         {
             primaryFire = arrival - flight;
             var burst = ReadyBurst(actor.Primary, actor.Heat.Limit - MathF.Max(0,
@@ -312,7 +369,7 @@ public sealed partial class Battle
             AddStream(member, actor.Primary, target, targetIndex, distance, arrival, flight, scoring.HeatScale, 1, burst,
                 ref scoring.PrimaryDps, streams, ref count);
         }
-        if (WeaponArrival(actor, target, actor.Secondary, out distance, out arrival, out flight))
+        if (CachedArrival(member, targetIndex, SecondarySlot, out distance, out arrival, out flight))
         {
             var ready = arrival - flight;
             var heat = SecondaryHeat(actor, primaryFire, primaryHeat, ready);
@@ -334,14 +391,14 @@ public sealed partial class Battle
         ref var mounts = ref actorScoring[member];
         var pairs = mounts.MountCount / 2;
         var ownHeat = new Heat { Limit = 30, CoolingPerSecond = 12 };
-        if (WeaponArrival(actor, target, mounts.Cannon, out distance, out arrival, out flight))
+        if (CachedArrival(member, targetIndex, CannonSlot, out distance, out arrival, out flight))
         {
             mounts.CannonHeatScale = SustainableScale(ownHeat, WeaponHeatRate(mounts.Cannon), FirstHeat(mounts.Cannon)); mounts.MountHeatReady = true;
             AddStream(member, mounts.Cannon, target, targetIndex, distance, arrival, flight, mounts.CannonHeatScale, pairs,
                 ReadyBurst(mounts.Cannon, ownHeat.Limit),
                 ref mounts.CannonDps, streams, ref count);
         }
-        if (WeaponArrival(actor, target, mounts.Plasma, out distance, out arrival, out flight))
+        if (CachedArrival(member, targetIndex, PlasmaSlot, out distance, out arrival, out flight))
         {
             mounts.PlasmaHeatScale = SustainableScale(ownHeat, WeaponHeatRate(mounts.Plasma), FirstHeat(mounts.Plasma)); mounts.MountHeatReady = true;
             AddStream(member, mounts.Plasma, target, targetIndex, distance, arrival, flight, mounts.PlasmaHeatScale, pairs,
@@ -387,30 +444,31 @@ public sealed partial class Battle
         streams[count++] = new() { Member = member, Arrival = arrival, Volley = volley, Rate = rate, Profile = profile };
     }
 
-    private float CounterLoss(in AiShipSnapshot enemy, in AiShipSnapshot actor, float exposure)
+    private float CounterLoss(int enemyIndex, int actorIndex, float exposure)
     {
         if (exposure <= 0) return 0;
+        ref readonly var enemy = ref AiRows[enemyIndex]; ref readonly var actor = ref AiRows[actorIndex];
         var scale = SustainableScale(enemy.Heat, WeaponHeatRate(enemy.Primary) + WeaponHeatRate(enemy.Secondary), MainFirstHeat(enemy));
         float shieldDamage = 0, hullDamage = 0;
-        CounterWeapon(enemy, actor, enemy.Primary, scale, exposure, 1, ref shieldDamage, ref hullDamage);
-        CounterWeapon(enemy, actor, enemy.Secondary, scale, exposure, 1, ref shieldDamage, ref hullDamage);
+        CounterWeapon(enemyIndex, actorIndex, PrimarySlot, enemy.Primary, scale, exposure, 1, ref shieldDamage, ref hullDamage);
+        CounterWeapon(enemyIndex, actorIndex, SecondarySlot, enemy.Secondary, scale, exposure, 1, ref shieldDamage, ref hullDamage);
         var pairs = ShipCatalog.TurretCount(enemy.Id.Class) / 2;
         if (pairs > 0)
         {
             var heat = new Heat { Limit = 30, CoolingPerSecond = 12 };
             var cannon = ShipCatalog.TurretWeapon(enemy.Id.Class, 0); var plasma = ShipCatalog.TurretWeapon(enemy.Id.Class, 1);
-            CounterWeapon(enemy, actor, cannon, SustainableScale(heat, WeaponHeatRate(cannon), FirstHeat(cannon)), exposure, pairs, ref shieldDamage, ref hullDamage);
-            CounterWeapon(enemy, actor, plasma, SustainableScale(heat, WeaponHeatRate(plasma), FirstHeat(plasma)), exposure, pairs, ref shieldDamage, ref hullDamage);
+            CounterWeapon(enemyIndex, actorIndex, CannonSlot, cannon, SustainableScale(heat, WeaponHeatRate(cannon), FirstHeat(cannon)), exposure, pairs, ref shieldDamage, ref hullDamage);
+            CounterWeapon(enemyIndex, actorIndex, PlasmaSlot, plasma, SustainableScale(heat, WeaponHeatRate(plasma), FirstHeat(plasma)), exposure, pairs, ref shieldDamage, ref hullDamage);
         }
         var time = DamageRules.EstimateKillSeconds(actor.Shield.Current, actor.Hull.Current, actor.Hull.Armor, shieldDamage, hullDamage);
         return time > 0 ? Math.Clamp(1 / time, 0, 1) : 1;
     }
 
-    private void CounterWeapon(in AiShipSnapshot enemy, in AiShipSnapshot actor, in Weapon weapon, float scale,
+    private void CounterWeapon(int enemyIndex, int actorIndex, int slot, in Weapon weapon, float scale,
         float exposure, int copies, ref float shieldDamage, ref float hullDamage)
     {
-        if (!WeaponArrival(enemy, actor, weapon, out var distance, out var arrival, out var flight) || arrival > exposure) return;
-        var chance = HitProbability(actor, distance, flight);
+        if (!CachedArrival(enemyIndex, actorIndex, slot, out var distance, out var arrival, out var flight) || arrival > exposure) return;
+        var chance = HitProbability(AiRows[actorIndex], distance, flight);
         var profile = DamageRules.ForWeapon(weapon.Kind, Config.Damage);
         var ticks = Math.Max(1, (int)(weapon.Cooldown / Config.ChurnMultiplier));
         var volleys = 1 + MathF.Max(0, exposure - arrival) * Config.TickRate / ticks * scale;

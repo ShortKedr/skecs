@@ -27,7 +27,7 @@ public sealed partial class Battle
             var pairs = count / 2;
             var x = pairs == 1 ? 0 : 0.45f - 0.9f * (slot / 2) / (pairs - 1);
             var offset = new Vector2(x, slot % 2 == 0 ? -0.45f : 0.45f) * radius;
-            var gun = Store.Create(); var number = ++serial;
+            var gun = Store.Create<TurretEntity>(); var number = ++serial;
             var position = ship.Position + Rotate(offset, ship.Angle);
             Store.Set(gun, new MountedTurret { Serial = number, Slot = slot, Parent = parent, Target = EntityKey.None,
                 LocalOffset = offset, LastFireTick = -1000 });
