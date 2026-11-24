@@ -57,6 +57,16 @@ for (const release of registry.releases) {
   for (const page of ['index', 'guide/sample', ...release.guides.map(item => 'guide/' + item.route), 'api/index', ...['World', 'Query-2', 'RawChunkView'].map(name => `api/${release.product}.${name}`)]) {
     assert.ok(contents.has(join(dist, prefix, page + '.html')), `Missing ${prefix}${page}`)
   }
+  if (release.migrationFrom) {
+    const installation = contents.get(join(dist, prefix, 'guide/installation.html'))
+    const article = installation?.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1]
+    assert.ok(article, `Missing installation article at ${prefix}guide/installation.html`)
+    for (const route of ['migration', 'release-notes']) {
+      const target = `${docsBase}${prefix}guide/${route}`
+      assert.ok(article.includes(`href="${target}.html"`) || article.includes(`href="${target}"`),
+        `Installation must link to ${target} in the current release and locale`)
+    }
+  }
   const sample = contents.get(join(dist, prefix, 'guide/sample.html'))
   assert.ok(sample.includes('MovementProcessor'), 'The existing repository sample must be included')
   assert.ok(sample.includes('Matching archetypes:'), 'The full sample must be included')

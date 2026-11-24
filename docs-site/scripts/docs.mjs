@@ -101,9 +101,15 @@ async function prepareGuides(release, assembly) {
         let introduction = lang
           ? `# Установка ${release.product} ${release.version}\n\nСкачайте \`${release.packageId}.${release.version}.nupkg\` из [релиза ${release.version}](${release.releaseUrl}) и сохраните в каталоге \`packages/\` рядом с проектом. Эта документация относится именно к этому релизному пакету.\n`
           : `# Install ${release.product} ${release.version}\n\nDownload \`${release.packageId}.${release.version}.nupkg\` from [release ${release.version}](${release.releaseUrl}) and keep it in a \`packages/\` directory beside your project. This documentation describes that exact release package.\n`
-        if (release.migrationFrom) introduction += lang
-          ? `\nПеред обновлением с ${release.migrationFrom} прочитайте [статью по миграции](/ru/guide/migration) и [примечания к релизу](/ru/guide/release-notes).\n`
-          : `\nBefore upgrading from ${release.migrationFrom}, read the [migration article](/guide/migration) and [release notes](/guide/release-notes).\n`
+        if (release.migrationFrom) {
+          const migration = release.guides.find(guide => guide.route === 'migration')
+          const notes = release.guides.find(guide => guide.route === 'release-notes')
+          const migrationPath = posix.relative(posix.dirname(sourceFile), migration.source + suffix)
+          const notesPath = posix.relative(posix.dirname(sourceFile), notes.source + suffix)
+          introduction += lang
+            ? `\nПеред обновлением с ${release.migrationFrom} прочитайте [статью по миграции](${migrationPath}) и [примечания к релизу](${notesPath}).\n`
+            : `\nBefore upgrading from ${release.migrationFrom}, read the [migration article](${migrationPath}) and [release notes](${notesPath}).\n`
+        }
         text = introduction + text.slice(text.indexOf('\n## '))
         text = text.replace('Use the locally built ', 'Use the released ').replace('Используйте локально собранный ', 'Используйте релизный ')
           .replace(/^## Godot(?: \(C#\)| C#)$/gm, '## Godot .NET (C#)')
