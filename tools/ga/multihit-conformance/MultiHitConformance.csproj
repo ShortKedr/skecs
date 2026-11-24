@@ -16,6 +16,7 @@
     <Compile Include="DamageKernels.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="DamageOracle.cs" />
+    <Compile Include="MultiHitScenario.cs" />
     <Compile Include="$(Bundle)/ga-adapter.g.cs" />
     <Compile Include="$(Bundle)/ga-row-codec.g.cs" />
   </ItemGroup>

@@ -1,0 +1,7 @@
+{
+  "source": "CarrierKernel.cs",
+  "systemType": "CarrierOrders",
+  "simulationContract": "carrier-capacity/1",
+  "adapter": "UnityCarrierCapacity",
+  "workgroup": 64
+}

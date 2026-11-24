@@ -1,15 +1,50 @@
-using System.Diagnostics;
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
 using SKECS;
 using SKECS.GA;
 using SKECS.Numerics;
 using InventoryItems = SKECS.GA.FixedArray16<global::InventoryItem>;
 
-internal readonly record struct Scenario(int Rows, uint Seed, int Chunk, int Budget, int Workers);
-
-internal readonly record struct Coverage(long Rows, long Transfers, long Overheated, long HeatSpent, long Docked,
-    long Kits, long EnabledKits, long HeatRefusals, int Slots, long DeviceRows, long DeviceBatches)
+internal readonly struct ThermalCase
 {
-    public static Coverage operator +(Coverage left, Coverage right) => new(
+    internal ThermalCase(int rows, uint seed, int chunk, int budget, int workers) =>
+        (Rows, Seed, Chunk, Budget, Workers) = (rows, seed, chunk, budget, workers);
+
+    internal int Rows { get; }
+    internal uint Seed { get; }
+    internal int Chunk { get; }
+    internal int Budget { get; }
+    internal int Workers { get; }
+
+    public override string ToString() => $"rows={Rows}, seed={Seed}, chunk={Chunk}, budget={Budget}, workers={Workers}";
+}
+
+internal readonly struct ThermalCoverage
+{
+    internal ThermalCoverage(long rows, long transfers, long overheated, long heatSpent, long docked,
+        long kits, long enabledKits, long heatRefusals, int slots, long deviceRows, long deviceBatches)
+    {
+        (Rows, Transfers, Overheated, HeatSpent, Docked) = (rows, transfers, overheated, heatSpent, docked);
+        (Kits, EnabledKits, HeatRefusals, Slots) = (kits, enabledKits, heatRefusals, slots);
+        (DeviceRows, DeviceBatches) = (deviceRows, deviceBatches);
+    }
+
+    internal long Rows { get; }
+    internal long Transfers { get; }
+    internal long Overheated { get; }
+    internal long HeatSpent { get; }
+    internal long Docked { get; }
+    internal long Kits { get; }
+    internal long EnabledKits { get; }
+    internal long HeatRefusals { get; }
+    internal int Slots { get; }
+    internal long DeviceRows { get; }
+    internal long DeviceBatches { get; }
+
+    public static ThermalCoverage operator +(ThermalCoverage left, ThermalCoverage right) => new(
         left.Rows + right.Rows, left.Transfers + right.Transfers, left.Overheated + right.Overheated,
         left.HeatSpent + right.HeatSpent, left.Docked + right.Docked, left.Kits + right.Kits,
         left.EnabledKits + right.EnabledKits, left.HeatRefusals + right.HeatRefusals, left.Slots | right.Slots,
@@ -22,11 +57,35 @@ internal static class ThermalScenario
     private const uint StampSeed = 2166136261u;
     private static readonly ThermalContribution CounterSeed = new() { Stamp = StampSeed };
 
-#if GA_BROWSER_CONFORMANCE
-    public static async Task<Coverage> Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
-#else
-    public static Coverage Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
-#endif
+    internal static (ThermalCase[] Cases, int Ticks) SelectCases(string profile, bool singleWorker)
+    {
+        int[] rows = { 0, 1, 63, 64, 65, 127, 128, 129, 1024 };
+        uint[] seeds = { 0, 1, 27, 7331, uint.MaxValue };
+        int[] chunks = { 1, 64, 127, 256 };
+        int[] budgets = { 1, 3, 64 };
+        int[] workers = singleWorker ? new[] { 1 } : new[] { 1, 2, Environment.ProcessorCount };
+        if (profile is "short" or "long")
+            return (new[] { new ThermalCase(65, 27, 127, 64, singleWorker ? 1 : 2) }, profile == "short" ? 1_000 : 100_000);
+        if (profile is not ("smoke" or "matrix"))
+            throw new ArgumentException($"Unknown ThermalInventory profile '{profile}'.");
+        var scenarios = new List<ThermalCase>();
+        foreach (int rowCount in rows)
+        {
+            int firstSeed = profile == "matrix" ? 0 : scenarios.Count % seeds.Length;
+            int lastSeed = profile == "matrix" ? seeds.Length : firstSeed + 1;
+            for (int seed = firstSeed; seed < lastSeed; seed++)
+            {
+                int i = scenarios.Count;
+                scenarios.Add(new ThermalCase(rowCount, seeds[seed], chunks[i % chunks.Length],
+                    budgets[i % budgets.Length], workers[i % workers.Length]));
+            }
+        }
+        return (scenarios.ToArray(), 16);
+    }
+
+    internal static async ValueTask<ThermalCoverage> Run(ThermalCase scenario, int ticks, bool useGpu, bool requireYield,
+        Action<DeterministicWorkload<ThermalFrame>, DeterministicReduction<ThermalContribution>, Action<GaBatchTimings>> register,
+        Func<DeterministicRunner<ThermalFrame>, int, ValueTask<bool>> drain, Action<string> report)
     {
         using var world = new World(new WorldOptions(scenario.Chunk));
         var rows = Seed(world, scenario);
@@ -34,18 +93,10 @@ internal static class ThermalScenario
         var counters = workload.AddReduction(CounterSeed, MergeCounters);
         long deviceRows = 0;
         long deviceBatches = 0;
-        if (startup is null)
-            ThermalAdapter.Register(workload, SystemStage.Update, counters);
-        else
-            workload.AddBatchSystem(SystemStage.Update, ThermalAdapterRowCodec.CreateQuery(),
-                new GaBatchProcessor<ThermalFrame>(startup, contract.SystemId, contract.SourceDigest, contract.IrDigest,
-                    contract.ComponentSchemaDigest, ThermalAdapterRowCodec.WordsPerRow, ThermalAdapterRowCodec.Pack<ThermalFrame>,
-                    ThermalAdapterRowCodec.Apply<ThermalFrame>, contract.EventCapacity,
-                    batch => { deviceRows += batch.Rows; deviceBatches++; }, null, false, [], [],
-                    ThermalAdapterRowCodec.TickResource, null, ThermalAdapterRowCodec.CreateEventTypes(counters)));
+        register(workload, counters, batch => { deviceRows += batch.Rows; deviceBatches++; });
 
         using var runner = new DeterministicRunner<ThermalFrame>(world, workload, scenario.Workers);
-        var coverage = default(Coverage);
+        var coverage = default(ThermalCoverage);
         for (int tick = 1; tick <= ticks; tick++)
         {
             var raw = RawFrame.At(tick, scenario.Seed);
@@ -54,20 +105,27 @@ internal static class ThermalScenario
             runner.BeginTick(tick, in input, Fixed.One);
             // The caller may reuse its input storage while the runner owns its copied frame.
             input = default;
-#if GA_BROWSER_CONFORMANCE
-            bool waitedForReadback = await Drain(runner, scenario.Budget);
-            if (startup is not null && scenario.Rows != 0 && !waitedForReadback)
-                throw new InvalidDataException($"WebGPU did not yield at {scenario}, tick {tick}.");
-#else
-            Drain(runner, scenario.Budget);
-#endif
-            if (startup is not null && deviceRows != (long)scenario.Rows * tick)
+            bool waited = await drain(runner, scenario.Budget);
+            if (requireYield && useGpu && scenario.Rows != 0 && !waited)
+                throw new InvalidDataException($"GPU work did not yield at {scenario}, tick {tick}.");
+            if (useGpu && deviceRows != (long)scenario.Rows * tick)
                 throw new InvalidDataException($"Wrong actual device row count at {scenario}, tick {tick}.");
             coverage += VerifyTick(world, rows, raw, scenario, tick, runner.LastCompleted!, counters);
             if (ticks >= 1_000 && tick % 1_000 == 0)
-                Console.WriteLine($"progress tick={tick}/{ticks} deviceRows={deviceRows} deviceBatches={deviceBatches}");
+                report($"progress tick={tick}/{ticks} deviceRows={deviceRows} deviceBatches={deviceBatches}");
         }
-        return coverage with { DeviceRows = deviceRows, DeviceBatches = deviceBatches };
+        return coverage + new ThermalCoverage(0, 0, 0, 0, 0, 0, 0, 0, 0, deviceRows, deviceBatches);
+    }
+
+    internal static void VerifyCoverage(ThermalCoverage coverage, bool useGpu)
+    {
+        if (coverage.Rows <= 0 || coverage.Transfers <= 0 || coverage.Overheated <= 0 || coverage.HeatRefusals <= 0 ||
+            coverage.Docked <= 0 || coverage.Docked >= coverage.Rows || coverage.EnabledKits <= 0 ||
+            coverage.EnabledKits >= coverage.Kits || coverage.Kits >= coverage.Rows || coverage.Slots != 0xffff)
+            throw new InvalidDataException("The corpus missed a required transfer, optional component, or inventory slot.");
+        if (useGpu ? coverage.DeviceRows != coverage.Rows || coverage.DeviceBatches <= 0 :
+            coverage.DeviceRows != 0 || coverage.DeviceBatches != 0)
+            throw new InvalidDataException("Actual device work did not match expected routes.");
     }
 
     private static ThermalContribution MergeCounters(ThermalContribution sum, ThermalContribution leaf) => new()
@@ -76,7 +134,7 @@ internal static class ThermalScenario
         HeatSpent = sum.HeatSpent + leaf.HeatSpent, Stamp = unchecked((sum.Stamp * 16777619u) ^ leaf.Stamp)
     };
 
-    private static ModelRow[] Seed(World world, Scenario scenario)
+    private static ModelRow[] Seed(World world, ThermalCase scenario)
     {
         int salt = (int)(scenario.Seed & 255);
         var rows = new ModelRow[scenario.Rows];
@@ -129,13 +187,14 @@ internal static class ThermalScenario
             {
                 int slot = (model.Serial + frame.SlotShift) % 16;
                 ref var item = ref model.Items[slot];
-                item = item with { Units = 2 + row % 5, Credit = 0x01111111L };
+                item.Units = 2 + row % 5;
+                item.Credit = 0x01111111L;
                 InventoryItems.At(ref world.Get<ThermalInventory>(model.Entity).State.Items, slot) = item.ToComponent();
             }
         }
     }
 
-    private static Coverage VerifyTick(World world, ModelRow[] rows, RawFrame frame, Scenario scenario, int tick,
+    private static ThermalCoverage VerifyTick(World world, ModelRow[] rows, RawFrame frame, ThermalCase scenario, int tick,
         DeterministicTickResult result, DeterministicReduction<ThermalContribution> counters)
     {
         IReadOnlyList<DeterministicEvent> events = result.Events;
@@ -165,7 +224,8 @@ internal static class ThermalScenario
             bool accepted = eligible && charge <= frame.HeatLimit - model.Heat;
             if (accepted)
             {
-                item = item with { Units = item.Units - 1, Credit = item.Credit + frame.CreditStep };
+                item.Units--;
+                item.Credit += frame.CreditStep;
                 model.Heat += charge;
                 spent += charge;
                 transfers++;
@@ -212,7 +272,7 @@ internal static class ThermalScenario
             throw new InvalidDataException($"Typed counter diverged at {scenario}, tick {tick}: " +
                 $"expected ({transfers},{overheated},{spent},{stamp}), got " +
                 $"({reduction.Transfers},{reduction.Overheated},{reduction.HeatSpent.Raw},{reduction.Stamp}).");
-        return new Coverage(rows.Length, transfers, overheated, spent, docked, kits, enabledKits, heatRefusals, slots, 0, 0);
+        return new ThermalCoverage(rows.Length, transfers, overheated, spent, docked, kits, enabledKits, heatRefusals, slots, 0, 0);
     }
 
     private static ThermalContribution ReadCounters(DeterministicTickResult result, DeterministicReduction<ThermalContribution> counters)
@@ -232,50 +292,22 @@ internal static class ThermalScenario
         return item.Get<T>();
     }
 
-#if GA_BROWSER_CONFORMANCE
-    private static async Task<bool> Drain(DeterministicRunner<ThermalFrame> runner, int budget)
+    private readonly struct RawFrame
     {
-        var timer = Stopwatch.StartNew();
-        bool pending = false;
-        var status = runner.Advance(budget);
-        while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
+        private RawFrame(int slotShift, long ambient, long transferHeat, long heatLimit, long shieldLimit, long shieldDrain, long creditStep)
         {
-            pending = true;
-            await Task.Delay(1);
-            status = runner.Advance(budget);
+            (SlotShift, Ambient, TransferHeat, HeatLimit) = (slotShift, ambient, transferHeat, heatLimit);
+            (ShieldLimit, ShieldDrain, CreditStep) = (shieldLimit, shieldDrain, creditStep);
         }
-        if (status == DeterministicTickStatus.Faulted)
-            throw new InvalidOperationException("ThermalInventory tick faulted.", runner.Fault);
-        if (status != DeterministicTickStatus.Completed)
-            throw new TimeoutException("ThermalInventory stayed pending for 20 seconds.");
-        return pending;
-    }
-#else
-    private static void Drain(DeterministicRunner<ThermalFrame> runner, int budget)
-    {
-        long started = Stopwatch.GetTimestamp();
-        var spin = new SpinWait();
-        while (true)
-        {
-            var status = runner.Advance(budget);
-            if (status == DeterministicTickStatus.Completed)
-                return;
-            if (status == DeterministicTickStatus.Faulted)
-                throw new InvalidOperationException("ThermalInventory tick faulted.", runner.Fault);
-            double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-            if (elapsed >= 20_000)
-                throw new TimeoutException("ThermalInventory stayed pending for 20 seconds.");
-            if (elapsed < 2)
-                spin.SpinOnce(sleep1Threshold: -1);
-            else
-                Thread.Sleep(1);
-        }
-    }
-#endif
 
-    private readonly record struct RawFrame(int SlotShift, long Ambient, long TransferHeat, long HeatLimit,
-        long ShieldLimit, long ShieldDrain, long CreditStep)
-    {
+        public int SlotShift { get; }
+        public long Ambient { get; }
+        public long TransferHeat { get; }
+        public long HeatLimit { get; }
+        public long ShieldLimit { get; }
+        public long ShieldDrain { get; }
+        public long CreditStep { get; }
+
         public static RawFrame At(int tick, uint seed) => new((tick - 1) % 16,
             0x18000000L + ((tick + seed % 7) % 6) * 0x10000000L, Unit + (tick % 5) * 0x20000000L,
             (5 + (tick % 8)) * Unit + 0x04aaaaaaL, 10 * Unit + 0x21000000L,
@@ -289,20 +321,31 @@ internal static class ThermalScenario
         };
     }
 
-    private readonly record struct Item(int Units, long Credit, bool Enabled)
+    private struct Item
     {
+        public Item(int units, long credit, bool enabled) => (Units, Credit, Enabled) = (units, credit, enabled);
+        public int Units;
+        public long Credit;
+        public bool Enabled;
+
         public InventoryItem ToComponent() => new() { Units = Units, Credit = Fixed.FromRaw(Credit), Enabled = Enabled };
     }
 
-    private sealed class ModelRow(Entity entity, int serial, Item[] items, long heat, long shield, bool docked, bool hasKit, CoolingKit kit)
+    private sealed class ModelRow
     {
-        public Entity Entity { get; } = entity;
-        public int Serial { get; } = serial;
-        public Item[] Items { get; } = items;
-        public long Heat = heat;
-        public long Shield = shield;
-        public bool Docked = docked;
-        public bool HasKit = hasKit;
-        public CoolingKit Kit { get; } = kit;
+        public ModelRow(Entity entity, int serial, Item[] items, long heat, long shield, bool docked, bool hasKit, CoolingKit kit)
+        {
+            (Entity, Serial, Items, Kit) = (entity, serial, items, kit);
+            (Heat, Shield, Docked, HasKit) = (heat, shield, docked, hasKit);
+        }
+
+        public Entity Entity { get; }
+        public int Serial { get; }
+        public Item[] Items { get; }
+        public long Heat;
+        public long Shield;
+        public bool Docked;
+        public bool HasKit;
+        public CoolingKit Kit { get; }
     }
 }

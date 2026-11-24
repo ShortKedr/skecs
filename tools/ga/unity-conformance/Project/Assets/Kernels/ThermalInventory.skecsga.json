@@ -1,0 +1,7 @@
+{
+  "source": "ThermalKernel.cs",
+  "systemType": "ThermalKernel",
+  "simulationContract": "thermal-inventory/1",
+  "adapter": "UnityThermalInventory",
+  "workgroup": 64
+}

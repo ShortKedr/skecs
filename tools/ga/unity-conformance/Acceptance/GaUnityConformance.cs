@@ -37,13 +37,17 @@ public static class GaUnityConformance
             var targetRead = UnityTargetRead.LoadAsset();
             var shotBurst = UnityShotBurst.LoadAsset();
             var spatialParent = UnitySpatialParent.LoadAsset();
-            Check(movement && nested && targetRead && shotBurst && spatialParent, "The packaged Unity GA assets are missing.");
+            var thermalInventory = UnityThermalInventory.LoadAsset();
+            var multiHit = UnityMultiHit.LoadAsset();
+            var carrierCapacity = UnityCarrierCapacity.LoadAsset();
+            var assets = new[] { movement, nested, targetRead, shotBurst, spatialParent, thermalInventory, multiHit, carrierCapacity };
+            Check(Array.TrueForAll(assets, asset => asset), "The packaged Unity GA assets are missing.");
             var movementRequest = UnityMovement.CreateRequest(movement);
             var nestedRequest = UnityNestedFault.CreateRequest(nested);
             var requests = new[] { movementRequest, nestedRequest,
                 UnityTargetRead.CreateRequest(targetRead), UnityShotBurst.CreateRequest(shotBurst),
-                UnitySpatialParent.CreateRequest(spatialParent) };
-            var assets = new[] { movement, nested, targetRead, shotBurst, spatialParent };
+                UnitySpatialParent.CreateRequest(spatialParent), UnityThermalInventory.CreateRequest(thermalInventory),
+                UnityMultiHit.CreateRequest(multiHit), UnityCarrierCapacity.CreateRequest(carrierCapacity) };
             var devices = GaUnityDevice.Discover(assets);
             cpuOnlyHost |= Application.platform == RuntimePlatform.WebGLPlayer && devices.Count == 0;
             Debug.Log($"GA_UNITY_DEVICE Unity={Application.unityVersion} api={SystemInfo.graphicsDeviceType} " +
@@ -70,7 +74,9 @@ public static class GaUnityConformance
                 await CompareMovement(cpu, noCompute, 65, 1200, 0);
                 CompareFault(await RunNested(cpu), await RunNested(noCompute));
                 await GaUnityGameplayConformance.Run(cpu, noCompute);
+                await GaUnityExtendedGameplayConformance.Run(cpu, noCompute);
                 await GaUnityServiceConformance.Run(useGpu: false);
+                await GaUnityLifecycleConformance.Run(useGpu: false);
                 Debug.Log("SKECS_GA_UNITY_OK policy=CpuOnly,Auto,RequireGpu deviceRows=0 ticks=1200 defaultAsync=passed");
                 return 0;
             }
@@ -102,7 +108,9 @@ public static class GaUnityConformance
             CompareFault(await RunNested(cpu), await RunNested(gpu));
             await VerifyDiscard((GaPackedKernel)auto.GetPreparedKernel(nestedRequest.Contract.SystemId));
             await GaUnityGameplayConformance.Run(cpu, gpu);
+            await GaUnityExtendedGameplayConformance.Run(cpu, gpu);
             await GaUnityServiceConformance.Run(useGpu: true);
+            await GaUnityLifecycleConformance.Run(useGpu: true);
 
             Debug.Log($"SKECS_GA_UNITY_OK policy=CpuOnly,Auto,RequireGpu deviceRows={gpuRows} ticks=1200 " +
                 "fault=nested-divide-by-zero discard=passed concurrent=passed defaultAsync=passed qualification=Experimental");

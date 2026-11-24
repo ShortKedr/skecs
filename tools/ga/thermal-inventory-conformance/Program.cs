@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+using SKECS;
 using SKECS.GA;
 #if !GA_BROWSER_CONFORMANCE
 using SKECS.GA.Backend.D3D11;
@@ -32,7 +34,7 @@ var device = backend;
 #else
 if (args.Length is 1 or 2 && args[0] == "cpu")
 {
-    Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
+    await Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
     return;
 }
 if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
@@ -59,32 +61,20 @@ Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={d
     $"numericVersion={contract.NumericVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
     $"contentId={route.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
 Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
-#if GA_BROWSER_CONFORMANCE
 await Exercise(profile, startup);
-#else
-Exercise(profile, startup);
-#endif
 
-#if GA_BROWSER_CONFORMANCE
 async Task Exercise(string profile, GaStartupResult? startup)
-#else
-void Exercise(string profile, GaStartupResult? startup)
-#endif
 {
-    var (scenarios, ticks) = SelectCases(profile);
-    var coverage = default(Coverage);
-    foreach (var scenario in scenarios)
 #if GA_BROWSER_CONFORMANCE
-        coverage += await ThermalScenario.Run(scenario with { Workers = 1 }, ticks, startup, contract);
+    const bool browser = true;
 #else
-        coverage += ThermalScenario.Run(scenario, ticks, startup, contract);
+    const bool browser = false;
 #endif
-    Require(coverage.Rows > 0 && coverage.Transfers > 0 && coverage.Overheated > 0 && coverage.HeatRefusals > 0 &&
-        coverage.Docked > 0 && coverage.Docked < coverage.Rows && coverage.EnabledKits > 0 &&
-        coverage.EnabledKits < coverage.Kits && coverage.Kits < coverage.Rows && coverage.Slots == 0xffff,
-        "The corpus missed a required transfer, optional component, or inventory slot.");
-    Require(startup is null ? coverage.DeviceRows == 0 && coverage.DeviceBatches == 0 :
-        coverage.DeviceRows == coverage.Rows && coverage.DeviceBatches > 0, "Actual device work did not match expected routes.");
+    var (scenarios, ticks) = ThermalScenario.SelectCases(profile, singleWorker: browser);
+    var coverage = default(ThermalCoverage);
+    foreach (var scenario in scenarios)
+        coverage += await ThermalScenario.Run(scenario, ticks, startup is not null, browser, Register, Drain, Console.WriteLine);
+    ThermalScenario.VerifyCoverage(coverage, startup is not null);
     Console.WriteLine($"ThermalInventory route={(startup is null ? "cpu" : "gpu")} profile={profile} cases={scenarios.Length} " +
         $"ticks={scenarios.Length * ticks} rows={coverage.Rows} transfers={coverage.Transfers} " +
         $"overheated={coverage.Overheated} heatRefusals={coverage.HeatRefusals} heatSpentRaw={coverage.HeatSpent} " +
@@ -94,32 +84,54 @@ void Exercise(string profile, GaStartupResult? startup)
 #if GA_BROWSER_CONFORMANCE
     Console.WriteLine("WebGPU ThermalInventory pendingReadback=passed");
 #endif
+
+    void Register(DeterministicWorkload<ThermalFrame> workload, DeterministicReduction<ThermalContribution> counters, Action<GaBatchTimings> observe)
+    {
+        if (startup is null)
+            ThermalAdapter.Register(workload, SystemStage.Update, counters);
+        else
+            workload.AddBatchSystem(SystemStage.Update, ThermalAdapterRowCodec.CreateQuery(),
+                new GaBatchProcessor<ThermalFrame>(startup, contract.SystemId, contract.SourceDigest, contract.IrDigest,
+                    contract.ComponentSchemaDigest, ThermalAdapterRowCodec.WordsPerRow, ThermalAdapterRowCodec.Pack<ThermalFrame>,
+                    ThermalAdapterRowCodec.Apply<ThermalFrame>, contract.EventCapacity,
+                    observe, null, false, [], [], ThermalAdapterRowCodec.TickResource, null, ThermalAdapterRowCodec.CreateEventTypes(counters)));
+    }
 }
 
-static (Scenario[] Cases, int Ticks) SelectCases(string profile)
+#if GA_BROWSER_CONFORMANCE
+static async ValueTask<bool> Drain(DeterministicRunner<ThermalFrame> runner, int budget)
+#else
+static ValueTask<bool> Drain(DeterministicRunner<ThermalFrame> runner, int budget)
+#endif
 {
-    int[] rows = [0, 1, 63, 64, 65, 127, 128, 129, 1024];
-    uint[] seeds = [0, 1, 27, 7331, uint.MaxValue];
-    int[] chunks = [1, 64, 127, 256];
-    int[] budgets = [1, 3, 64];
-    int[] workers = [1, 2, Environment.ProcessorCount];
-    if (profile is "short" or "long")
-        return ([new(65, 27, 127, 64, 2)], profile == "short" ? 1_000 : 100_000);
-    if (profile is not ("smoke" or "matrix"))
-        throw new ArgumentException($"Unknown ThermalInventory profile '{profile}'.");
-    var scenarios = new List<Scenario>();
-    foreach (int rowCount in rows)
+    var timer = Stopwatch.StartNew();
+    bool pending = false;
+#if !GA_BROWSER_CONFORMANCE
+    var spin = new SpinWait();
+#endif
+    var status = runner.Advance(budget);
+    while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
     {
-        int firstSeed = profile == "matrix" ? 0 : scenarios.Count % seeds.Length;
-        int lastSeed = profile == "matrix" ? seeds.Length : firstSeed + 1;
-        for (int seed = firstSeed; seed < lastSeed; seed++)
-        {
-            int i = scenarios.Count;
-            scenarios.Add(new Scenario(rowCount, seeds[seed], chunks[i % chunks.Length],
-                budgets[i % budgets.Length], workers[i % workers.Length]));
-        }
+        pending = true;
+#if GA_BROWSER_CONFORMANCE
+        await Task.Delay(1);
+#else
+        if (timer.Elapsed.TotalMilliseconds < 2)
+            spin.SpinOnce(sleep1Threshold: -1);
+        else
+            Thread.Sleep(1);
+#endif
+        status = runner.Advance(budget);
     }
-    return (scenarios.ToArray(), 16);
+    if (status == DeterministicTickStatus.Faulted)
+        throw new InvalidOperationException("ThermalInventory tick faulted.", runner.Fault);
+    if (status != DeterministicTickStatus.Completed)
+        throw new TimeoutException("ThermalInventory stayed pending for 20 seconds.");
+#if GA_BROWSER_CONFORMANCE
+    return pending;
+#else
+    return new ValueTask<bool>(pending);
+#endif
 }
 
 #if !GA_BROWSER_CONFORMANCE

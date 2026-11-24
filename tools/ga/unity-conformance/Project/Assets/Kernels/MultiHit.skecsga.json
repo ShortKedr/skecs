@@ -1,0 +1,7 @@
+{
+  "source": "DamageKernels.cs",
+  "systemType": "HitCollection",
+  "simulationContract": "multi-hit-damage/1",
+  "adapter": "UnityMultiHit",
+  "workgroup": 64
+}

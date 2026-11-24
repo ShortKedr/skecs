@@ -32,12 +32,18 @@ New-Item -ItemType Directory -Path $scenarios -Force | Out-Null
 $ga = Split-Path -Parent $PSScriptRoot
 foreach ($file in @('movement-conformance/MovementKernel.cs', 'target-read-conformance/TargetKernel.cs',
     'shotburst-conformance/ShotKernels.cs', 'spatial-parent-conformance/SpatialKernel.cs',
-    'service-continuation-conformance/ServiceKernel.cs')) {
+    'service-continuation-conformance/ServiceKernel.cs', 'host-lifecycle-conformance/HostKernel.cs',
+    'thermal-inventory-conformance/ThermalKernel.cs', 'multihit-conformance/DamageKernels.cs',
+    'carrier-capacity-conformance/CarrierKernel.cs')) {
     Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $kernels
 }
 foreach ($file in @('target-read-conformance/TargetScenario.cs', 'shotburst-conformance/ShotBurstScenario.cs',
     'spatial-parent-conformance/SpatialScenario.cs', 'spatial-parent-conformance/FlatCandidates.cs',
-    'service-continuation-conformance/ContactService.cs', 'service-continuation-conformance/ContinuationChecks.cs')) {
+    'service-continuation-conformance/ContactService.cs', 'service-continuation-conformance/ContinuationChecks.cs',
+    'host-lifecycle-conformance/HostSession.cs', 'host-lifecycle-conformance/HostLifecycleChecks.cs',
+    'thermal-inventory-conformance/ThermalScenario.cs', 'multihit-conformance/MultiHitScenario.cs',
+    'multihit-conformance/DamageOracle.cs', 'carrier-capacity-conformance/CarrierChecks.cs',
+    'carrier-capacity-conformance/CarrierOracle.cs')) {
     Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $scenarios
 }
 @{ dependencies = @{ 'com.shortkedr.skecs.ga' = "file:$packagePath" } } |

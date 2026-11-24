@@ -4,7 +4,6 @@ using System.Linq;
 using SKECS.GA.Unity.Editor;
 using UnityEditor;
 using UnityEditor.Build;
-using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -64,7 +63,7 @@ public static class GaUnityConformanceBuild
             target = target,
             options = BuildOptions.None
         });
-        if (report.summary.result != BuildResult.Succeeded)
+        if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
             throw new BuildFailedException($"Unity GA Player build failed ({report.summary.result}).");
         Debug.Log($"SKECS_GA_UNITY_BUILD_OK target={target} backend={backend}");
     }

@@ -1,16 +1,29 @@
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.Threading;
 using SKECS;
 using SKECS.GA;
 using SKECS.Numerics;
 
 // This host is deliberately small. Update and Poll own the runner; Render only sees published values.
-internal sealed class HostSession(
-    Func<DeterministicWorkload<HostInput>> workload, int chunkCapacity) : IDisposable
+internal sealed class HostSession : IDisposable
 {
     internal const int RowCount = 131;
+    private readonly Func<DeterministicWorkload<HostInput>> _workload;
+    private readonly int _chunkCapacity;
+    private readonly int _workerCount;
     private World _world = null!;
     private DeterministicRunner<HostInput> _runner = null!;
-    private Entity[] _bodies = [];
+    private Entity[] _bodies = Array.Empty<Entity>();
     private Frame _published = null!;
+
+    internal HostSession(Func<DeterministicWorkload<HostInput>> workload, int chunkCapacity, int workerCount)
+    {
+        _workload = workload;
+        _chunkCapacity = chunkCapacity;
+        _workerCount = workerCount;
+    }
 
     internal bool Paused { get; set; }
     internal Exception? Fault => _runner.Fault;
@@ -21,13 +34,13 @@ internal sealed class HostSession(
     {
         int generation = _published is null ? 0 : _published.Generation + 1;
         Dispose();
-        _world = new World(new WorldOptions(chunkCapacity));
+        _world = new World(new WorldOptions(_chunkCapacity));
         _bodies = new Entity[RowCount];
         for (int index = 0; index < _bodies.Length; index++)
             _bodies[index] = _world.CreateEntity(new HostBody { Index = index, Position = Fixed.FromRaw(17L * index - 39) });
-        _runner = new DeterministicRunner<HostInput>(_world, workload(), workerCount: OperatingSystem.IsBrowser() ? 1 : 2);
+        _runner = new DeterministicRunner<HostInput>(_world, _workload(), workerCount: _workerCount);
         Paused = false;
-        Publish(generation, 0, []);
+        Publish(generation, 0, Array.Empty<RenderEvent>());
     }
 
     internal DeterministicTickStatus Update(in HostInput input)
@@ -77,11 +90,40 @@ internal sealed class HostSession(
     }
 }
 
-internal sealed record Frame(int Generation, long Tick, IReadOnlyList<long> Positions, IReadOnlyList<RenderEvent> Events);
-internal readonly record struct RenderEvent(DeterministicOrderKey Key, int Value);
-
-internal sealed class AuditedBatches(GaBatchProcessor<HostInput> processor) : IDeterministicBatchProcessor<HostInput>
+internal sealed class Frame
 {
+    internal Frame(int generation, long tick, IReadOnlyList<long> positions, IReadOnlyList<RenderEvent> events)
+    {
+        Generation = generation;
+        Tick = tick;
+        Positions = positions;
+        Events = events;
+    }
+
+    internal int Generation { get; }
+    internal long Tick { get; }
+    internal IReadOnlyList<long> Positions { get; }
+    internal IReadOnlyList<RenderEvent> Events { get; }
+}
+
+internal readonly struct RenderEvent
+{
+    internal RenderEvent(DeterministicOrderKey key, int value)
+    {
+        Key = key;
+        Value = value;
+    }
+
+    internal DeterministicOrderKey Key { get; }
+    internal int Value { get; }
+}
+
+internal sealed class AuditedBatches : IDeterministicBatchProcessor<HostInput>
+{
+    private readonly GaBatchProcessor<HostInput> _processor;
+
+    internal AuditedBatches(GaBatchProcessor<HostInput> processor) => _processor = processor;
+
     // Hold the host's observation of the real GPU submission to make pause/reset deterministic on fast devices.
     internal bool Hold { get; set; }
     internal int Submitted { get; private set; }
@@ -90,28 +132,36 @@ internal sealed class AuditedBatches(GaBatchProcessor<HostInput> processor) : ID
 
     public IDeterministicBatchSubmission<HostInput> Begin(DeterministicBatch<HostInput> batch)
     {
-        var submission = processor.Begin(batch);
+        var submission = _processor.Begin(batch);
         Submitted++;
         InFlight++;
         return new Submission(this, submission);
     }
 
-    private sealed class Submission(AuditedBatches owner, IDeterministicBatchSubmission<HostInput> inner)
-        : IDeterministicBatchSubmission<HostInput>
+    private sealed class Submission : IDeterministicBatchSubmission<HostInput>
     {
-        public bool IsCompleted => !owner.Hold && inner.IsCompleted;
-        public void Apply(DeterministicBatch<HostInput> batch) => inner.Apply(batch);
+        private readonly AuditedBatches _owner;
+        private readonly IDeterministicBatchSubmission<HostInput> _inner;
+
+        internal Submission(AuditedBatches owner, IDeterministicBatchSubmission<HostInput> inner)
+        {
+            _owner = owner;
+            _inner = inner;
+        }
+
+        public bool IsCompleted => !_owner.Hold && _inner.IsCompleted;
+        public void Apply(DeterministicBatch<HostInput> batch) => _inner.Apply(batch);
 
         public void Discard()
         {
-            inner.Discard();
-            owner.Discarded++;
+            _inner.Discard();
+            _owner.Discarded++;
         }
 
         public void Dispose()
         {
-            inner.Dispose();
-            owner.InFlight--;
+            _inner.Dispose();
+            _owner.InFlight--;
         }
     }
 }

@@ -1,0 +1,7 @@
+{
+  "source": "HostKernel.cs",
+  "systemType": "HostKernel",
+  "simulationContract": "host-lifecycle/1",
+  "adapter": "UnityHostLifecycle",
+  "workgroup": 64
+}
