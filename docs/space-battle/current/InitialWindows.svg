@@ -4,63 +4,63 @@
 <text x="24" y="32" font-size="22" font-weight="bold">Opening windows, remainder and full run</text>
 <text x="24" y="58" font-size="14">ms · lower is better · colour shows relative lag, not statistical significance</text>
 <text x="228" y="111" text-anchor="end" font-size="14">SKECS First600</text>
-<rect x="240" y="90" width="564.64659" height="30" fill="#e87c3f"/>
-<text x="812.64659" y="111" font-size="14">0.620684</text>
+<rect x="240" y="90" width="326.56566" height="30" fill="#c93637"/>
+<text x="574.56566" y="111" font-size="14">0.391522</text>
 <text x="228" y="155" text-anchor="end" font-size="14">SKECS First2000</text>
-<rect x="240" y="134" width="523.916482" height="30" fill="#c7df78"/>
-<text x="771.916482" y="155" font-size="14">0.575912</text>
+<rect x="240" y="134" width="305.003186" height="30" fill="#c93637"/>
+<text x="553.003186" y="155" font-size="14">0.365671</text>
 <text x="228" y="199" text-anchor="end" font-size="14">SKECS RemainderAfter2000</text>
-<rect x="240" y="178" width="494.500817" height="30" fill="#59b35d"/>
-<text x="742.500817" y="199" font-size="14">0.543577</text>
+<rect x="240" y="178" width="323.542704" height="30" fill="#c93637"/>
+<text x="571.542704" y="199" font-size="14">0.387898</text>
 <text x="228" y="243" text-anchor="end" font-size="14">SKECS Full</text>
-<rect x="240" y="222" width="495.045552" height="30" fill="#59b35d"/>
-<text x="743.045552" y="243" font-size="14">0.544176</text>
+<rect x="240" y="222" width="323.199379" height="30" fill="#c93637"/>
+<text x="571.199379" y="243" font-size="14">0.387486</text>
 <text x="228" y="287" text-anchor="end" font-size="14">LeoECSLite First600</text>
 <rect x="240" y="266" width="650" height="30" fill="#c93637"/>
-<text x="898" y="287" font-size="14">0.714508</text>
+<text x="898" y="287" font-size="14">0.779291</text>
 <text x="228" y="331" text-anchor="end" font-size="14">LeoECSLite First2000</text>
-<rect x="240" y="310" width="567.746859" height="30" fill="#e87c3f"/>
-<text x="815.746859" y="331" font-size="14">0.624092</text>
+<rect x="240" y="310" width="546.129351" height="30" fill="#c93637"/>
+<text x="794.129351" y="331" font-size="14">0.654759</text>
 <text x="228" y="375" text-anchor="end" font-size="14">LeoECSLite RemainderAfter2000</text>
-<rect x="240" y="354" width="536.904443" height="30" fill="#f2d85c"/>
-<text x="784.904443" y="375" font-size="14">0.590189</text>
+<rect x="240" y="354" width="531.976991" height="30" fill="#c93637"/>
+<text x="779.976991" y="375" font-size="14">0.637792</text>
 <text x="228" y="419" text-anchor="end" font-size="14">LeoECSLite Full</text>
-<rect x="240" y="398" width="537.475599" height="30" fill="#f2d85c"/>
-<text x="785.475599" y="419" font-size="14">0.590816</text>
+<rect x="240" y="398" width="532.239072" height="30" fill="#c93637"/>
+<text x="780.239072" y="419" font-size="14">0.638106</text>
 <text x="228" y="463" text-anchor="end" font-size="14">LeoECS Classic First600</text>
-<rect x="240" y="442" width="601.342439" height="30" fill="#c93637"/>
-<text x="849.342439" y="463" font-size="14">0.661022</text>
+<rect x="240" y="442" width="616.518712" height="30" fill="#c93637"/>
+<text x="864.518712" y="463" font-size="14">0.73915</text>
 <text x="228" y="507" text-anchor="end" font-size="14">LeoECS Classic First2000</text>
-<rect x="240" y="486" width="546.235107" height="30" fill="#efad46"/>
-<text x="794.235107" y="507" font-size="14">0.600445</text>
+<rect x="240" y="486" width="504.295382" height="30" fill="#c93637"/>
+<text x="752.295382" y="507" font-size="14">0.604604</text>
 <text x="228" y="551" text-anchor="end" font-size="14">LeoECS Classic RemainderAfter2000</text>
-<rect x="240" y="530" width="519.398837" height="30" fill="#c7df78"/>
-<text x="767.398837" y="551" font-size="14">0.570946</text>
+<rect x="240" y="530" width="446.499275" height="30" fill="#c93637"/>
+<text x="694.499275" y="551" font-size="14">0.535312</text>
 <text x="228" y="595" text-anchor="end" font-size="14">LeoECS Classic Full</text>
-<rect x="240" y="574" width="519.895805" height="30" fill="#c7df78"/>
-<text x="767.895805" y="595" font-size="14">0.571492</text>
+<rect x="240" y="574" width="447.569574" height="30" fill="#c93637"/>
+<text x="695.569574" y="595" font-size="14">0.536595</text>
 <text x="228" y="639" text-anchor="end" font-size="14">Morpeh First600</text>
-<rect x="240" y="618" width="592.900419" height="30" fill="#dc513c"/>
-<text x="840.900419" y="639" font-size="14">0.651742</text>
+<rect x="240" y="618" width="553.079896" height="30" fill="#c93637"/>
+<text x="801.079896" y="639" font-size="14">0.663092</text>
 <text x="228" y="683" text-anchor="end" font-size="14">Morpeh First2000</text>
-<rect x="240" y="662" width="553.405858" height="30" fill="#efad46"/>
-<text x="801.405858" y="683" font-size="14">0.608328</text>
+<rect x="240" y="662" width="508.004714" height="30" fill="#c93637"/>
+<text x="756.004714" y="683" font-size="14">0.609051</text>
 <text x="228" y="727" text-anchor="end" font-size="14">Morpeh RemainderAfter2000</text>
-<rect x="240" y="706" width="525.706007" height="30" fill="#f2d85c"/>
-<text x="773.706007" y="727" font-size="14">0.577879</text>
+<rect x="240" y="706" width="548.664115" height="30" fill="#c93637"/>
+<text x="796.664115" y="727" font-size="14">0.657798</text>
 <text x="228" y="771" text-anchor="end" font-size="14">Morpeh Full</text>
-<rect x="240" y="750" width="526.218967" height="30" fill="#f2d85c"/>
-<text x="774.218967" y="771" font-size="14">0.578443</text>
+<rect x="240" y="750" width="547.911163" height="30" fill="#c93637"/>
+<text x="795.911163" y="771" font-size="14">0.656895</text>
 <text x="228" y="815" text-anchor="end" font-size="14">StaticEcs 2.2.9 First600</text>
-<rect x="240" y="794" width="536.489798" height="30" fill="#f2d85c"/>
-<text x="784.489798" y="815" font-size="14">0.589733</text>
+<rect x="240" y="794" width="253.007084" height="30" fill="#efad46"/>
+<text x="501.007084" y="815" font-size="14">0.303332</text>
 <text x="228" y="859" text-anchor="end" font-size="14">StaticEcs 2.2.9 First2000</text>
-<rect x="240" y="838" width="479.775664" height="30" fill="#2e9b50"/>
-<text x="727.775664" y="859" font-size="14">0.52739</text>
+<rect x="240" y="838" width="212.599259" height="30" fill="#2e9b50"/>
+<text x="460.599259" y="859" font-size="14">0.254887</text>
 <text x="228" y="903" text-anchor="end" font-size="14">StaticEcs 2.2.9 RemainderAfter2000</text>
-<rect x="240" y="882" width="462.151531" height="30" fill="#2e9b50"/>
-<text x="710.151531" y="903" font-size="14">0.508017</text>
+<rect x="240" y="882" width="255.882276" height="30" fill="#efad46"/>
+<text x="503.882276" y="903" font-size="14">0.306779</text>
 <text x="228" y="947" text-anchor="end" font-size="14">StaticEcs 2.2.9 Full</text>
-<rect x="240" y="926" width="462.477904" height="30" fill="#2e9b50"/>
-<text x="710.477904" y="947" font-size="14">0.508376</text>
+<rect x="240" y="926" width="255.080738" height="30" fill="#efad46"/>
+<text x="503.080738" y="947" font-size="14">0.305818</text>
 </g></svg>

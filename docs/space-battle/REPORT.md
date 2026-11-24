@@ -2,7 +2,7 @@ English | [Русский](REPORT.ru.md)
 
 # Space Battle benchmarks — real-game high
 
-Preset: `game`; profile: `high`; 2026-10-19T04:33:57.3983635+00:00 — 2026-10-19T04:44:30.9401893+00:00.
+Preset: `game`; profile: `high`; 2026-11-24T08:27:13.8070421+00:00 — 2026-11-24T08:38:43.3254183+00:00.
 
 Five independent native ECS cores, 108,000 measured ticks each and 600 separate warmup ticks. Seed 7331, 96 escorts and 3 carriers per team; gameplay churn multiplier 2; endless reinforcements enabled.
 
@@ -22,7 +22,7 @@ Outer tick includes gameplay, physics and ECS commits; HUD and stage timers cove
 
 | ECS | Source revision | Version |
 | --- | --- | --- |
-| SKECS | `48347501a0d41b453768c456e582c75f6b37af77` | 0.2.0 |
+| SKECS | `a18443101ca1a27191745b979c32518eab4d058d` | 0.2.0 |
 | LeoECSLite | `5053141d7d663c6b1855c8409ac93dfac807b239` | 2024.5.22 |
 | LeoECS Classic | `1213c31c9ef8325d48e74a52b345c4db242d038b` | 2023.6.22 |
 | Morpeh | `9f6369384792a01d74df24efd35b08ae313e4f12` | 2024.1.1 |
@@ -34,11 +34,11 @@ StaticPack: `7bfb6cf925901b9366dda884258d727a89fff76e`.
 
 | ECS | Mean ms | P95 ms | P99 ms | Max ms | >16.67 ms | Managed B/tick | Total outer s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| SKECS | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.5442 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.8947 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 1.1407 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 3.6522 | ![Neutral](../benchmarks/heatmap/equal.svg) 0 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 584.1 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 58.770956 |
-| LeoECSLite | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.5908 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.9544 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 1.2083 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 5.7411 | ![Neutral](../benchmarks/heatmap/equal.svg) 0 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 666.8 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 63.808179 |
-| LeoECS Classic | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.5715 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.9289 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 1.1744 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 3.5846 | ![Neutral](../benchmarks/heatmap/equal.svg) 0 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 648.7 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 61.721136 |
-| Morpeh | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.5784 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.9501 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 1.2273 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 3.8858 | ![Neutral](../benchmarks/heatmap/equal.svg) 0 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 644.9 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 62.471811 |
-| StaticEcs 2.2.9 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.5084 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.8543 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 1.1080 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 3.9540 | ![Neutral](../benchmarks/heatmap/equal.svg) 0 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 605.5 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 54.904581 |
+| SKECS | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.3875 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.7655 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 1.0737 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 9.0559 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 616.6 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 41.848539 |
+| LeoECSLite | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.6381 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 1.1754 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 1.5861 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 5.2985 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 699.1 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 68.915440 |
+| LeoECS Classic | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.5366 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 1.0276 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 1.4231 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 8.8131 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 681.3 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 57.952254 |
+| Morpeh | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.6569 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 1.2288 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 1.8793 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 34.9796 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 8 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 677.5 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 70.944696 |
+| StaticEcs 2.2.9 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.3058 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.6618 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.9256 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 6.0490 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 606.0 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 33.028393 |
 
 ![Mean tick time](current/MeanMs.svg)
 
@@ -50,11 +50,11 @@ The first 600 and 2,000 windows are cumulative; the remainder is disjoint.
 
 | ECS | 1–600 ms | 1–2000 ms | 2001–108000 ms | Full ms |
 | --- | --- | --- | --- | --- |
-| SKECS | 0.6207 | 0.5759 | 0.5436 | 0.5442 |
-| LeoECSLite | 0.7145 | 0.6241 | 0.5902 | 0.5908 |
-| LeoECS Classic | 0.6610 | 0.6004 | 0.5709 | 0.5715 |
-| Morpeh | 0.6517 | 0.6083 | 0.5779 | 0.5784 |
-| StaticEcs 2.2.9 | 0.5897 | 0.5274 | 0.5080 | 0.5084 |
+| SKECS | 0.3915 | 0.3657 | 0.3879 | 0.3875 |
+| LeoECSLite | 0.7793 | 0.6548 | 0.6378 | 0.6381 |
+| LeoECS Classic | 0.7391 | 0.6046 | 0.5353 | 0.5366 |
+| Morpeh | 0.6631 | 0.6091 | 0.6578 | 0.6569 |
+| StaticEcs 2.2.9 | 0.3033 | 0.2549 | 0.3068 | 0.3058 |
 
 ![Opening windows](current/InitialWindows.svg)
 
@@ -64,31 +64,31 @@ The first 600 and 2,000 windows are cumulative; the remainder is disjoint.
 
 | Stage | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| collect | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1400 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1453 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.1567 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.1586 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1455 |
-| ai | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0886 | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.1032 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0833 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0904 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0847 |
-| thermal-inventory | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0065 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0080 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0062 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0062 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0058 |
-| steering | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0193 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0225 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0187 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0194 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0179 |
-| weapons | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.0126 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0176 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0117 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0132 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0104 |
-| carriers | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0003 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 |
-| physics | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0564 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.0660 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0598 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0836 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0628 |
-| hits | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.1824 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1954 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2050 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.1767 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1408 |
-| lifecycle | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0378 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0322 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0298 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0297 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0399 |
-| Battle.LastTickMs | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.5441 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.5907 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.5714 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.5784 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.5083 |
-| Outer tick | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.5442 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.5908 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.5715 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.5784 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.5084 |
+| collect | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0174 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0253 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0341 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0407 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0048 |
+| ai | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1178 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1804 | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.1401 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1711 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1130 |
+| thermal-inventory | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0090 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0152 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0104 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0124 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0044 |
+| steering | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.0274 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0392 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0311 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0366 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0233 |
+| weapons | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0197 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0323 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0217 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0265 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0108 |
+| carriers | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0011 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0012 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0007 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0016 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.0008 |
+| physics | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0426 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0788 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0618 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1188 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.0498 |
+| hits | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1238 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1971 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1765 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1837 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0840 |
+| lifecycle | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0286 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0683 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0601 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0653 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0147 |
+| Battle.LastTickMs | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.3874 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.6379 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.5364 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.6567 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.3057 |
+| Outer tick | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.3875 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.6381 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.5366 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.6569 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.3058 |
 
 ### SKECS opening stages
 
 | Stage | 1–600 ms | 1–2000 ms | 2001–108000 ms | Full ms |
 | --- | --- | --- | --- | --- |
-| collect | 0.1541 | 0.1447 | 0.1399 | 0.1400 |
-| ai | 0.1208 | 0.0989 | 0.0884 | 0.0886 |
-| thermal-inventory | 0.0070 | 0.0064 | 0.0065 | 0.0065 |
-| steering | 0.0242 | 0.0205 | 0.0192 | 0.0193 |
-| weapons | 0.0164 | 0.0136 | 0.0126 | 0.0126 |
-| carriers | 0.0001 | 0.0003 | 0.0005 | 0.0005 |
-| physics | 0.0629 | 0.0585 | 0.0564 | 0.0564 |
-| hits | 0.1943 | 0.1940 | 0.1822 | 0.1824 |
-| lifecycle | 0.0407 | 0.0389 | 0.0377 | 0.0378 |
+| collect | 0.0173 | 0.0162 | 0.0175 | 0.0174 |
+| ai | 0.1399 | 0.1185 | 0.1177 | 0.1178 |
+| thermal-inventory | 0.0074 | 0.0075 | 0.0091 | 0.0090 |
+| steering | 0.0295 | 0.0260 | 0.0274 | 0.0274 |
+| weapons | 0.0196 | 0.0178 | 0.0197 | 0.0197 |
+| carriers | 0.0002 | 0.0005 | 0.0011 | 0.0011 |
+| physics | 0.0385 | 0.0378 | 0.0427 | 0.0426 |
+| hits | 0.1127 | 0.1155 | 0.1240 | 0.1238 |
+| lifecycle | 0.0263 | 0.0257 | 0.0287 | 0.0286 |
 
 ## HUD windows: first, second and common worst
 
@@ -98,16 +98,16 @@ The common worst window has the largest HUD mean among all five ports; each ECS 
 
 | HUD / stage ms | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| HUD total | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.6206 | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.7144 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.6609 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.6517 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.5897 |
-| collect | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1541 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.1657 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.1787 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.1766 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1588 |
-| ai | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1208 | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.1430 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1178 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1190 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1190 |
-| thermal-inventory | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.0070 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0089 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0076 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0064 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0057 |
-| steering | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0242 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0301 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0241 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0250 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0233 |
-| weapons | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.0164 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0226 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.0160 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.0149 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0134 |
-| carriers | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0001 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0002 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0003 |
-| physics | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0629 | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.0777 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0707 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0888 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0701 |
-| hits | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.1943 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2270 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2106 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.1912 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1588 |
-| lifecycle | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0407 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0391 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.0351 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0295 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0403 |
+| HUD total | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.3914 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.7791 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.7389 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.6629 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.3032 |
+| collect | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0173 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0313 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0396 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0409 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0043 |
+| ai | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.1399 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2457 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2225 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1995 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1303 |
+| thermal-inventory | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0074 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0152 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0137 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0117 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0038 |
+| steering | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0295 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0468 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0440 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0386 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0227 |
+| weapons | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0196 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0397 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0323 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0271 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0108 |
+| carriers | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0002 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0007 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0008 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0004 |
+| physics | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0385 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0903 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0808 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1101 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0413 |
+| hits | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1127 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2232 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2198 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1695 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0767 |
+| lifecycle | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0263 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0863 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0855 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0645 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0128 |
 
 | Ships | Projectiles | Debris | Particles | Turrets |
 | --- | --- | --- | --- | --- |
@@ -117,39 +117,39 @@ The common worst window has the largest HUD mean among all five ports; each ECS 
 
 | HUD / stage ms | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| HUD total | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.7225 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.7800 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.7668 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.7575 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.6641 |
-| collect | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1893 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1962 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.2140 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.2120 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1915 |
-| ai | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.1212 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.1438 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1158 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.1228 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1133 |
-| thermal-inventory | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0072 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0093 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.0075 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0076 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0068 |
-| steering | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0237 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0269 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.0232 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0235 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0210 |
-| weapons | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0146 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0197 | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.0143 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0151 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0116 |
-| carriers | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0003 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0004 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0004 |
-| physics | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0760 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.0868 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0818 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1077 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0817 |
-| hits | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.2404 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2579 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2675 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.2320 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1863 |
-| lifecycle | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0499 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0390 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.0424 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0363 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0514 |
+| HUD total | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.5015 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.8275 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.7161 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.7222 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.3217 |
+| collect | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0212 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0344 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0439 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0473 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0048 |
+| ai | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1615 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2468 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1954 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2007 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1213 |
+| thermal-inventory | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0100 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0187 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0126 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0124 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0039 |
+| steering | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0340 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0465 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0375 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0375 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0221 |
+| weapons | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0224 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0365 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0256 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0257 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0107 |
+| carriers | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0008 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0011 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0008 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0014 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0006 |
+| physics | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0556 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1050 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0847 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1272 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0518 |
+| hits | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1582 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2505 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2314 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1974 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0885 |
+| lifecycle | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0377 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0881 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0842 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0725 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0180 |
 
 | Ships | Projectiles | Debris | Particles | Turrets |
 | --- | --- | --- | --- | --- |
 | 100.58 | 970.01 | 1513.26 | 1386.75 | 44.51 |
 
-### Worst: 80401–81000
+### Worst: 25201–25800
 
 | HUD / stage ms | SKECS | LeoECSLite | LeoECS Classic | Morpeh | StaticEcs 2.2.9 |
 | --- | --- | --- | --- | --- | --- |
-| HUD total | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.6399 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.6773 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.6743 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.8305 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.5797 |
-| collect | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1763 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1782 | ![Lag between 5% and 30%](../benchmarks/heatmap/good.svg) 0.1929 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.2121 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1767 |
-| ai | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.1009 | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.1166 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0979 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1290 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0959 |
-| thermal-inventory | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0066 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0082 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.0066 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0092 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0059 |
-| steering | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0190 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0229 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0194 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0264 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0179 |
-| weapons | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0150 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0185 | ![Lag between 5% and 30%](../benchmarks/heatmap/weak.svg) 0.0128 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0213 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0107 |
-| carriers | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0003 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0012 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0005 |
-| physics | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0627 | ![Lag between 5% and 30%](../benchmarks/heatmap/middle.svg) 0.0722 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0662 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1258 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0674 |
-| hits | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2138 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2241 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2395 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2487 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1592 |
-| lifecycle | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0451 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0360 | ![Lag between 5% and 30%](../benchmarks/heatmap/strong.svg) 0.0386 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0569 | ![Lag between 5% and 30%](../benchmarks/heatmap/bad.svg) 0.0454 |
+| HUD total | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.4581 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.8318 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.7115 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 1.2909 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.4400 |
+| collect | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0186 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0294 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0412 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0600 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0068 |
+| ai | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1664 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2760 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2211 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.3713 | ![Lag between 5% and 30%](../benchmarks/heatmap/fair.svg) 0.1853 |
+| thermal-inventory | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0102 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0207 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0139 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0240 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0061 |
+| steering | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0356 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0600 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0474 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0725 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0362 |
+| weapons | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0207 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0397 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0268 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0494 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0134 |
+| carriers | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0010 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0011 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0007 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0034 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0010 |
+| physics | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0490 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0961 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0794 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2276 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0659 |
+| hits | ![Lag between 5% and 30%](../benchmarks/heatmap/poor.svg) 0.1267 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2296 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.2078 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.3203 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.1047 |
+| lifecycle | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0299 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0791 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.0732 | ![Lag from 30%](../benchmarks/heatmap/worst.svg) 0.1624 | ![Lag up to 5%](../benchmarks/heatmap/best.svg) 0.0206 |
 
 | Ships | Projectiles | Debris | Particles | Turrets |
 | --- | --- | --- | --- | --- |
-| 85.66 | 716.35 | 1336.79 | 1462.78 | 46.07 |
+| 115.89 | 756.05 | 1239.28 | 1417.06 | 53.13 |
 
 ## Gameplay parity, census and tactical counters
 
@@ -199,11 +199,11 @@ Peak samples across 30 minute checkpoints; store entities include gameplay entit
 
 | ECS | Managed heap MiB | Working set MiB | Private MiB | Native MiB | Accessor MiB | Entities final | Archetypes final | Chunks final |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SKECS | 42.92 | 91.98 | 70.48 | 7.04 | 0.00 | 3820 | 81 | 119 |
-| LeoECSLite | 47.78 | 85.46 | 65.01 | n/a | n/a | 3820 | n/a | n/a |
-| LeoECS Classic | 47.65 | 89.81 | 68.75 | n/a | n/a | 3820 | n/a | n/a |
-| Morpeh | 47.38 | 98.11 | 76.66 | n/a | n/a | 3820 | n/a | n/a |
-| StaticEcs 2.2.9 | 44.22 | 90.27 | 65.11 | n/a | n/a | 3820 | n/a | n/a |
+| SKECS | 46.95 | 98.19 | 76.41 | 7.04 | 0.00 | 3820 | 81 | 119 |
+| LeoECSLite | 51.82 | 94.32 | 78.78 | n/a | n/a | 3820 | n/a | n/a |
+| LeoECS Classic | 51.74 | 98.70 | 82.70 | n/a | n/a | 3820 | n/a | n/a |
+| Morpeh | 51.44 | 105.07 | 90.97 | n/a | n/a | 3820 | n/a | n/a |
+| StaticEcs 2.2.9 | 45.23 | 92.77 | 66.05 | n/a | n/a | 3820 | n/a | n/a |
 
 ### Minute population census
 
@@ -242,9 +242,9 @@ Peak samples across 30 minute checkpoints; store entities include gameplay entit
 
 ## Data provenance and reproduction
 
-Runtime: .NET 8.0.32; OS: Microsoft Windows 10.0.26200; tiered compilation `0`.
+Runtime: .NET 8.0.34; OS: Microsoft Windows 10.0.26200; tiered compilation `0`.
 
-Base commit: `48347501a0d41b453768c456e582c75f6b37af77`. Source and loaded DLL hashes describe the measured working tree.
+Base commit: `a18443101ca1a27191745b979c32518eab4d058d`. Source and loaded DLL hashes describe the measured working tree.
 
 
 Local lossless gzip archives retain the full tick CSV; archive and decompressed SHA256 hashes are recorded in the local manifest. Analysis reads gzip directly and requires only .NET 8.
@@ -258,6 +258,6 @@ dotnet run --project SpaceBattle.Benchmarks -- report space-battle --data artifa
 [Desktop timing](DESKTOP_TIMING.md) · [Architecture](ARCHITECTURE.md)
 
 Local measurement inputs: `artifacts/benchmarks/current/space-battle`.
-Base commit: `48347501a0d41b453768c456e582c75f6b37af77`.
+Base commit: `a18443101ca1a27191745b979c32518eab4d058d`.
 GC total available memory limit; not physical RAM: 61.49 GiB.
 CPU: AMD Ryzen 9 9900X 12-Core Processor.
