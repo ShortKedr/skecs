@@ -18,27 +18,56 @@ internal static class Sample
             [] or ["cpu"] => GaPolicy.CpuOnly,
             ["auto"] => GaPolicy.Auto,
             ["vulkan", _, _, _] => GaPolicy.RequireGpu,
-            _ => throw new ArgumentException("Usage: ga [cpu|auto|vulkan <slang-adapter> <native-bridge> <output-directory>]")
+            _ => throw new ArgumentException(
+                "Usage: ga [cpu|auto|vulkan <slang-adapter> <native-bridge> <output-directory>]"),
         };
 
         var program = CompileMovement();
-        using var backend = policy == GaPolicy.RequireGpu ? GaVulkanBackend.Open(Path.GetFullPath(args[2])) : null;
-        var bundle = backend is null ? null :
-            await GaVulkanPackager.Build(program, ContractId, Path.GetFullPath(args[1]), args[3], "movement");
-        // With no artifact, startup only needs a system identity to report the CPU decision.
-        var request = bundle is null
-            ? new GaSystemRequest(new(program.SystemId, ContractId, program.SourceDigest, "", "",
-                GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion), [])
-            : new GaSystemRequest(bundle.Manifest.Contract, [new GaArtifactCandidate(bundle)]);
-        // The Vulkan adapter advertises an experimental profile and probes the actual device at startup.
-        using var startup = GaStartup.Select(policy, [request], backend?.Devices ?? [], allowExperimental: backend is not null);
+        if (policy == GaPolicy.RequireGpu)
+        {
+            await RunOnVulkanAsync(program, args[1], args[2], args[3]);
+            return;
+        }
+
+        // When no GPU artifact is supplied, startup can report its CPU decision using the system identity.
+        var contract = new GaContractIdentity(
+            program.SystemId,
+            ContractId,
+            program.SourceDigest,
+            "",
+            "",
+            GaProgram.NumericVersion,
+            GaProgram.SubsetVersion,
+            GaProgram.IrVersion);
+        var request = new GaSystemRequest(contract, []);
+        using var startup = GaStartup.Select(policy, [request], []);
+        PrintDecision(startup.Decisions.Single());
+
+        await RunMovementAsync(program);
+    }
+
+    private static async Task RunOnVulkanAsync(
+        GaProgram program,
+        string slangAdapter,
+        string nativeBridge,
+        string outputDirectory)
+    {
+        using var backend = GaVulkanBackend.Open(Path.GetFullPath(nativeBridge));
+        var bundle = await GaVulkanPackager.Build(
+            program, ContractId, Path.GetFullPath(slangAdapter), outputDirectory, "movement");
+
+        // The Vulkan adapter advertises an experimental profile and probes the device at startup.
+        var request = new GaSystemRequest(bundle.Manifest.Contract, [new GaArtifactCandidate(bundle)]);
+        using var startup = GaStartup.Select(GaPolicy.RequireGpu, [request], backend.Devices, allowExperimental: true);
         var decision = startup.Decisions.Single();
         PrintDecision(decision);
-        if (!startup.Succeeded)
+        if (!startup.Succeeded || decision.Route != GaRoute.Gpu)
+        {
             throw new InvalidOperationException("Vulkan did not select a GPU for the movement kernel.");
+        }
 
-        var kernel = decision.Route == GaRoute.Gpu ? (GaPackedKernel)startup.GetPreparedKernel(program.SystemId) : null;
-        await RunMovementAsync(program, kernel);
+        var gpuKernel = (GaPackedKernel)startup.GetPreparedKernel(program.SystemId);
+        await RunMovementAsync(program, gpuKernel);
     }
 
     private static GaProgram CompileMovement()
@@ -46,63 +75,105 @@ internal static class Sample
         using var source = typeof(Sample).Assembly.GetManifestResourceStream("Skecs.Samples.Ga.Movement.cs")
             ?? throw new InvalidOperationException("The movement source is missing from the sample assembly.");
         using var reader = new StreamReader(source);
-        string runtime = Path.Combine(Path.GetDirectoryName(typeof(object).Assembly.Location)!, "System.Runtime.dll");
-        string[] assemblies = [typeof(object).Assembly.Location, runtime, typeof(World).Assembly.Location,
-            typeof(SecsSystemAttribute).Assembly.Location];
-        var compilation = CSharpCompilation.Create("GaMovement",
-            [CSharpSyntaxTree.ParseText(reader.ReadToEnd(), path: "Movement.cs")],
-            assemblies.Select(path => MetadataReference.CreateFromFile(path)),
+
+        var runtimeDirectory = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        string[] assemblies =
+        [
+            typeof(object).Assembly.Location,
+            Path.Combine(runtimeDirectory, "System.Runtime.dll"),
+            typeof(World).Assembly.Location,
+            typeof(SecsSystemAttribute).Assembly.Location,
+        ];
+        var syntaxTree = CSharpSyntaxTree.ParseText(reader.ReadToEnd(), path: "Movement.cs");
+        var references = assemblies.Select(path => MetadataReference.CreateFromFile(path));
+        var compilation = CSharpCompilation.Create(
+            "GaMovement",
+            [syntaxTree],
+            references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-        var execute = compilation.GetTypeByMetadataName(typeof(Movement).FullName!)!
-            .GetMembers(nameof(Movement.Execute)).OfType<IMethodSymbol>().Single();
-        var result = GaCompiler.Compile(compilation, execute);
+
+        var movementType = compilation.GetTypeByMetadataName(typeof(Movement).FullName!)!;
+        var executeMethod = movementType.GetMembers(nameof(Movement.Execute)).OfType<IMethodSymbol>().Single();
+        var result = GaCompiler.Compile(compilation, executeMethod);
         return result.Program ?? throw new InvalidDataException(string.Join(Environment.NewLine, result.Diagnostics));
     }
 
-    private static async Task RunMovementAsync(GaProgram program, GaPackedKernel? kernel = null)
+    private static async Task RunMovementAsync(GaProgram program, GaPackedKernel? gpuKernel = null)
     {
-        Position[] positions = [new(), new() { X = 10, Y = -4 }];
-        Velocity[] velocities = [new() { X = 3, Y = 1 }, new() { X = -1, Y = 2 }];
-        int width = program.WordCount;
-        var cpuRows = new uint[positions.Length * width];
-        for (int row = 0; row < positions.Length; row++)
-            Pack(program, positions[row], velocities[row], cpuRows.AsSpan(row * width, width));
+        Position[] positions =
+        [
+            new() { X = 0, Y = 0 },
+            new() { X = 10, Y = -4 },
+        ];
+        Velocity[] velocities =
+        [
+            new() { X = 3, Y = 1 },
+            new() { X = -1, Y = 2 },
+        ];
+        int wordsPerRow = program.WordCount;
+        var cpuRows = new uint[positions.Length * wordsPerRow];
+        for (var row = 0; row < positions.Length; row++)
+        {
+            Pack(program, positions[row], velocities[row], cpuRows.AsSpan(row * wordsPerRow, wordsPerRow));
+        }
 
-        // A device dispatch starts with a row count followed by the canonical packed component rows.
+        // The dispatch packet starts with a row count followed by the packed components.
         var gpuInput = new uint[1 + cpuRows.Length];
         gpuInput[0] = (uint)positions.Length;
         cpuRows.CopyTo(gpuInput, 1);
-        var expected = new uint[width];
+        var expectedRow = new uint[wordsPerRow];
         var movement = new Movement();
 
-        for (int tick = 1; tick <= TickCount; tick++)
+        for (var tick = 1; tick <= TickCount; tick++)
         {
-            for (int row = 0; row < positions.Length; row++)
+            for (var row = 0; row < positions.Length; row++)
             {
-                if (GaInterpreter.Execute(program, cpuRows.AsSpan(row * width, width)) is { } fault)
-                    throw new InvalidDataException($"CPU fault {fault.Kind} at tick {tick}, row {row}.");
+                var rowOffset = row * wordsPerRow;
+                var fault = GaInterpreter.Execute(program, cpuRows.AsSpan(rowOffset, wordsPerRow));
+                if (fault is { } cpuFault)
+                {
+                    throw new InvalidDataException($"CPU fault {cpuFault.Kind} at tick {tick}, row {row}.");
+                }
+
+                // Call the original C# kernel directly for the reference result.
                 movement.Execute(ref positions[row], velocities[row]);
-                Pack(program, positions[row], velocities[row], expected);
-                if (!cpuRows.AsSpan(row * width, width).SequenceEqual(expected))
+                Pack(program, positions[row], velocities[row], expectedRow);
+                if (!cpuRows.AsSpan(rowOffset, wordsPerRow).SequenceEqual(expectedRow))
+                {
                     throw new InvalidDataException($"The GA interpreter diverged at tick {tick}, row {row}.");
+                }
             }
 
-            if (kernel is not null)
+            if (gpuKernel is not null)
             {
-                var result = await kernel.BeginDispatch(gpuInput, width).DrainAsync();
+                var dispatch = gpuKernel.BeginDispatch(gpuInput, wordsPerRow);
+                var result = await dispatch.DrainAsync();
                 if (result.FindFirstFault() is { } gpuFault)
-                    throw new InvalidDataException($"GPU fault {gpuFault.Fault.Kind} at tick {tick}, row {gpuFault.Row}.");
+                {
+                    throw new InvalidDataException(
+                        $"GPU fault {gpuFault.Fault.Kind} at tick {tick}, row {gpuFault.Row}.");
+                }
+
                 if (result.RowCount != positions.Length || !result.Output.SequenceEqual(cpuRows))
+                {
                     throw new InvalidDataException($"Vulkan readback diverged from the CPU at tick {tick}.");
+                }
+
+                // Feed the device's own output into the next tick, leaving the row-count prefix in place.
                 result.Output.CopyTo(gpuInput.AsSpan(1));
             }
         }
 
         if (positions[0] is not { X: 15, Y: 5 } || positions[1] is not { X: 5, Y: 6 })
+        {
             throw new InvalidDataException("The movement fixture ended at unexpected positions.");
+        }
+
         Console.WriteLine("Final positions after 5 ticks: (15, 5), (5, 6).");
-        if (kernel is not null)
+        if (gpuKernel is not null)
+        {
             Console.WriteLine("Vulkan matched the CPU on every tick.");
+        }
     }
 
     private static void Pack(GaProgram program, Position position, Velocity velocity, Span<uint> row)
@@ -126,8 +197,13 @@ internal static class Sample
     {
         Console.WriteLine($"GA route: {decision.Route} ({decision.Reason}).");
         if (decision.Device is { } device)
+        {
             Console.WriteLine($"{device.Api}: {device.Device} ({decision.Qualification}).");
+        }
+
         if (decision.Detail is { } detail)
+        {
             Console.WriteLine(detail);
+        }
     }
 }

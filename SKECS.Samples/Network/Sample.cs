@@ -10,18 +10,24 @@ internal static class Sample
     public static async Task RunAsync(string[] args)
     {
         if (args.Length != 0)
+        {
             throw new ArgumentException("The network sample takes no arguments.");
+        }
 
         const int frameLimit = 64 * 1024;
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var token = deadline.Token;
-        var (authorityPath, replicaPath) = LoopbackTransport.CreatePair(frameLimit);
-        await using var authorityTransport = authorityPath;
-        await using var replicaTransport = replicaPath;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var cancellationToken = timeout.Token;
+        var (authorityEndpoint, replicaEndpoint) = LoopbackTransport.CreatePair(frameLimit);
+        await using var authorityTransport = authorityEndpoint;
+        await using var replicaTransport = replicaEndpoint;
 
         var authorityId = Guid.NewGuid();
         var replicaId = Guid.NewGuid();
-        var authorityOptions = new ReplicationOptions(authorityId, replicaId, ReplicationRole.Authority, "sample-movement-v1")
+        var authorityOptions = new ReplicationOptions(
+            authorityId,
+            replicaId,
+            ReplicationRole.Authority,
+            "sample-movement-v1")
         {
             MaxFrameBytes = frameLimit,
             MaxSlots = 1,
@@ -33,49 +39,74 @@ internal static class Sample
             Role = ReplicationRole.Replica,
         };
 
-        // Both ends participate in the handshake.
-        var authorityConnection = ReplicationSession.ConnectAsync(authorityTransport, authorityOptions, CreateRegistry(), token);
-        var replicaConnection = ReplicationSession.ConnectAsync(replicaTransport, replicaOptions, CreateRegistry(), token);
+        // Start both sides of the handshake before awaiting either session.
+        var authorityConnection = ReplicationSession.ConnectAsync(
+            authorityTransport, authorityOptions, CreateRegistry(), cancellationToken);
+        var replicaConnection = ReplicationSession.ConnectAsync(
+            replicaTransport, replicaOptions, CreateRegistry(), cancellationToken);
         await using var authority = await authorityConnection;
         await using var replica = await replicaConnection;
 
-        using var world = new World();
-        var entity = world.CreateEntity(new Position(0, 0));
-        var networkId = await ReplicateAsync(0, SnapshotEncoding.Full, new Position(0, 0));
+        using var sourceWorld = new World();
+        var initialPosition = new Position(0, 0);
+        var entity = sourceWorld.CreateEntity(initialPosition);
+        var originalNetworkId = await ReplicateAsync(0, SnapshotEncoding.Full, initialPosition);
 
-        world.Get<Position>(entity) = new Position(3, 1);
-        if (await ReplicateAsync(1, SnapshotEncoding.Delta, new Position(3, 1)) != networkId)
+        var movedPosition = new Position(3, 1);
+        sourceWorld.Get<Position>(entity) = movedPosition;
+        var updatedNetworkId = await ReplicateAsync(1, SnapshotEncoding.Delta, movedPosition);
+        if (updatedNetworkId != originalNetworkId)
+        {
             throw new InvalidOperationException("The moving entity changed its network identity.");
+        }
 
         async Task<NetworkEntityId> ReplicateAsync(ulong tick, SnapshotEncoding encoding, Position expected)
         {
-            var sent = await authority.PublishAsync(world, tick, token);
-            var received = await replica.ReceiveAsync(token);
+            var sent = await authority.PublishAsync(sourceWorld, tick, cancellationToken);
+            var received = await replica.ReceiveAsync(cancellationToken);
             if (received != sent.Snapshot || received.Encoding != encoding)
+            {
                 throw new InvalidOperationException($"Expected a {encoding} snapshot for tick {tick}.");
+            }
 
-            if (await replica.ApplyAtBoundaryAsync(token) != SnapshotResult.Applied)
+            // The replica commits the staged snapshot at its simulation boundary.
+            if (await replica.ApplyAtBoundaryAsync(cancellationToken) != SnapshotResult.Applied)
+            {
                 throw new InvalidOperationException($"The replica could not apply tick {tick}.");
+            }
 
-            await replica.ConfirmAsync(token);
-            if (await authority.WaitForAcknowledgementAsync(token) != SnapshotResult.Applied)
+            await replica.ConfirmAsync(cancellationToken);
+            if (await authority.WaitForAcknowledgementAsync(cancellationToken) != SnapshotResult.Applied)
+            {
                 throw new InvalidOperationException($"The authority could not acknowledge tick {tick}.");
+            }
 
-            // Resolve the same network ID against each newly applied replica world.
-            var state = replica.Current;
-            if (!authority.TryGetNetworkEntityId(entity, out var id) ||
-                state is null || state.Tick != tick || state.EntityCount != 1 ||
-                !state.TryResolve(id, out var local) || state.World.Get<Position>(local) != expected)
+            // Resolve the authority's network ID to a local entity in the replica.
+            var replicaState = replica.Current;
+            if (replicaState is null || replicaState.Tick != tick || replicaState.EntityCount != 1 ||
+                !authority.TryGetNetworkEntityId(entity, out var networkId) ||
+                !replicaState.TryResolve(networkId, out var replicaEntity) ||
+                replicaState.World.Get<Position>(replicaEntity) != expected)
+            {
                 throw new InvalidOperationException($"The replica has unexpected entity state at tick {tick}.");
+            }
 
-            Console.WriteLine($"Tick {tick}: {received.Encoding} snapshot, replica position ({expected.X}, {expected.Y}).");
-            return id;
+            Console.WriteLine(
+                $"Tick {tick}: {received.Encoding} snapshot, replica position ({expected.X}, {expected.Y}).");
+            return networkId;
         }
     }
 
-    private static CodecRegistry CreateRegistry() => new CodecRegistry().Register(
-        new ComponentSchema(1, 1, new FieldSchema(1, FieldKind.Int32), new FieldSchema(2, FieldKind.Int32)),
-        new PositionCodec());
+    private static CodecRegistry CreateRegistry()
+    {
+        var positionSchema = new ComponentSchema(
+            1,
+            1,
+            new FieldSchema(1, FieldKind.Int32),
+            new FieldSchema(2, FieldKind.Int32));
+
+        return new CodecRegistry().Register(positionSchema, new PositionCodec());
+    }
 
     private readonly record struct Position(int X, int Y);
 
@@ -87,7 +118,11 @@ internal static class Sample
             fields.Set(2, FieldValue.From(value.Y));
         }
 
-        public Position Read(ComponentReader fields) =>
-            new(fields.Get(1).AsInt32(), fields.Get(2).AsInt32());
+        public Position Read(ComponentReader fields)
+        {
+            var x = fields.Get(1).AsInt32();
+            var y = fields.Get(2).AsInt32();
+            return new Position(x, y);
+        }
     }
 }

@@ -10,61 +10,79 @@ internal static class Sample
     public static Task RunAsync(string[] args)
     {
         if (args.Length != 0)
+        {
             throw new ArgumentException("The serialization sample takes no arguments.");
+        }
 
         const uint hostStateId = 1;
         const uint hostStateVersion = 1;
         const int checkpointTick = 12;
         const int continuationTicks = 12;
+
         var schema = WorldSchema.Create();
         using var original = new World(new WorldOptions(chunkCapacity: 32));
         var originalHost = new HostState(0, 0x5CF631B859UL);
-        for (var i = 0; i < checkpointTick; i++)
-            Advance(original, ref originalHost);
+        for (var tick = 0; tick < checkpointTick; tick++)
+        {
+            AdvanceTick(original, ref originalHost);
+        }
 
         // Store application-owned state alongside the generated Motion component schema.
         using var checkpoint = new MemoryStream();
-        WorldSerializer.WriteBinary(original, checkpoint, schema, new CheckpointWriteOptions
+        var hostExtension = new CheckpointExtension(
+            hostStateId, hostStateVersion, required: true, data: originalHost.Encode());
+        var writeOptions = new CheckpointWriteOptions
         {
-            Extensions = [new CheckpointExtension(hostStateId, hostStateVersion, true, originalHost.Encode())],
-        });
+            Extensions = [hostExtension],
+        };
+        WorldSerializer.WriteBinary(original, checkpoint, schema, writeOptions);
         checkpoint.Position = 0;
 
-        using var restored = WorldSerializer.ReadBinary(checkpoint, schema, out var extensions,
-            new CheckpointReadOptions
-            {
-                WorldOptions = new WorldOptions(chunkCapacity: 7),
-                Extensions = new Dictionary<uint, uint> { [hostStateId] = hostStateVersion },
-                RequiredExtensions = [hostStateId],
-            });
+        // Restore into a new world with a different chunk capacity.
+        var readOptions = new CheckpointReadOptions
+        {
+            WorldOptions = new WorldOptions(chunkCapacity: 7),
+            Extensions = new Dictionary<uint, uint> { [hostStateId] = hostStateVersion },
+            RequiredExtensions = [hostStateId],
+        };
+        using var restored = WorldSerializer.ReadBinary(checkpoint, schema, out var extensions, readOptions);
         var restoredHost = HostState.Decode(extensions.Single().Data);
-        CheckState();
+        VerifyMatchingState();
         Console.WriteLine($"Restored tick {restoredHost.Tick} from a {checkpoint.Length}-byte checkpoint.");
 
-        for (var i = 0; i < continuationTicks; i++)
+        // Advance the original and restored worlds with the same simulation code.
+        for (var tick = 0; tick < continuationTicks; tick++)
         {
-            var expected = Advance(original, ref originalHost);
-            var actual = Advance(restored, ref restoredHost);
+            var expected = AdvanceTick(original, ref originalHost);
+            var actual = AdvanceTick(restored, ref restoredHost);
             if ((expected.Id, expected.Version) != (actual.Id, actual.Version))
+            {
                 throw new InvalidOperationException($"Entity allocation diverged at tick {originalHost.Tick}.");
-            CheckState();
+            }
+
+            VerifyMatchingState();
         }
 
         Console.WriteLine($"Verified {continuationTicks} continuation ticks through tick {restoredHost.Tick}.");
         return Task.CompletedTask;
 
-        void CheckState()
+        void VerifyMatchingState()
         {
-            if (originalHost != restoredHost ||
-                !CanonicalState(original, schema).AsSpan().SequenceEqual(CanonicalState(restored, schema)))
+            var originalState = CanonicalState(original, schema);
+            var restoredState = CanonicalState(restored, schema);
+            if (originalHost != restoredHost || !originalState.AsSpan().SequenceEqual(restoredState))
+            {
                 throw new InvalidOperationException($"Checkpoint state diverged at tick {originalHost.Tick}.");
+            }
         }
     }
 
-    private static Entity Advance(World world, ref HostState host)
+    private static Entity AdvanceTick(World world, ref HostState host)
     {
         var integrate = new Integrate();
         world.Query<Motion>().ForEach(ref integrate);
+
+        // Step the RNG before deriving the new entity's initial motion.
         var random = host.Rng;
         random ^= random << 13;
         random ^= random >> 7;
@@ -82,7 +100,10 @@ internal static class Sample
 
     private struct Integrate : IQueryProcessor<Motion>
     {
-        public void Execute(Entity entity, ref Motion motion) => motion.Position += motion.Velocity;
+        public void Execute(Entity entity, ref Motion motion)
+        {
+            motion.Position += motion.Velocity;
+        }
     }
 
     private readonly record struct HostState(long Tick, ulong Rng)
@@ -98,11 +119,17 @@ internal static class Sample
         public static HostState Decode(ReadOnlySpan<byte> bytes)
         {
             if (bytes.Length != 16)
+            {
                 throw new InvalidDataException("Expected a host tick and RNG state.");
+            }
+
             var tick = BinaryPrimitives.ReadInt64LittleEndian(bytes);
             var rng = BinaryPrimitives.ReadUInt64LittleEndian(bytes[8..]);
             if (tick < 0 || rng == 0)
+            {
                 throw new InvalidDataException("The checkpoint contains an invalid host tick or RNG state.");
+            }
+
             return new HostState(tick, rng);
         }
     }
@@ -111,6 +138,9 @@ internal static class Sample
 [WorldComponent(1001)]
 internal struct Motion(int position, int velocity)
 {
-    [WorldField(1)] public int Position = position;
-    [WorldField(2)] public int Velocity = velocity;
+    [WorldField(1)]
+    public int Position = position;
+
+    [WorldField(2)]
+    public int Velocity = velocity;
 }

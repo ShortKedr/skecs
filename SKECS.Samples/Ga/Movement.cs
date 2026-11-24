@@ -14,6 +14,7 @@ public struct Velocity
     public int Y;
 }
 
+// This kernel is both the compiled GA input and the reference C# implementation.
 [SecsSystem(SystemId = "samples.movement")]
 public partial struct Movement
 {
