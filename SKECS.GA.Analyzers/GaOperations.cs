@@ -70,7 +70,7 @@ public static partial class GaSemanticAnalysis
                     break;
                 case ISimpleAssignmentOperation initializerAssignment when
                     initializerAssignment.Parent is IObjectOrCollectionInitializerOperation valueInitializer &&
-                    IsPlainValueCreation(valueInitializer.Parent):
+                    IsValueCreation(valueInitializer.Parent):
                     if (initializerAssignment.Target is not IFieldReferenceOperation { Field.IsStatic: false })
                         Report(Unknown, location, "Initialize only explicit instance fields in a portable value.");
                     break;
@@ -131,13 +131,17 @@ public static partial class GaSemanticAnalysis
                         Report(Stream, location, "Use a plain field initializer with no user-defined constructor in a GA output payload.");
                     break;
                 case IObjectOrCollectionInitializerOperation initializer when
-                    IsPackedOutputInitializer(initializer) || IsPlainValueCreation(initializer.Parent):
+                    IsPackedOutputInitializer(initializer) || IsValueCreation(initializer.Parent):
                     break;
-                case IObjectCreationOperation creation when IsPlainValueCreation(creation):
-                    break;
-                case IObjectCreationOperation creation when creation.Type?.IsValueType == true && creation.Initializer == null:
+                case IObjectCreationOperation creation when IsValueCreation(creation) ||
+                    creation.Type?.IsValueType == true && creation.Initializer == null:
                     if (creation.Constructor is { IsImplicitlyDeclared: false } constructor)
+                    {
+                        if (constructor.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsParams) ||
+                            creation.Arguments.Any(argument => argument.ArgumentKind != ArgumentKind.Explicit))
+                            Report(Unknown, location, "Use explicit by-value arguments for a GA value constructor.");
                         VisitMethod(constructor, location);
+                    }
                     break;
                 case IBranchOperation branch when branch.BranchKind is BranchKind.Break or BranchKind.Continue:
                 case IReturnOperation { Kind: OperationKind.Return }:
@@ -610,11 +614,9 @@ public static partial class GaSemanticAnalysis
                 Report(Stream, location, $"Use default, a plain field initializer, or an entry component as the {method.Name}<T> payload.");
         }
 
-        private static bool IsPlainValueCreation(IOperation? operation) => operation is IObjectCreationOperation
+        private static bool IsValueCreation(IOperation? operation) => operation is IObjectCreationOperation
         {
-            Type: INamedTypeSymbol { TypeKind: TypeKind.Struct, IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false },
-            Arguments.Length: 0,
-            Constructor: null or { IsImplicitlyDeclared: true }
+            Type: INamedTypeSymbol { TypeKind: TypeKind.Struct, IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false }
         };
 
         private bool IsPackedOutputInitializer(IOperation? operation) =>

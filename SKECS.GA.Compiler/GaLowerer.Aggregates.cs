@@ -120,10 +120,11 @@ internal sealed partial class GaLowerer
             return CreateAggregate(type, operation, bindings);
         if (operation is IObjectCreationOperation creation)
         {
-            if (creation.Arguments.Length != 0 || creation.Constructor is { IsImplicitlyDeclared: false } ||
-                creation.Type is INamedTypeSymbol { StaticConstructors.IsEmpty: false })
-                throw Unsupported(operation, "Use default or a plain field initializer without a user constructor.");
+            if (type is INamedTypeSymbol { StaticConstructors.IsEmpty: false })
+                throw Unsupported(operation, "A GA constructor cannot depend on static initialization of its declaring type.");
             var fields = CreateAggregate(type, operation, bindings);
+            if (creation.Constructor is { IsImplicitlyDeclared: false } constructor)
+                LowerAggregateConstructor(creation, constructor, fields, bindings);
             if (creation.Initializer != null)
             {
                 var stores = new List<GaStatement>();
@@ -208,6 +209,37 @@ internal sealed partial class GaLowerer
         return result;
     }
 
+    private void LowerAggregateConstructor(IObjectCreationOperation creation, IMethodSymbol constructor,
+        Dictionary<string, GaSlot> fields, List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)> bindings)
+    {
+        constructor = SpecializeMethod(constructor);
+        var definition = constructor.OriginalDefinition;
+        if (definition.DeclaringSyntaxReferences is not [var reference] ||
+            reference.GetSyntax(cancellationToken) is not ConstructorDeclarationSyntax { Initializer: null } declaration ||
+            constructor.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsParams) ||
+            creation.Arguments.Length != constructor.Parameters.Length ||
+            creation.Arguments.Any(argument => argument.Parameter == null || argument.ArgumentKind != ArgumentKind.Explicit))
+            throw Unsupported(creation, "Use a source-defined value constructor with explicit by-value arguments and no constructor chaining.");
+
+        var model = compilation.GetSemanticModel(declaration.SyntaxTree);
+        if (model.GetOperation(declaration, cancellationToken) is not IConstructorBodyOperation body ||
+            (body.BlockBody ?? body.ExpressionBody) is not { } block)
+            throw Unsupported(creation, "The GA value constructor must have a source-defined body.");
+
+        var frame = new HelperFrame(new GaSlot[constructor.Parameters.Length],
+            new Dictionary<ILocalSymbol, GaSlot>(SymbolEqualityComparer.Default), MemberTypes(constructor, creation));
+        frame.AggregateInputs.Add(ReceiverInput, fields);
+        var arguments = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
+        foreach (var argument in creation.Arguments.OrderBy(argument => argument.Syntax.SpanStart))
+        {
+            int ordinal = argument.Parameter!.Ordinal;
+            BindMemberInput(frame, ordinal, constructor.Parameters[ordinal].Type, argument.Value, arguments);
+        }
+
+        var effect = LowerAggregateHelperBody(creation, definition, declaration, block.Operations, null, frame, arguments);
+        bindings.Add((AddLocal(GaScalar.Bool), effect, Source(creation)));
+    }
+
     private (IMethodSymbol Method, IOperation? Receiver, IOperation[] Arguments, int[]? Ordinals)? AggregateMember(IOperation operation)
     {
         return operation switch
@@ -244,9 +276,9 @@ internal sealed partial class GaLowerer
     }
 
     private GaValue LowerAggregateHelperBody(IOperation site, IMethodSymbol definition, SyntaxNode declaration,
-        IReadOnlyList<IOperation> operations, IOperation? expression, ITypeSymbol returnType,
-        Dictionary<string, GaSlot> result, HelperFrame frame,
-        List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)> bindings)
+        IReadOnlyList<IOperation> operations, IOperation? expression, HelperFrame frame,
+        List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)> bindings, ITypeSymbol? returnType = null,
+        Dictionary<string, GaSlot>? result = null)
     {
         if (!_activeHelpers.Add(definition))
             throw Unsupported(site, "Recursive GA helpers and value members are not supported.");
@@ -255,21 +287,26 @@ internal sealed partial class GaLowerer
         var outerControl = _loopControl;
         int outerDepth = _helperLoopBaseDepth;
         var completed = AddLocal(GaScalar.Bool);
-        var state = new HelperReturn(completed, completed) { AggregateType = returnType, AggregateResult = result };
+        var state = new HelperReturn(completed, completed)
+        {
+            AggregateType = returnType,
+            AggregateResult = result,
+            IsConstructor = definition.MethodKind == MethodKind.Constructor
+        };
         _helper = frame;
         _helperReturn = state;
         _loopControl = null;
         _helperLoopBaseDepth = _loopCounters.Count;
         try
         {
-            GaStatement body = expression == null ? LowerBlock(operations) : StoreAggregate(returnType, result, expression);
+            GaStatement body = expression == null ? LowerBlock(operations) : StoreAggregate(returnType!, result!, expression);
             GaValue effect = new GaBlockValue(body, new GaConstant(GaScalar.Bool, 0, Source(site)), Source(site));
             foreach (var local in frame.Locals.Values.Reverse())
                 effect = new GaBoundValue(local, new GaConstant(local.Type, 0, Source(site)), effect, Source(site));
             effect = new GaBoundValue(completed, new GaConstant(GaScalar.Bool, 0, Source(site)), effect, Source(site));
             if (!SymbolEqualityComparer.Default.Equals(definition.ContainingType, entry.ContainingType))
                 _externalHelperSources.Add(definition.GetDocumentationCommentId() + "\n" +
-                    System.Text.RegularExpressions.Regex.Replace(declaration.ToFullString(), "\r\n|[\r\n\f\u0085\u2028\u2029]", "\n"));
+                    GaCompilerText.NormalizeLineEndings(declaration.ToFullString()));
             return BindValues(bindings, effect);
         }
         finally

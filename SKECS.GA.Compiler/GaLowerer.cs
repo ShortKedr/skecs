@@ -62,6 +62,7 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
     {
         internal ITypeSymbol? AggregateType { get; init; }
         internal Dictionary<string, GaSlot>? AggregateResult { get; init; }
+        internal bool IsConstructor { get; init; }
     }
     private const uint LoopRunning = 0;
     private const uint LoopContinue = 1;
@@ -251,6 +252,12 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                     : StoreAggregate(exit.AggregateType!, exit.AggregateResult, returned);
                 return new GaBlock([result,
                     new GaStore(exit.Completed, new GaConstant(GaScalar.Bool, 1, Source(operation)))]);
+            case IReturnOperation { ReturnedValue: null } when _helperReturn is { IsConstructor: true } constructor:
+                return new GaStore(constructor.Completed, new GaConstant(GaScalar.Bool, 1, Source(operation)));
+            case IObjectCreationOperation creation when IsAggregate(ResolveHelperType(creation.Type)!):
+                var construction = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
+                CaptureAggregate(ResolveHelperType(creation.Type)!, creation, construction);
+                return BindingStatements(construction);
             case IInvocationOperation invocation when IsAggregate(ResolveHelperType(invocation.Type)!):
                 var discarded = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
                 CaptureAggregate(ResolveHelperType(invocation.Type)!, invocation, discarded);
@@ -1179,8 +1186,8 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
         }
         return aggregateResult == null
             ? LowerHelperBody(site, definition, declaration, operations, expression, resultType, frame, bindings)
-            : LowerAggregateHelperBody(site, definition, declaration, operations, expression,
-                target.ReturnType, aggregateResult, frame, bindings);
+            : LowerAggregateHelperBody(site, definition, declaration, operations, expression, frame, bindings,
+                target.ReturnType, aggregateResult);
     }
 
     private void BindMemberInput(HelperFrame frame, int index, ITypeSymbol type, IOperation operation,
@@ -1386,6 +1393,8 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                         return new GaBlockValue(LowerStatement(invocation), empty, position);
                     var value = LowerValue(invocation);
                     return new GaBoundValue(AddLocal(value.Type), value, empty, position);
+                case IObjectCreationOperation creation when IsAggregate(ResolveHelperType(creation.Type)!):
+                    return new GaBlockValue(LowerStatement(creation), empty, position);
                 case IEmptyOperation:
                     return empty;
                 default:
