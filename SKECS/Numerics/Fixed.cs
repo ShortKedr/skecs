@@ -107,6 +107,10 @@ public readonly struct Fixed : IEquatable<Fixed>, IComparable<Fixed>
 
     private static Fixed Divide(long numerator, long denominator)
     {
+        // Some AOT runtimes lower integer division to a native instruction without a managed zero check.
+        if (denominator == 0)
+            throw new DivideByZeroException();
+
         ulong divisor = Magnitude(denominator);
         ulong dividend = Magnitude(numerator);
         ulong whole = dividend / divisor;
