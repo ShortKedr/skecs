@@ -1,0 +1,6 @@
+{
+  "name": "SKECS.GA.Unity",
+  "rootNamespace": "SKECS.GA.Unity",
+  "overrideReferences": true,
+  "precompiledReferences": ["SKECS.dll", "SKECS.GA.dll", "System.Text.Json.dll"]
+}

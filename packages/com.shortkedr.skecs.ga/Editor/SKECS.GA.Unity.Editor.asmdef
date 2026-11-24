@@ -1,0 +1,15 @@
+{
+  "name": "SKECS.GA.Unity.Editor",
+  "rootNamespace": "SKECS.GA.Unity.Editor",
+  "references": ["SKECS.GA.Unity"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "SKECS.dll",
+    "SKECS.GA.dll",
+    "SKECS.GA.Compiler.dll",
+    "Microsoft.CodeAnalysis.dll",
+    "Microsoft.CodeAnalysis.CSharp.dll",
+    "System.Collections.Immutable.dll"
+  ]
+}

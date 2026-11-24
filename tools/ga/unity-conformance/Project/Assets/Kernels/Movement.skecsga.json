@@ -1,0 +1,7 @@
+{
+  "source": "MovementKernel.cs",
+  "systemType": "Movement",
+  "simulationContract": "movement/1",
+  "adapter": "UnityMovement",
+  "workgroup": 64
+}

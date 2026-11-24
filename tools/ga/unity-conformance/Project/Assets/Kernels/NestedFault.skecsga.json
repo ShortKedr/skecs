@@ -1,0 +1,8 @@
+{
+  "source": "NestedFaultKernel.cs",
+  "systemType": "NestedFaultKernel",
+  "simulationContract": "unity.nested-fault/1",
+  "adapter": "UnityNestedFault",
+  "inputType": "System.Byte",
+  "workgroup": 32
+}

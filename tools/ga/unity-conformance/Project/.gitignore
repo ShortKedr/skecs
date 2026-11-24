@@ -1,0 +1,9 @@
+/Library/
+/Temp/
+/Logs/
+/UserSettings/
+/obj/
+/Assets/Kernels/Generated/
+/Assets/Kernels/Generated.meta
+/Assets/GaUnityConformance.unity
+/Assets/GaUnityConformance.unity.meta
