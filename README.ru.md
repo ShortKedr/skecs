@@ -20,7 +20,7 @@
 | Ваша задача | Куда перейти |
 | --- | --- |
 | Использовать библиотеку | [Документация релизов](https://shortkedr.github.io/skecs/ru/) · [Быстрый старт](#быстрый-старт) · [Установка пакета](docs/skecs/INSTALL.ru.md) · [API и правила времени жизни](docs/skecs/README.ru.md) · [Исходник примера](SKECS.Sample/Program.cs) |
-| Развивать SKECS | [Реализованные оптимизации](docs/SKECS_OPTIMIZATION.ru.md) · [Тесты](SKECS.Tests) |
+| Развивать SKECS | [Примеры модулей](SKECS.Samples/README.md) · [Реализованные оптимизации](docs/SKECS_OPTIMIZATION.ru.md) · [Тесты](SKECS.Tests) |
 | Прочитать или воспроизвести измерения | [Бенчмарки ECS](SKECS.Benchmarks/README.ru.md) · [Бенчмарки SpaceBattle](SpaceBattle.Benchmarks/README.ru.md) · [Отчёт Space Battle](docs/space-battle/REPORT.ru.md) |
 | Запустить игру | [Desktop](SpaceBattle.Game/README.ru.md) · [Web](SpaceBattle.Web/README.ru.md) |
 
