@@ -7,6 +7,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $packagePath = (Resolve-Path -LiteralPath $Package).Path.Replace([IO.Path]::DirectorySeparatorChar, '/')
+if (-not (Test-Path -LiteralPath (Join-Path $packagePath 'Runtime/Plugins/SKECS.Serialization.dll') -PathType Leaf)) {
+    throw 'Build the conformance package with New-UnityGaPackage.ps1 -IncludeSerialization.'
+}
 if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $workspace 'artifacts/ga/unity-package/project'
 }
@@ -28,11 +31,13 @@ $scenarios = Join-Path $project 'Assets/Scenarios'
 New-Item -ItemType Directory -Path $scenarios -Force | Out-Null
 $ga = Split-Path -Parent $PSScriptRoot
 foreach ($file in @('movement-conformance/MovementKernel.cs', 'target-read-conformance/TargetKernel.cs',
-    'shotburst-conformance/ShotKernels.cs', 'spatial-parent-conformance/SpatialKernel.cs')) {
+    'shotburst-conformance/ShotKernels.cs', 'spatial-parent-conformance/SpatialKernel.cs',
+    'service-continuation-conformance/ServiceKernel.cs')) {
     Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $kernels
 }
 foreach ($file in @('target-read-conformance/TargetScenario.cs', 'shotburst-conformance/ShotBurstScenario.cs',
-    'spatial-parent-conformance/SpatialScenario.cs', 'spatial-parent-conformance/FlatCandidates.cs')) {
+    'spatial-parent-conformance/SpatialScenario.cs', 'spatial-parent-conformance/FlatCandidates.cs',
+    'service-continuation-conformance/ContactService.cs', 'service-continuation-conformance/ContinuationChecks.cs')) {
     Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $scenarios
 }
 @{ dependencies = @{ 'com.shortkedr.skecs.ga' = "file:$packagePath" } } |

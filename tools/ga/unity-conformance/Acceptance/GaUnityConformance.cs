@@ -70,6 +70,7 @@ public static class GaUnityConformance
                 await CompareMovement(cpu, noCompute, 65, 1200, 0);
                 CompareFault(await RunNested(cpu), await RunNested(noCompute));
                 await GaUnityGameplayConformance.Run(cpu, noCompute);
+                await GaUnityServiceConformance.Run(useGpu: false);
                 Debug.Log("SKECS_GA_UNITY_OK policy=CpuOnly,Auto,RequireGpu deviceRows=0 ticks=1200 defaultAsync=passed");
                 return 0;
             }
@@ -101,6 +102,7 @@ public static class GaUnityConformance
             CompareFault(await RunNested(cpu), await RunNested(gpu));
             await VerifyDiscard((GaPackedKernel)auto.GetPreparedKernel(nestedRequest.Contract.SystemId));
             await GaUnityGameplayConformance.Run(cpu, gpu);
+            await GaUnityServiceConformance.Run(useGpu: true);
 
             Debug.Log($"SKECS_GA_UNITY_OK policy=CpuOnly,Auto,RequireGpu deviceRows={gpuRows} ticks=1200 " +
                 "fault=nested-divide-by-zero discard=passed concurrent=passed defaultAsync=passed qualification=Experimental");

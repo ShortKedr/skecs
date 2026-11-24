@@ -2,7 +2,8 @@
 param(
     [string] $OutputDirectory,
     [string] $NuGetPackages = $env:NUGET_PACKAGES,
-    [string] $Dotnet = 'dotnet'
+    [string] $Dotnet = 'dotnet',
+    [switch] $IncludeSerialization
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,11 +42,17 @@ $env:DOTNET_ADD_GLOBAL_TOOLS_TO_PATH = 'false'
 $env:DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE = 'true'
 $env:DOTNET_NOLOGO = '1'
 $build = Join-Path $scratch 'build'
-$compiler = Join-Path $workspace 'SKECS.GA.Compiler/SKECS.GA.Compiler.csproj'
 $restoreCache = Join-Path $scratch 'nuget-cache'
-& $Dotnet build $compiler -c Release -f netstandard2.1 --artifacts-path $build -p:NuGetAudit=false "-p:RestorePackagesPath=$restoreCache" --source $NuGetPackages /m:1 /nr:false -p:UseSharedCompilation=false
-if ($LASTEXITCODE -ne 0) {
-    throw "Unity GA managed build failed with exit code $LASTEXITCODE."
+$managedProjects = @('SKECS.GA.Compiler')
+if ($IncludeSerialization) {
+    $managedProjects += 'SKECS.Serialization'
+}
+foreach ($name in $managedProjects) {
+    $project = Join-Path $workspace "$name/$name.csproj"
+    & $Dotnet build $project -c Release -f netstandard2.1 --artifacts-path $build -p:NuGetAudit=false "-p:RestorePackagesPath=$restoreCache" --source $NuGetPackages /m:1 /nr:false -p:UseSharedCompilation=false
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unity managed build for $name failed with exit code $LASTEXITCODE."
+    }
 }
 
 Copy-Item -Path (Join-Path $source '*') -Destination $package -Recurse
@@ -95,7 +102,11 @@ PluginImporter:
 "@ | Set-Content -LiteralPath ($target + '.meta') -Encoding utf8NoBOM
 }
 
-foreach ($name in @('SKECS', 'SKECS.GA')) {
+$runtimeAssemblies = @('SKECS', 'SKECS.GA')
+if ($IncludeSerialization) {
+    $runtimeAssemblies += 'SKECS.Serialization'
+}
+foreach ($name in $runtimeAssemblies) {
     Add-Plugin (Join-Path $build "bin/$name/release_netstandard2.1/$name.dll") $runtime $false
 }
 Add-Plugin (Join-Path $build 'bin/SKECS.GA.Compiler/release_netstandard2.1/SKECS.GA.Compiler.dll') $editor $true

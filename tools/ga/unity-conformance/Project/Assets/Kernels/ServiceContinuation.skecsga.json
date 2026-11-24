@@ -1,0 +1,7 @@
+{
+  "source": "ServiceKernel.cs",
+  "systemType": "IntegrateBodies",
+  "simulationContract": "service-continuation/1",
+  "adapter": "UnityServiceContinuation",
+  "workgroup": 64
+}

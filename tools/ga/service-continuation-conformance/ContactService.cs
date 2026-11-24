@@ -1,15 +1,69 @@
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using SKECS;
 using SKECS.Numerics;
 using SKECS.Serialization;
 
-internal readonly record struct BodySlot(int Generation, int Owner, int OwnerGeneration)
+internal readonly struct BodySlot
 {
+    public BodySlot(int generation, int owner, int ownerGeneration)
+    {
+        Generation = generation;
+        Owner = owner;
+        OwnerGeneration = ownerGeneration;
+    }
+
+    public int Generation { get; }
+    public int Owner { get; }
+    public int OwnerGeneration { get; }
     public bool Alive => Owner >= 0;
 }
 
-internal readonly record struct ContactPair(int First, int FirstGeneration, int Second, int SecondGeneration);
-internal readonly record struct ContactStarted(ContactPair Pair);
-internal readonly record struct Lifecycle(long Tick, int RetireSlot, int SpawnPosition);
+internal readonly struct ContactPair : IEquatable<ContactPair>
+{
+    public ContactPair(int first, int firstGeneration, int second, int secondGeneration)
+    {
+        First = first;
+        FirstGeneration = firstGeneration;
+        Second = second;
+        SecondGeneration = secondGeneration;
+    }
+
+    public int First { get; }
+    public int FirstGeneration { get; }
+    public int Second { get; }
+    public int SecondGeneration { get; }
+
+    public bool Equals(ContactPair other) => First == other.First && FirstGeneration == other.FirstGeneration &&
+        Second == other.Second && SecondGeneration == other.SecondGeneration;
+
+    public override bool Equals(object? other) => other is ContactPair pair && Equals(pair);
+
+    public override int GetHashCode() => HashCode.Combine(First, FirstGeneration, Second, SecondGeneration);
+}
+
+internal readonly struct ContactStarted
+{
+    public ContactStarted(ContactPair pair) => Pair = pair;
+    public ContactPair Pair { get; }
+}
+
+internal readonly struct Lifecycle
+{
+    public Lifecycle(long tick, int retireSlot, int spawnPosition)
+    {
+        Tick = tick;
+        RetireSlot = retireSlot;
+        SpawnPosition = spawnPosition;
+    }
+
+    public long Tick { get; }
+    public int RetireSlot { get; }
+    public int SpawnPosition { get; }
+}
 
 // The fixture uses equal-mass, unit-radius circles constrained to one axis.
 internal sealed class ContactService

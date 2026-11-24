@@ -1,5 +1,12 @@
+#nullable enable
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 using SKECS;
 using SKECS.Numerics;
 using SKECS.Serialization;
@@ -16,12 +23,26 @@ internal static class ContinuationChecks
         .Register(new ComponentSchema(302, 1, new FieldSchema(1, FieldKind.Int32), new FieldSchema(2, FieldKind.Int32)),
             new LinkCodec());
 
-    internal readonly record struct Frame(long Tick, byte[] Checkpoint, ContactPair[] Began, int Rows, int Impulses);
-    private readonly record struct ExpectedBody(int Owner, int OwnerGeneration, int Slot, int Generation, long Position, long InitialVelocity);
-    private readonly record struct OracleContact(ContactPair Pair, long Difference);
+    internal readonly struct Frame
+    {
+        public Frame(long tick, byte[] checkpoint, ContactPair[] began, int rows, int impulses)
+        {
+            Tick = tick;
+            Checkpoint = checkpoint;
+            Began = began;
+            Rows = rows;
+            Impulses = impulses;
+        }
+
+        public long Tick { get; }
+        public byte[] Checkpoint { get; }
+        public ContactPair[] Began { get; }
+        public int Rows { get; }
+        public int Impulses { get; }
+    }
 
     internal static async ValueTask<Frame[]> RunAsync(Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan,
-        string lane, int chunk, Action? observePending = null)
+        string lane, int chunk, Action? observePending = null, Action<string>? report = null)
     {
         using var original = new World(new WorldOptions(chunk));
         var service = ContactService.Seed(original);
@@ -30,7 +51,7 @@ internal static class ContinuationChecks
             Require(initial.SequenceEqual(Save(decoded, initialService.Capture())), "Initial checkpoint changed after restore.");
 
         using var originalRunner = NewRunner(original, service, createPlan);
-        var prefix = await AdvanceAsync(original, service, originalRunner, [], ForkTick, observePending);
+        var prefix = await AdvanceAsync(original, service, originalRunner, Array.Empty<ContactPair>(), ForkTick, observePending);
         var start = prefix[^1];
         Require(service.Previous.Count >= 2 && service.Free.SequenceEqual(new[] { 3, 4 }) &&
             service.PendingLifecycle == 4 && prefix[0].Impulses >= 2, "Fork missed significant service state.");
@@ -53,13 +74,13 @@ internal static class ContinuationChecks
 
         using var broken = Load(noHistory, chunk, out var noPrevious);
         using var brokenRunner = NewRunner(broken, noPrevious, createPlan);
-        var incorrect = (await AdvanceAsync(broken, noPrevious, brokenRunner, [], ForkTick + 1, observePending)).Single();
+        var incorrect = (await AdvanceAsync(broken, noPrevious, brokenRunner, Array.Empty<ContactPair>(), ForkTick + 1, observePending)).Single();
         Require(incorrect.Began.Except(tail[0].Began).Any(),
             "Losing the previous contact history did not change the next begin-contact stream.");
 
         var all = prefix.Concat(tail).ToArray();
         await VerifyFaultRecoveryAsync(original, service, originalRunner, createPlan, chunk, all[^1], observePending);
-        Console.WriteLine($"{lane} ticks={all.Length} restoredTicks={replay.Length} beginContacts={all.Sum(frame => frame.Began.Length)} " +
+        (report ?? Console.WriteLine)($"{lane} ticks={all.Length} restoredTicks={replay.Length} beginContacts={all.Sum(frame => frame.Began.Length)} " +
             $"orderedImpulses={all.Sum(frame => frame.Impulses)} initialRestore=passed continuation=passed " +
             "historyLossDetected=passed invalidLinkRejected=passed missingExtensionRejected=passed " +
             "faultCheckpointRecovery=passed allocator=passed exactOracle=passed");
@@ -67,8 +88,15 @@ internal static class ContinuationChecks
     }
 
     private static DeterministicRunner<IntegrationFrame> NewRunner(World world, ContactService service,
-        Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan) =>
-        new(world, createPlan(service), workerCount: OperatingSystem.IsBrowser() ? 1 : 2);
+        Func<ContactService, DeterministicWorkload<IntegrationFrame>> createPlan)
+    {
+#if UNITY_2021_3_OR_NEWER
+        bool singleWorker = UnityEngine.Application.platform == UnityEngine.RuntimePlatform.WebGLPlayer;
+#else
+        bool singleWorker = OperatingSystem.IsBrowser();
+#endif
+        return new DeterministicRunner<IntegrationFrame>(world, createPlan(service), workerCount: singleWorker ? 1 : 2);
+    }
 
     private static async ValueTask<Frame[]> AdvanceAsync(World world, ContactService service,
         DeterministicRunner<IntegrationFrame> runner, ContactPair[] previous, long last, Action? observePending)
@@ -77,7 +105,7 @@ internal static class ContinuationChecks
         for (long tick = service.CompletedTick + 1; tick <= last; tick++)
         {
             service.BeforeTick(world, tick);
-            var bodies = new List<ExpectedBody>();
+            var bodies = new List<(int Owner, int OwnerGeneration, int Slot, int Generation, long Position, long InitialVelocity)>();
             for (int slot = 0; slot < service.Slots.Count; slot++)
             {
                 var body = service.Slots[slot];
@@ -85,7 +113,7 @@ internal static class ContinuationChecks
                     continue;
                 var motion = world.Get<ContactMotion>(world.BindEntity(body.Owner, body.OwnerGeneration));
                 long position = checked(motion.Position.Raw + IntegrationDelta(motion.Velocity.Raw));
-                bodies.Add(new ExpectedBody(body.Owner, body.OwnerGeneration, slot, body.Generation, position, motion.Velocity.Raw));
+                bodies.Add((body.Owner, body.OwnerGeneration, slot, body.Generation, position, motion.Velocity.Raw));
             }
 
             var contacts = FindContacts(bodies);
@@ -136,7 +164,7 @@ internal static class ContinuationChecks
                 var published = events[index++];
                 Require(published.Key.TickIndex == tick && published.Key.Stage == SystemStage.Update &&
                     published.Key.SystemOrder == 1 && published.Key.SourceKind == DeterministicSourceKind.Job &&
-                    published.Key.LocalOrdinal == contact && published.Get<ContactStarted>().Pair == begins[contact],
+                    published.Key.LocalOrdinal == contact && published.Get<ContactStarted>().Pair.Equals(begins[contact]),
                     $"Begin-contact stream differs at tick {tick}, index {contact}.");
             }
 
@@ -148,7 +176,8 @@ internal static class ContinuationChecks
         return result.ToArray();
     }
 
-    private static OracleContact[] FindContacts(List<ExpectedBody> bodies)
+    private static (ContactPair Pair, long Difference)[] FindContacts(
+        List<(int Owner, int OwnerGeneration, int Slot, int Generation, long Position, long InitialVelocity)> bodies)
     {
         var pairs = from left in bodies
                     from right in bodies
@@ -156,7 +185,7 @@ internal static class ContinuationChecks
                     let difference = (BigInteger)right.Position - left.Position
                     where BigInteger.Abs(difference) <= 2 * Scale
                     orderby left.Slot, right.Slot
-                    select new OracleContact(new ContactPair(left.Slot, left.Generation, right.Slot, right.Generation), (long)difference);
+                    select (new ContactPair(left.Slot, left.Generation, right.Slot, right.Generation), (long)difference);
         return pairs.ToArray();
     }
 
@@ -186,13 +215,13 @@ internal static class ContinuationChecks
         runner.BeginTick(tick, new IntegrationFrame { Delta = Fixed.FromRaw(Delta) }, Fixed.FromRaw(Delta));
 
     private static
-#if GA_BROWSER_CONFORMANCE
+#if GA_BROWSER_CONFORMANCE || UNITY_2021_3_OR_NEWER
         async
 #endif
         ValueTask<DeterministicTickStatus> DrainAsync(DeterministicRunner<IntegrationFrame> runner, Action? observePending)
     {
         var clock = Stopwatch.StartNew();
-#if GA_BROWSER_CONFORMANCE
+#if GA_BROWSER_CONFORMANCE || UNITY_2021_3_OR_NEWER
         // Pending here must be a readback yield, independent of the logical job budget.
         const int budget = int.MaxValue;
 #else
@@ -208,15 +237,17 @@ internal static class ContinuationChecks
                 throw new TimeoutException("Service fixture runner did not complete.");
 #if GA_BROWSER_CONFORMANCE
             await Task.Delay(1);
+#elif UNITY_2021_3_OR_NEWER
+            await Task.Yield();
 #else
             wait.SpinOnce(sleep1Threshold: -1);
 #endif
             status = runner.Advance(budget);
         }
-#if GA_BROWSER_CONFORMANCE
+#if GA_BROWSER_CONFORMANCE || UNITY_2021_3_OR_NEWER
         return status;
 #else
-        return ValueTask.FromResult(status);
+        return new ValueTask<DeterministicTickStatus>(status);
 #endif
     }
 
