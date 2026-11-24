@@ -137,9 +137,7 @@ public static partial class GaSemanticAnalysis
                     creation.Type?.IsValueType == true && creation.Initializer == null:
                     if (creation.Constructor is { IsImplicitlyDeclared: false } constructor)
                     {
-                        if (constructor.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsParams) ||
-                            creation.Arguments.Any(argument => argument.ArgumentKind != ArgumentKind.Explicit))
-                            Report(Unknown, location, "Use explicit by-value arguments for a GA value constructor.");
+                        CheckValueConstructorArguments(constructor, creation.Arguments, location);
                         VisitMethod(constructor, location);
                     }
                     break;

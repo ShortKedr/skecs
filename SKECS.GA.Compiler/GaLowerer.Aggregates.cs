@@ -126,7 +126,10 @@ internal sealed partial class GaLowerer
                 throw Unsupported(operation, "A GA constructor cannot depend on static initialization of its declaring type.");
             var fields = CreateAggregate(type, operation, bindings);
             if (creation.Constructor is { IsImplicitlyDeclared: false } constructor)
-                LowerAggregateConstructor(creation, constructor, fields, bindings);
+            {
+                var effect = LowerAggregateConstructor(creation, constructor, creation.Arguments, fields);
+                bindings.Add((AddLocal(GaScalar.Bool), effect, Source(creation)));
+            }
             if (creation.Initializer != null)
             {
                 var stores = new List<GaStatement>();
@@ -211,35 +214,95 @@ internal sealed partial class GaLowerer
         return result;
     }
 
-    private void LowerAggregateConstructor(IObjectCreationOperation creation, IMethodSymbol constructor,
-        Dictionary<string, GaSlot> fields, List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)> bindings)
+    private GaValue LowerAggregateConstructor(IOperation site, IMethodSymbol constructor,
+        IReadOnlyList<IArgumentOperation> supplied, Dictionary<string, GaSlot> fields)
     {
         constructor = SpecializeMethod(constructor);
         var definition = constructor.OriginalDefinition;
         if (definition.DeclaringSyntaxReferences is not [var reference] ||
-            reference.GetSyntax(cancellationToken) is not ConstructorDeclarationSyntax { Initializer: null } declaration ||
+            reference.GetSyntax(cancellationToken) is not ConstructorDeclarationSyntax declaration ||
             constructor.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsParams) ||
-            creation.Arguments.Length != constructor.Parameters.Length ||
-            creation.Arguments.Any(argument => argument.Parameter == null || argument.ArgumentKind != ArgumentKind.Explicit))
-            throw Unsupported(creation, "Use a source-defined value constructor with explicit by-value arguments and no constructor chaining.");
+            supplied.Count != constructor.Parameters.Length ||
+            supplied.Any(argument => argument.Parameter == null || argument.ArgumentKind != ArgumentKind.Explicit))
+            throw Unsupported(site, "Use a source-defined value constructor with explicit by-value arguments.");
 
         var model = compilation.GetSemanticModel(declaration.SyntaxTree);
         if (model.GetOperation(declaration, cancellationToken) is not IConstructorBodyOperation body ||
             (body.BlockBody ?? body.ExpressionBody) is not { } block)
-            throw Unsupported(creation, "The GA value constructor must have a source-defined body.");
+            throw Unsupported(site, "The GA value constructor must have a source-defined body.");
 
         var frame = new HelperFrame(new GaSlot[constructor.Parameters.Length],
-            new Dictionary<ILocalSymbol, GaSlot>(SymbolEqualityComparer.Default), MemberTypes(constructor, creation));
+            new Dictionary<ILocalSymbol, GaSlot>(SymbolEqualityComparer.Default), MemberTypes(constructor, site));
         frame.AggregateInputs.Add(ReceiverInput, fields);
         var arguments = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
-        foreach (var argument in creation.Arguments.OrderBy(argument => argument.Syntax.SpanStart))
+        foreach (var argument in supplied.OrderBy(argument => argument.Syntax.SpanStart))
         {
             int ordinal = argument.Parameter!.Ordinal;
             BindMemberInput(frame, ordinal, constructor.Parameters[ordinal].Type, argument.Value, arguments);
         }
 
-        var effect = LowerAggregateHelperBody(creation, definition, declaration, block.Operations, null, frame, arguments);
-        bindings.Add((AddLocal(GaScalar.Bool), effect, Source(creation)));
+        return LowerAggregateHelperBody(site, definition, declaration, block.Operations, null, frame, arguments,
+            initialize: Initialize);
+
+        GaBlock Initialize()
+        {
+            if (declaration.Initializer != null)
+            {
+                var initializer = model.GetOperation(declaration.Initializer, cancellationToken) as IInvocationOperation ??
+                    (body.Initializer as IExpressionStatementOperation)?.Operation as IInvocationOperation;
+                if (!declaration.Initializer.ThisOrBaseKeyword.IsKind(SyntaxKind.ThisKeyword) ||
+                    initializer == null)
+                    throw Unsupported(site, "Use a source-defined struct constructor or the default this() initializer.");
+                if (!initializer.TargetMethod.IsImplicitlyDeclared)
+                {
+                    var effect = LowerAggregateConstructor(initializer, initializer.TargetMethod, initializer.Arguments, fields);
+                    return new GaBlock([new GaStore(AddLocal(GaScalar.Bool), effect)]);
+                }
+            }
+            return LowerInstanceFieldInitializers(constructor.ContainingType, fields, site);
+        }
+    }
+
+    private GaBlock LowerInstanceFieldInitializers(INamedTypeSymbol type, Dictionary<string, GaSlot> fields, IOperation site)
+    {
+        var declarations = type.GetMembers().OfType<IFieldSymbol>().Where(field => !field.IsStatic)
+            .SelectMany(field => field.DeclaringSyntaxReferences.Select(reference =>
+                (Field: field, Syntax: reference.GetSyntax(cancellationToken) as VariableDeclaratorSyntax)))
+            .Where(item => item.Syntax?.Initializer != null)
+            .ToLookup(item => item.Syntax!.SyntaxTree);
+        var stores = new List<GaStatement>();
+        var sourceText = new System.Text.StringBuilder();
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            foreach (var (field, syntax) in declarations[tree].OrderBy(item => item.Syntax!.SpanStart))
+            {
+                var initializer = syntax!.Initializer!;
+                var model = compilation.GetSemanticModel(tree);
+                if (model.GetOperation(initializer, cancellationToken) is not IFieldInitializerOperation operation)
+                    throw Unsupported(site, "The GA instance field initializer must have a source operation.");
+
+                string name = field.MetadataName;
+                if (IsAggregate(field.Type))
+                {
+                    string prefix = name + ".";
+                    var destination = fields.Where(item => item.Key.StartsWith(prefix, StringComparison.Ordinal))
+                        .ToDictionary(item => item.Key[prefix.Length..], item => item.Value, StringComparer.Ordinal);
+                    stores.Add(StoreAggregate(field.Type, destination, operation.Value));
+                }
+                else if (fields.TryGetValue(name, out var slot))
+                {
+                    stores.Add(new GaStore(slot, LowerValue(operation.Value)));
+                }
+                else
+                {
+                    throw Unsupported(operation, "Initialize only explicit portable instance fields.");
+                }
+                sourceText.Append(GaCompilerText.NormalizeLineEndings(syntax.ToFullString())).Append('\n');
+            }
+        }
+        if (stores.Count != 0)
+            _externalHelperSources.Add(type.OriginalDefinition.GetDocumentationCommentId() + "\n" + sourceText);
+        return new GaBlock(stores);
     }
 
     private (IMethodSymbol Method, IOperation? Receiver, IOperation[] Arguments, int[]? Ordinals)? AggregateMember(IOperation operation)
@@ -280,7 +343,7 @@ internal sealed partial class GaLowerer
     private GaValue LowerAggregateHelperBody(IOperation site, IMethodSymbol definition, SyntaxNode declaration,
         IReadOnlyList<IOperation> operations, IOperation? expression, HelperFrame frame,
         List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)> bindings, ITypeSymbol? returnType = null,
-        Dictionary<string, GaSlot>? result = null)
+        Dictionary<string, GaSlot>? result = null, Func<GaBlock>? initialize = null)
     {
         if (!_activeHelpers.Add(definition))
             throw Unsupported(site, "Recursive GA helpers and value members are not supported.");
@@ -301,7 +364,10 @@ internal sealed partial class GaLowerer
         _helperLoopBaseDepth = _loopCounters.Count;
         try
         {
+            var initialization = initialize?.Invoke();
             GaStatement body = expression == null ? LowerBlock(operations) : StoreAggregate(returnType!, result!, expression);
+            if (initialization is { Statements.Count: > 0 })
+                body = new GaBlock([initialization, body]);
             GaValue effect = new GaBlockValue(body, new GaConstant(GaScalar.Bool, 0, Source(site)), Source(site));
             foreach (var local in frame.Locals.Values.Reverse())
                 effect = new GaBoundValue(local, new GaConstant(local.Type, 0, Source(site)), effect, Source(site));

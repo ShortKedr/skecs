@@ -183,8 +183,8 @@ public static partial class GaSemanticAnalysis
                 CheckType(parameter.Type, Source(parameter), allowContext: true);
             if (HasUnsafeModifier(declaration!))
                 Report(Managed, declaration!.GetLocation(), "Remove unsafe code from the GA call graph.");
-            if (declaration is ConstructorDeclarationSyntax constructor && HasHiddenConstruction(constructor, definition.ContainingType))
-                Report(Unknown, constructor.GetLocation(), "Use explicit value assignments in a GA constructor instead of constructor chaining or field initializers.");
+            if (declaration is ConstructorDeclarationSyntax constructor)
+                VisitConstructorInitialization(constructor, definition.ContainingType);
             Visit(body);
 
             for (int i = substitutions.Count - 1; i >= 0; i--)
@@ -254,10 +254,58 @@ public static partial class GaSemanticAnalysis
             _ => false
         };
 
-        private bool HasHiddenConstruction(ConstructorDeclarationSyntax constructor, INamedTypeSymbol type) =>
-            constructor.Initializer != null || type.GetMembers().OfType<IFieldSymbol>().Any(field => !field.IsStatic &&
-                field.DeclaringSyntaxReferences.Any(reference =>
-                    reference.GetSyntax(cancellationToken) is VariableDeclaratorSyntax { Initializer: not null }));
+        private void VisitConstructorInitialization(ConstructorDeclarationSyntax constructor, INamedTypeSymbol type)
+        {
+            if (constructor.Initializer is { } delegation)
+            {
+                var model = compilation.GetSemanticModel(constructor.SyntaxTree);
+                var initializerOperation = model.GetOperation(delegation, cancellationToken) ??
+                    (model.GetOperation(constructor, cancellationToken) as IConstructorBodyOperation)?.Initializer;
+                var call = initializerOperation as IInvocationOperation ??
+                    (initializerOperation as IExpressionStatementOperation)?.Operation as IInvocationOperation;
+                if (!delegation.IsKind(SyntaxKind.ThisConstructorInitializer) || call == null ||
+                    !Equal(call.TargetMethod.ContainingType.OriginalDefinition, type))
+                {
+                    Report(Unknown, delegation.GetLocation(), "Use a source-defined this(...) constructor on the same value type.");
+                    return;
+                }
+
+                CheckValueConstructorArguments(call.TargetMethod, call.Arguments, delegation.GetLocation());
+                foreach (var argument in call.Arguments.OrderBy(argument => argument.Syntax.SpanStart))
+                    Visit(argument);
+                if (!call.TargetMethod.IsImplicitlyDeclared)
+                {
+                    VisitMethod(call.TargetMethod, delegation.GetLocation());
+                    return;
+                }
+            }
+
+            var initializers = type.GetMembers().OfType<IFieldSymbol>().Where(field => !field.IsStatic)
+                .SelectMany(field => field.DeclaringSyntaxReferences)
+                .Select(reference => (reference.GetSyntax(cancellationToken) as VariableDeclaratorSyntax)?.Initializer)
+                .OfType<EqualsValueClauseSyntax>().ToArray();
+            if (initializers.Length == 0)
+                return;
+
+            var treeOrder = compilation.SyntaxTrees.Select((tree, index) => (tree, index))
+                .ToDictionary(item => item.tree, item => item.index);
+            foreach (var initializer in initializers.OrderBy(initializer => treeOrder[initializer.SyntaxTree])
+                .ThenBy(initializer => initializer.SpanStart))
+            {
+                var model = compilation.GetSemanticModel(initializer.SyntaxTree);
+                if (model.GetOperation(initializer, cancellationToken) is IFieldInitializerOperation fieldInitializer)
+                    Visit(fieldInitializer.Value);
+                else
+                    Report(Unknown, initializer.GetLocation(), "Use a source-defined instance field initializer.");
+            }
+        }
+
+        private void CheckValueConstructorArguments(IMethodSymbol constructor, ImmutableArray<IArgumentOperation> arguments, Location location)
+        {
+            if (constructor.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsParams) ||
+                arguments.Any(argument => argument.ArgumentKind != ArgumentKind.Explicit))
+                Report(Unknown, location, "Use explicit by-value arguments for a GA value constructor.");
+        }
 
         private void Report(DiagnosticDescriptor descriptor, Location location, string reason)
         {

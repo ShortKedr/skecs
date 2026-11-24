@@ -316,7 +316,7 @@ public sealed class GaSystemAnalyzerTests
     }
 
     [Fact]
-    public async Task RejectsConstructorWithHiddenInitialization()
+    public async Task RejectsForbiddenOperationInConstructorFieldInitializer()
     {
         const string source = """
             struct Cell
@@ -331,8 +331,86 @@ public sealed class GaSystemAnalyzerTests
             }
             """;
 
-        Assert.Contains(await Analyze(source), diagnostic => diagnostic.Id == "GA0004" &&
-            diagnostic.GetMessage().Contains("field initializers"));
+        var diagnostic = Assert.Single(await Analyze(source));
+        Assert.Equal("GA0003", diagnostic.Id);
+        Assert.Equal("System.Environment.TickCount", Text(diagnostic));
+        Assert.Contains("Motion.Execute -> Cell..ctor", diagnostic.GetMessage());
+    }
+
+    [Fact]
+    public async Task AnalyzesConstructorDelegatingArgumentsAndSelectedOverload()
+    {
+        const string source = """
+            struct Cell
+            {
+                public int Value;
+                public Cell(int left, int right) : this(arg: left + System.Environment.TickCount) { }
+                private Cell(int arg) { Value = arg + System.Environment.ProcessorCount; }
+            }
+            [SKECS.GA.SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(ref Cell cell) => cell = new Cell(0, 0);
+            }
+            """;
+        var diagnostics = await Analyze(source);
+        Assert.Collection(diagnostics,
+            argument =>
+            {
+                Assert.Equal("GA0003", argument.Id);
+                Assert.Equal("System.Environment.TickCount", Text(argument));
+                Assert.Contains("Motion.Execute -> Cell..ctor", argument.GetMessage());
+            },
+            body =>
+            {
+                Assert.Equal("GA0003", body.Id);
+                Assert.Equal("System.Environment.ProcessorCount", Text(body));
+                Assert.Contains("Motion.Execute -> Cell..ctor -> Cell..ctor", body.GetMessage());
+            });
+    }
+
+    [Fact]
+    public async Task AcceptsPortableGenericConstructorChainWithInstanceInitializers()
+    {
+        const string source = """
+            struct Cell<T> where T : unmanaged
+            {
+                public int Number = Initial();
+                public T Value = default;
+
+                public Cell(T value) : this(value, 0) { }
+                private Cell(T value, int extra) : this() { Value = value; Number += extra; }
+                private static int Initial() => 42;
+            }
+            [SKECS.GA.SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(ref Cell<int> cell) => cell = new Cell<int>(7);
+            }
+            """;
+        Assert.Empty(await Analyze(source));
+    }
+
+    [Fact]
+    public async Task AnalyzesFieldInitializerOnlyWhenImplicitDefaultIsUsedByConstructorInitializer()
+    {
+        const string source = """
+            struct Cell
+            {
+                public int Value = System.Environment.TickCount;
+                public Cell(int value) : this() { Value = value; }
+            }
+            [SKECS.GA.SecsSystem]
+            partial struct Motion
+            {
+                public void Execute(ref Cell cell) => cell = new Cell();
+            }
+            """;
+        Assert.Empty(await Analyze(source));
+        Assert.Empty(await Analyze(source.Replace("new Cell()", "default")));
+        var diagnostic = Assert.Single(await Analyze(source.Replace("new Cell()", "new Cell(7)")));
+        Assert.Equal("GA0003", diagnostic.Id);
+        Assert.Equal("System.Environment.TickCount", Text(diagnostic));
     }
 
     [Fact]
