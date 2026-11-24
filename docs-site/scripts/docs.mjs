@@ -3,6 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { basename, dirname, join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createMarkdownRenderer } from 'vitepress'
+import { validateRegistry, workingGuideVersion } from './releases.mjs'
+import { prepareModule, componentRoute, guideLinks, guideRoutes } from './modules.mjs'
 
 const site = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const root = resolve(site, '..')
@@ -41,17 +43,14 @@ function write(path, text) {
 }
 
 const registry = JSON.parse(readFileSync(join(site, 'releases.json'), 'utf8'))
-const versions = new Set()
-for (const release of registry.releases) {
-  if (!/^\d+\.\d+\.\d+$/.test(release.version) || versions.has(release.version)) throw new Error('Expected unique stable release versions')
-  if (!/^[a-f0-9]{40}$/.test(release.sourceCommit) || !/^[a-f0-9]{64}$/.test(release.packageSha256)) throw new Error('Pin each release commit and package checksum')
-  if (release.docsCommit && !/^[a-f0-9]{40}$/.test(release.docsCommit)) throw new Error('Documentation corrections require a pinned commit')
-  if (release.migrationFrom && !['migration', 'release-notes'].every(route => release.guides.some(guide => guide.route === route))) {
-    throw new Error(`Release ${release.version} requires migration and release-notes articles`)
-  }
-  versions.add(release.version)
+validateRegistry(registry)
+const draftVersion = workingGuideVersion(process.argv.slice(3), registry)
+delete process.env.SKECS_DOCS_DRAFT_VERSION
+if (draftVersion) {
+  if (process.env.CI) throw new Error('Working guides are available only for local verification')
+  process.env.SKECS_DOCS_DRAFT_VERSION = draftVersion
 }
-if (!versions.has(registry.defaultVersion)) throw new Error('Default version is not an available release')
+const outputRoot = draftVersion ? join(site, '.vitepress/cache/draft', draftVersion) : join(site, '.vitepress')
 
 function source(release, path, revision = release.sourceCommit) {
   const result = spawnSync('git', ['show', `${revision}:${path}`], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
@@ -59,8 +58,39 @@ function source(release, path, revision = release.sourceCommit) {
   return result.stdout.replace(/\r\n/g, '\n')
 }
 
-const releaseCache = release => join(site, '.vitepress/cache/releases', release.version)
+const releaseCache = release => join(outputRoot, 'cache/releases', release.version)
 const pageRoot = release => join(releaseCache(release), 'pages')
+
+function guideSource(release, component, path) {
+  if (release.version === draftVersion) return readFileSync(join(root, path), 'utf8').replace(/\r\n/g, '\n')
+  return source(component, path, component.docsCommit ?? component.sourceCommit)
+}
+
+function runCoreExample(directory, release, assembly, sourceText) {
+  const project = join(directory, 'Example.csproj')
+  const hintPath = assembly.replaceAll('&', '&amp;').replaceAll('<', '&lt;')
+  write(join(directory, 'Program.cs'), sourceText)
+  write(project, `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><AllowUnsafeBlocks>true</AllowUnsafeBlocks><NuGetAudit>false</NuGetAudit></PropertyGroup><ItemGroup><Reference Include="${release.product}"><HintPath>${hintPath}</HintPath></Reference></ItemGroup></Project>`)
+  return run('dotnet', ['run', '--project', project, '-c', 'Release'], true)
+}
+
+function verifyGuideExamples(text, sourceFile, checkedExamples, release, assembly) {
+  const markers = [...text.matchAll(/^<!-- docs-example(?:: ([^\n]+?))? -->[ \t]*\n/gm)]
+  for (const marker of markers) {
+    const block = text.slice(marker.index + marker[0].length).match(/^\n*```csharp[ \t]*\n([\s\S]*?)^```[ \t]*$/m)
+    if (!block || block.index !== 0) throw new Error(`Missing C# example marked for verification in ${sourceFile}`)
+    const expected = marker[1]
+    const snippet = JSON.stringify([block[1], expected])
+    if (checkedExamples.has(snippet)) continue
+    const directory = join(releaseCache(release), 'guide-examples', String(checkedExamples.size))
+    console.log(`Verifying ${release.version} guide example from ${sourceFile}.`)
+    const output = runCoreExample(directory, release, assembly, block[1])
+    if (expected && !output.split(/\r?\n/).includes(expected)) {
+      throw new Error(`Guide example from ${sourceFile} did not produce the documented output: ${expected}`)
+    }
+    checkedExamples.add(snippet)
+  }
+}
 
 async function prepareGuides(release, assembly) {
   const markdown = await createMarkdownRenderer(site, { headers: true })
@@ -71,13 +101,11 @@ async function prepareGuides(release, assembly) {
   const repository = {
     ...release,
     targets: project.match(/<TargetFrameworks>([^<]+)<\/TargetFrameworks>/)[1].split(';'),
-    guides: {}, pages: {}, api: []
+    guides: {}, pages: {}, api: [], modules: []
   }
   const sampleDirectory = join(releaseCache(release), 'sample')
   const sampleSource = source(release, release.sample)
-  write(join(sampleDirectory, 'Program.cs'), sampleSource)
-  write(join(sampleDirectory, 'Sample.csproj'), `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup><ItemGroup><Reference Include="${release.product}"><HintPath>${assembly.replaceAll('&', '&amp;')}</HintPath></Reference></ItemGroup></Project>`)
-  const sampleOutput = run('dotnet', ['run', '--project', join(sampleDirectory, 'Sample.csproj'), '-c', 'Release'], true)
+  const sampleOutput = runCoreExample(sampleDirectory, release, assembly, sampleSource)
   if (!sampleOutput.includes('Tick 5: (15, 5)') || !sampleOutput.includes('Matching archetypes: 1')) {
     throw new Error('The repository sample did not produce the documented result')
   }
@@ -87,15 +115,16 @@ async function prepareGuides(release, assembly) {
     output: sampleOutput.split(/\r?\n/).filter(line => /^(Tick |Matching archetypes:)/.test(line)).join('\n'),
     position: [...sampleOutput.matchAll(/Tick \d+: \(([^)]+)\)/g)].at(-1)[1]
   }
+  const checkedExamples = new Set()
   for (const lang of ['', 'ru/']) {
     const suffix = lang ? '.ru.md' : '.md'
     const guides = []
     const base = `/${release.version}/${lang}`
-    const routes = new Map(release.guides.map(({ source, route }) => [source + suffix, `${base}guide/${route}`]))
+    const routes = guideRoutes(release, lang)
     for (const { source: sourcePath, route } of release.guides) {
       const sourceFile = sourcePath + suffix
-      let text = source(release, sourceFile, release.docsCommit ?? release.sourceCommit).replace(/^\uFEFF/, '').split('\n').slice(1).join('\n').trim()
-      if (route === 'installation') {
+      let text = guideSource(release, release, sourceFile).replace(/^\uFEFF/, '').split('\n').slice(1).join('\n').trim()
+      if (route === 'installation' && release.version === '0.1.0') {
         // The original 0.1.0 tag still describes its pre-publication candidate.
         // Correct publication status without copying a historical manual tree.
         let introduction = lang
@@ -114,15 +143,8 @@ async function prepareGuides(release, assembly) {
         text = text.replace('Use the locally built ', 'Use the released ').replace('Используйте локально собранный ', 'Используйте релизный ')
           .replace(/^## Godot(?: \(C#\)| C#)$/gm, '## Godot .NET (C#)')
       }
-      text = text.replace(/(!?\[[^\]]*\]\()([^\s)]+)(\))/g, (match, start, href, end) => {
-        if (/^(https?:|mailto:|#)/.test(href)) return match
-        const [path, anchor] = href.split('#')
-        const target = posix.normalize(posix.join(posix.dirname(sourceFile), decodeURIComponent(path)))
-        const route = routes.get(target)
-        const revision = /\.(cs|csproj|sln)$/.test(target) ? release.sourceCommit : (release.docsCommit ?? release.sourceCommit)
-        const url = route ?? `https://github.com/ShortKedr/skecs/blob/${revision}/${target}`
-        return `${start}${url}${anchor ? '#' + anchor : ''}${end}`
-      })
+      verifyGuideExamples(text, sourceFile, checkedExamples, release, assembly)
+      text = guideLinks(text, sourceFile, release, routes)
       write(join(pageRoot(release), lang, 'guide', route + '.md'), `---\neditLink: false\n---\n\n${text.replaceAll(`](/${release.version}/`, '](/')}\n`)
       const environment = { path: sourceFile, relativePath: sourceFile }
       markdown.render(text, environment)
@@ -185,18 +207,21 @@ function forVitePress(markdown, targets) {
   return lines.join('\n')
 }
 
-function generateApi(release, assembly, repository, hasComments) {
-  const raw = join(releaseCache(release), 'api')
+function generateApi(release, component, assembly, repository, hasComments) {
+  const prefix = componentRoute(component)
+  const cache = join(releaseCache(release), prefix)
+  const raw = join(cache, 'api')
   // This fixed build-output directory is owned entirely by this script.
   if (existsSync(raw)) rmSync(raw, { recursive: true })
   const config = JSON.parse(readFileSync(join(site, 'docfx.json'), 'utf8'))
   config.metadata[0].src = [{ src: dirname(assembly), files: [basename(assembly)] }]
   config.metadata[0].output = raw
-  const configPath = join(releaseCache(release), 'docfx.json')
+  config.metadata[0].properties.TargetFramework = component.assemblyTarget ?? 'net8.0'
+  const configPath = join(cache, 'docfx.json')
   write(configPath, JSON.stringify(config, null, 2))
   run('dotnet', ['tool', 'run', 'docfx', '--', 'metadata', configPath, '--warningsAsErrors'])
   const pages = readdirSync(raw).filter(name => name.endsWith('.md')).sort()
-  if (!pages.includes(`${release.product}.World.md`) || !pages.includes(`${release.product}.Query-2.md`)) {
+  if (!pages.length || (!prefix && (!pages.includes(`${release.product}.World.md`) || !pages.includes(`${release.product}.Query-2.md`)))) {
     throw new Error('DocFX did not generate the expected release API')
   }
   const targets = new Map()
@@ -205,28 +230,28 @@ function generateApi(release, assembly, repository, hasComments) {
       targets.set(match[1], `${name}#${match[1]}`)
     }
   }
-  const sidebar = pages.filter(name => name !== release.product + '.md').map(name => {
+  const sidebar = pages.filter(name => prefix || name !== component.product + '.md').map(name => {
     const md = readFileSync(join(raw, name), 'utf8')
     const title = md.match(/^# (?:<a[^>]*><\/a> )?(?:Class|Struct|Interface|Enum) (.+)$/m)?.[1]
-    return { text: (title ?? name.slice(0, -3)).replaceAll('\\', ''), link: '/api/' + name.slice(0, -3) }
+    return { text: (title ?? name.slice(0, -3)).replaceAll('\\', ''), link: '/' + prefix + 'api/' + name.slice(0, -3) }
   })
   for (const lang of ['', 'ru/']) {
-    const directory = join(pageRoot(release), lang, 'api')
+    const directory = join(pageRoot(release), lang, prefix, 'api')
     if (existsSync(directory)) rmSync(directory, { recursive: true })
     mkdirSync(directory, { recursive: true })
     for (const name of pages) {
       write(join(directory, name), '---\neditLink: false\noutline: [2, 3]\n---\n\n' + forVitePress(readFileSync(join(raw, name), 'utf8'), targets))
-      repository.pages[lang + 'api/' + name.slice(0, -3)] = [...readFileSync(join(raw, name), 'utf8').matchAll(/<a id="([^"]+)"><\/a>/g)].map(match => match[1])
+      repository.pages[lang + prefix + 'api/' + name.slice(0, -3)] = [...readFileSync(join(raw, name), 'utf8').matchAll(/<a id="([^"]+)"><\/a>/g)].map(match => match[1])
     }
     const title = lang ? 'Справочник API' : 'API reference'
     const note = lang
-      ? `Публичные типы и сигнатуры получены DocFX из \`${release.product}.dll\` (.NET 8) проверенного пакета \`${release.packageId}\` версии **${release.version}**. ${hasComments ? 'XML-комментарии из пакета сохранены на исходном языке.' : 'В пакете отсутствуют XML-комментарии, поэтому справочник содержит сигнатуры.'} API текущей ветки здесь не используется.`
-      : `Public types and signatures are generated by DocFX from the .NET 8 \`${release.product}.dll\` in verified package \`${release.packageId}\` **${release.version}**. ${hasComments ? 'Packaged XML comments are included in their original language.' : 'The package has no XML comments, so this reference contains signatures.'} It does not use the current branch API.`
-    write(join(directory, 'index.md'), `# ${title}\n\n${note}\n\n` + sidebar.map(item => `- [\`${item.text}\`](${item.link.replace('/api/', `/${lang}api/`)})`).join('\n') + '\n')
-    repository.pages[lang + 'api/'] = []
+      ? `Публичные типы и сигнатуры получены DocFX из \`${component.product}.dll\` (\`${component.assemblyTarget ?? 'net8.0'}\`) проверенного пакета \`${component.packageId}\` версии **${component.version}**. ${hasComments ? 'XML-комментарии из пакета сохранены на исходном языке.' : 'В пакете отсутствуют XML-комментарии, поэтому справочник содержит сигнатуры.'}`
+      : `Public types and signatures are generated by DocFX from \`${component.product}.dll\` (\`${component.assemblyTarget ?? 'net8.0'}\`) in verified package \`${component.packageId}\` **${component.version}**. ${hasComments ? 'Packaged XML comments are included in their original language.' : 'The package has no XML comments, so this reference contains signatures.'}`
+    write(join(directory, 'index.md'), `# ${title}\n\n${note}\n\n` + sidebar.map(item => `- [\`${item.text}\`](/${lang}${item.link.slice(1)})`).join('\n') + '\n')
+    repository.pages[lang + prefix + 'api/'] = []
   }
-  repository.api = sidebar
-  console.log(`Generated ${pages.length} API pages in each locale from release ${release.version}'s package.`)
+  component.api = sidebar
+  console.log(`Generated ${pages.length} API pages in each locale from ${component.packageId} ${component.version}.`)
 }
 
 const command = process.argv[2] ?? 'build'
@@ -235,12 +260,20 @@ if (command !== 'preview') {
   run('dotnet', ['tool', 'restore'])
   const repositories = []
   for (const release of registry.releases) {
-    const result = run('python', [join(site, 'scripts/package.py'), JSON.stringify(release)], true)
-    const { assembly, hasComments } = JSON.parse(result.trim().split(/\r?\n/).at(-1))
+    const packages = new Map([release, ...(release.modules ?? [])].map(component => {
+      const result = run('python', [join(site, 'scripts/package.py'), JSON.stringify(component)], true)
+      return [component.packageId, JSON.parse(result.trim().split(/\r?\n/).at(-1))]
+    }))
+    const { assembly, hasComments } = packages.get(release.packageId)
     const pages = pageRoot(release)
     if (existsSync(pages)) rmSync(pages, { recursive: true })
     const repository = await prepareGuides(release, assembly)
-    generateApi(release, assembly, repository, hasComments)
+    generateApi(release, repository, assembly, repository, hasComments)
+    for (const module of release.modules ?? []) {
+      const details = await prepareModule(release, repository, module, packages, { site, source, guideSource, write, run, releaseCache, pageRoot })
+      const artifact = packages.get(module.packageId)
+      generateApi(release, details, artifact.assembly, repository, artifact.hasComments)
+    }
     repositories.push(repository)
   }
   const releases = repositories.map(({ version, product, packageId, pages }) => ({ version, product, packageId, pages }))
@@ -251,10 +284,10 @@ if (command !== 'preview') {
 if (command === 'preview') {
   // VitePress 1's preview ignores --host; Vite's preview honors loopback binding.
   run(process.execPath, [join(site, 'node_modules/vite/bin/vite.js'), 'preview',
-    '--outDir', '.vitepress/dist', '--base', docsBase, '--host', '127.0.0.1', '--port', '4187', '--strictPort'])
+    '--outDir', join(outputRoot, 'dist'), '--base', docsBase, '--host', '127.0.0.1', '--port', '4187', '--strictPort'])
 } else if (command !== 'api') {
   if (command === 'build') {
-    const dist = join(site, '.vitepress/dist')
+    const dist = join(outputRoot, 'dist')
     if (existsSync(dist)) rmSync(dist, { recursive: true })
     for (const release of registry.releases) {
       process.env.SKECS_DOCS_VERSION = release.version
@@ -271,7 +304,7 @@ if (command === 'preview') {
       if (!lang) write(join(dist, '404.html'), html.replace(/<script>.*?<\/script>/, ''))
     }
   } else {
-    process.env.SKECS_DOCS_VERSION = registry.defaultVersion
+    process.env.SKECS_DOCS_VERSION = draftVersion ?? registry.defaultVersion
     run(process.execPath, [join(site, 'node_modules/vitepress/bin/vitepress.js'), 'dev', '--host', '127.0.0.1', '--port', '4187', '--strictPort'])
   }
 }

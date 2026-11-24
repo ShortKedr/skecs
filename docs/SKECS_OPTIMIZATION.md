@@ -1,10 +1,11 @@
 English | [Русский](SKECS_OPTIMIZATION.ru.md)
 
-# SKECS Runtime Optimizations
+# SKECS 0.2.0 Runtime Optimizations
 
 [Library guide](skecs/README.md) · [Documentation map](README.md) · [Current ECS campaign](benchmarks/current/REPORT.md) · [Current API and storage measurements](benchmarks/current/SUPPLEMENT.md)
 
-Status: implemented in the current [CPU runtime](../SKECS/World.cs). This guide describes APIs and their costs. Measured speedups belong to the linked benchmark reports.
+This guide describes the 0.2.0 [CPU runtime](../SKECS/World.cs) and the costs of
+its storage APIs. The benchmark reports list the measured revisions and workloads.
 
 ## Existing API
 
@@ -30,10 +31,13 @@ if (positions.TryGet(entity, out var copy)) { /* use the value copy */ }
 ```
 
 The accessor caches component addresses and entity generations. Creation,
-migration, swap-removal, and destruction maintain its table; disposing the world
-invalidates it. Repeated requests for the same component share one table. `Has`
-and `TryGet` reject dead generations and missing components; `Get` throws for
-those cases even in Release.
+migration, swap-removal, and destruction maintain its table. Repeated requests for
+the same component share one table in that world. Give it a bound `Entity` from
+its world. `Has` and `TryGet` return `false` for foreign, unbound, or stale handles
+and for a missing component. `Get` throws `InvalidOperationException` in these
+cases in both Debug and Release. After the world is disposed, an existing
+accessor's `Has` and `TryGet` return `false`, and `Get` throws
+`InvalidOperationException`.
 
 This is opt-in: ordinary queries and `World.Get<T>` do not allocate address
 tables. On a 64-bit runtime, each cached component costs 12 bytes per allocated
@@ -43,10 +47,10 @@ Structural operations update each registered accessor, so register only the
 components needing frequent random access. Accessor construction scans existing
 entity records and must not be mistaken for a free operation.
 
-An `Entity` contains only ID and generation, not world identity. Pass handles
-from the owning world only: equal IDs/generations in different worlds can alias.
-Neither worlds nor accessors are thread-safe. A returned `ref` must not outlive
-a structural change or world disposal; cache the accessor, not component refs.
+Handles from different worlds compare unequal even if ID and generation match.
+Use the world and its accessor from one thread at a time. Cache the accessor and
+reacquire component refs after structural changes. Disposal ends the lifetime of
+every returned ref. See [entity ownership and liveness](skecs/README.md#entities-and-components).
 
 ## Direct Creation
 

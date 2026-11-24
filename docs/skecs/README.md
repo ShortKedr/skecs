@@ -1,22 +1,32 @@
 English | [Русский](README.ru.md)
 
-# Using SKECS
+# Using SKECS 0.2.0
 
 [Project overview](../../README.md) · [Documentation map](../README.md)
 
-SKECS builds for .NET Standard 2.0/2.1 and .NET 8. Components must satisfy C# `unmanaged`; systems and queries
-execute sequentially. Add a reference to [SKECS.csproj](../../SKECS/SKECS.csproj)
-and use the `SKECS` namespace. The [sample](../../SKECS.Sample/Program.cs) is a
-complete application showing systems and typed chunk iteration.
+Install [`ShortKedr.SKECS` 0.2.0](INSTALL.md) and use the `SKECS` namespace. The
+[sample source](../../SKECS.Sample/Program.cs) shows systems and typed chunk iteration.
+If you use SECS 0.1.0, follow the [migration guide](MIGRATION.md) before changing
+the package and namespace.
 
-The current package target is `ShortKedr.SKECS` 0.2.0 Branch. Upgrading from
-SECS 0.1.0 requires a package and namespace change; see the
-[installation and migration guide](INSTALL.md).
+## What 0.2.0 includes
 
-`new World()` uses a chunk capacity of 256 with diagnostics disabled. Configure it with `new World(new WorldOptions(chunkCapacity: 128, diagnosticsEnabled: true))`. Nonpositive capacities fall back to 256. Component type IDs are assigned locally to each world in first-access order; they are not stable serialization identifiers.
+The released package contains worlds and entities, archetype storage, sequential
+CPU systems and queries, typed chunk access, batch creation, component accessors,
+and storage counters. Components must satisfy the C# `unmanaged` constraint.
+The package provides .NET Standard 2.0, .NET Standard 2.1, and .NET 8 assets.
+See the [release notes](RELEASE_NOTES_0.2.0.md#verified-runtimes) for the consumer
+runtimes verified with these artifacts.
+
+`new World()` uses a chunk capacity of 256 with diagnostics disabled. To change
+those settings, use `new World(new WorldOptions(chunkCapacity: 128, diagnosticsEnabled: true))`.
+Nonpositive capacities fall back to 256. Component type IDs are assigned in
+first-access order within each world. For a persistent format, define stable
+component identifiers separately.
 
 ## A minimal query
 
+<!-- docs-example: Position: (3, 1) -->
 ```csharp
 using SKECS;
 
@@ -42,8 +52,9 @@ struct Movement : IQueryProcessor<Position, Velocity>
 ```
 
 The processor is a struct passed by reference. Queries with one, two, or three
-component types visit all entities containing those types; extra components do
-not exclude an entity. Changes through the component `ref` update stored values.
+component types visit all entities containing those types, including entities
+with additional components. Changes through the component `ref` update stored
+values. This example prints `Position: (3, 1)`.
 
 ## Entities and components
 
@@ -54,24 +65,67 @@ not exclude an entity. Changes through the component `ref` update stored values.
 | `Add(entity, component)` | Add a missing component; an existing value is left unchanged. |
 | `Set(entity, component)` | Replace a value, or add the component when absent. |
 | `Get<T>(entity)` | Access an existing component by `ref`. |
-| `TryGet<T>(entity, out value)` | Get a value copy; returns false for a stale handle or absent component. |
+| `TryGet<T>(entity, out value)` | Get a value copy or return `false` if the handle is invalid or the component is absent. |
 | `Has<T>(entity)` / `Remove<T>(entity)` | Check membership or remove a component from a live entity. |
-| `IsAlive(entity)` | Check the ID and generation. |
+| `IsAlive(entity)` | Check ownership, ID, generation, and whether the entity is alive. |
+| `BindEntity(id, version)` | Bind coordinates to this world before checking liveness. |
 
-An `Entity` holds an ID and generation, without world identity. Use it only with
-its owning world. Destroyed IDs may be reused with a new generation. Do not
-rely on invalid-handle exceptions from ordinary World operations: some checks
-are Debug-only and require `DiagnosticsEnabled`.
+Keep the bound `Entity` returned by the world or a query. Equality and hashing
+include the owning world, so handles from different worlds compare unequal even
+when their IDs and generations match. Destroyed IDs may be reused with a new
+generation.
+
+To reconstruct a handle from chunk IDs and generations, call
+`world.BindEntity(id, version)` on the world that supplied them, then call
+`world.IsAlive(entity)` before using it. The two-argument `Entity` constructor
+creates an unbound value. `Entity.IsValid` checks that the handle is bound and
+has a valid shape. It can remain `true` after entity destruction or world
+disposal. Use `World.IsAlive` to check liveness.
+
+On a live world, `World.IsAlive` and `World.TryGet` return `false` for a foreign,
+unbound, or stale handle. Strict operations such as `World.Has`, `World.Get`,
+and `World.DestroyEntity` throw `InvalidOperationException` for those handles in
+both Debug and Release. The [accessor guide](../SKECS_OPTIMIZATION.md#cached-random-access)
+describes the corresponding accessor behavior.
 
 Creation, destruction, and changes to component membership take effect
 immediately. Perform them between query iterations. Queries traverse live
 storage, so structural mutation inside a processor has no safe deferred-command
 or snapshot contract.
 
-A component `ref` or chunk pointer must not survive a structural change or
-world disposal. Cache handles and queries instead of component references.
-Worlds, queries, factories, and accessors are bound to the owning world;
-concurrent use of a World is unsupported. Dispose it to release native buffers.
+A structural change or world disposal invalidates component refs and chunk
+pointers. Cache handles and queries, and reacquire refs when needed. Use a world
+and its queries, factories, and accessors from one thread at a time.
+
+Dispose the world after queries return to release its native buffers. A call to
+`Dispose` inside `Query.ForEach` throws `InvalidOperationException`. After
+disposal, operations requiring a live world, including `World.IsAlive` and
+`World.TryGet`, throw `ObjectDisposedException`. Repeated `Dispose` is safe.
+
+Run this example to verify handle ownership and liveness across two worlds.
+
+<!-- docs-example: Handle lifetime verified. -->
+```csharp
+using SKECS;
+
+using var world = new World();
+using var other = new World();
+var entity = world.CreateEntity(12);
+var foreign = other.CreateEntity(16);
+var rebound = world.BindEntity(entity.Id, entity.Version);
+var accessor = world.GetAccessor<int>();
+
+if (entity == foreign || world.IsAlive(foreign) || accessor.Has(foreign))
+    throw new InvalidOperationException("A foreign handle was accepted.");
+if (rebound != entity || !world.IsAlive(rebound) || accessor.Get(rebound) != 12)
+    throw new InvalidOperationException("The rebound handle should be live.");
+
+world.DestroyEntity(entity);
+if (!rebound.IsValid || world.IsAlive(rebound) || accessor.TryGet(rebound, out _))
+    throw new InvalidOperationException("A destroyed entity should be absent.");
+
+Console.WriteLine("Handle lifetime verified.");
+```
 
 ## Systems and queries
 
@@ -80,7 +134,7 @@ that stage in registration order; `RunAll()` executes `PreUpdate`, `Update`, and
 `PostUpdate` in that order. The host supplies its own tick loop and time inputs.
 
 `QueryBuilder().With<T>().Without<U>().Build()` creates an include/exclude
-filter. Its `MatchCount` counts matching archetypes, not entities. Typed queries
+filter. Its `MatchCount` counts matching archetypes. Typed queries
 expose `Chunks()` with component pointers and `Count`; access requires an
 `unsafe` context. Iterate rows below `Count`, as in the sample. Component types
 have separate columns, but fields inside a component struct retain their layout.

@@ -7,7 +7,7 @@
     "build": "node scripts/docs.mjs build",
     "preview": "node scripts/docs.mjs preview",
     "gen:api": "node scripts/docs.mjs api",
-    "check": "node --test scripts/versions.test.mjs && node scripts/check.mjs"
+    "check": "node --test scripts/versions.test.mjs scripts/releases.test.mjs && node scripts/check.mjs"
   },
   "devDependencies": {
     "vitepress": "1.6.4"

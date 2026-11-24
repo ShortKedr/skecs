@@ -51,7 +51,9 @@ const text = computed(() => ru.value ? {
   memoryLink: 'Правила времени жизни', next: 'После первого примера',
   perf: 'Производительность и память', perfNote: 'Массовое создание, accessors и диагностика хранилища.',
   battle: 'SpaceBattle', battleNote: 'Посмотрите на SKECS в игровом примере с автономными флотами.',
-  current: 'Текущая версия'
+  current: 'Текущая версия',
+  scope: 'Эта документация охватывает выпущенное ядро, включая миры и сущности, запросы и системы, хранение компонентов и диагностику.',
+  modules: 'Дополнительные модули'
 } : {
   eyebrow: 'RELEASE DOCUMENTATION', title: `Get started with ${repository.value.product}.`,
   intro: 'Create entities, describe data with components, and process it with typed queries. A small ECS core for C# and .NET.',
@@ -66,7 +68,9 @@ const text = computed(() => ru.value ? {
   memoryLink: 'Read the lifetime rules', next: 'After your first example',
   perf: 'Performance & memory', perfNote: 'Batch creation, component accessors, and storage diagnostics.',
   battle: 'SpaceBattle', battleNote: 'See SKECS in an autonomous fleet battle example.',
-  current: 'Current version'
+  current: 'Current version',
+  scope: 'This documentation covers the released core, including worlds and entities, queries and systems, component storage, and diagnostics.',
+  modules: 'Optional modules'
 })
 </script>
 
@@ -76,6 +80,7 @@ const text = computed(() => ru.value ? {
       <div class="docs-kicker"><span>{{ text.eyebrow }}</span><span class="docs-version" :aria-label="text.current">v{{ repository.version }}</span></div>
       <h1>{{ text.title }}</h1>
       <p class="docs-lead">{{ text.intro }}</p>
+      <p v-if="repository.version === '0.2.0'">{{ text.scope }}</p>
       <div class="docs-platforms"><span v-for="target in repository.targets" :key="target">{{ target.replace('netstandard', '.NET Standard ').replace(/^net(\d)/, '.NET $1') }}</span><span class="docs-license">MIT</span></div>
     </header>
 
@@ -93,6 +98,15 @@ const text = computed(() => ru.value ? {
         <strong>{{ text.api }}</strong><span>{{ text.apiNote }}</span><b class="docs-card-arrow" aria-hidden="true">→</b>
       </a>
     </nav>
+
+    <section v-if="repository.modules?.length" aria-labelledby="modules-title">
+      <h2 id="modules-title">{{ text.modules }}</h2>
+      <ul>
+        <li v-for="module in repository.modules" :key="module.id">
+          <a :href="base + '/' + module.route">{{ module.title[ru ? 'ru' : 'en'] }} {{ module.version }}</a>
+        </li>
+      </ul>
+    </section>
 
     <div class="docs-workspace">
       <section class="docs-example" aria-labelledby="example-title">

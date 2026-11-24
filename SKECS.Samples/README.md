@@ -1,3 +1,5 @@
+English | [Русский](README.ru.md)
+
 # SKECS Samples
 
 These examples exercise the modules and tools in this source checkout. Run the commands from the repository root with the .NET 10 SDK and .NET 8 runtime. For the released core quickstart, see the [SKECS 0.2.0 documentation](https://shortkedr.github.io/skecs/0.2.0/).

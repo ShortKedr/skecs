@@ -9,9 +9,16 @@ your project for repeatable restores. To upgrade from SECS 0.1.0, see the
 
 ## .NET applications
 
-Use the released `ShortKedr.SKECS.0.2.0.nupkg` as a NuGet source. For an
-SDK-style project, place the package in a directory such as `packages/` and put
-this `NuGet.Config` beside the project:
+Create a console project with your installed .NET SDK to run the quick check.
+
+```powershell
+dotnet new console -o SkecsQuickstart
+cd SkecsQuickstart
+```
+
+Place the downloaded `ShortKedr.SKECS.0.2.0.nupkg` in `packages/` inside the
+project directory. Save the following configuration as `NuGet.Config` beside
+the project file.
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -32,6 +39,9 @@ The `netstandard2.0` asset used by .NET Framework 4.8 depends on
 in an offline package source.
 
 Run the [consumer checks](../../tools/release-consumers) against the SKECS 0.2.0 package before relying on a target runtime.
+See the [release notes](RELEASE_NOTES_0.2.0.md#verified-runtimes) for the exact
+runtime versions tested with this release and Microsoft's [.NET support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)
+for current support dates.
 
 ## Unity
 
@@ -75,6 +85,7 @@ scene. Godot C# Web and mobile exports require separate validation.
 The same check is used by the consumer fixtures: create an entity, run a query,
 read its changed component, then dispose the world.
 
+<!-- docs-example -->
 ```csharp
 using SKECS;
 
@@ -93,6 +104,10 @@ struct Increment : IQueryProcessor<Position>
     public void Execute(Entity entity, ref Position position) => position.X++;
 }
 ```
+
+For the console quickstart, paste the code into `Program.cs` and run
+`dotnet run -c Release`. The check exits successfully when the query increments
+the position from `2` to `3`.
 
 SKECS components must be unmanaged structs. A `World` is not thread-safe;
 structural changes and world disposal invalidate component references and chunk

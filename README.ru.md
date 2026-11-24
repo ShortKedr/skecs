@@ -19,14 +19,21 @@
 
 | Ваша задача | Куда перейти |
 | --- | --- |
-| Использовать библиотеку | [Документация релизов](https://shortkedr.github.io/skecs/ru/) · [Быстрый старт](#быстрый-старт) · [Установка пакета](docs/skecs/INSTALL.ru.md) · [API и правила времени жизни](docs/skecs/README.ru.md) · [Исходник примера](SKECS.Sample/Program.cs) |
-| Развивать SKECS | [Примеры модулей](SKECS.Samples/README.md) · [Реализованные оптимизации](docs/SKECS_OPTIMIZATION.ru.md) · [Тесты](SKECS.Tests) |
+| Использовать библиотеку | [Документация релизов](https://shortkedr.github.io/skecs/ru/) · [Быстрый старт](#быстрый-старт) · [API и правила времени жизни](https://shortkedr.github.io/skecs/0.2.0/ru/guide/using.html) |
+| Развивать SKECS | [Сборка из исходников](#сборка-из-исходников) · [Примеры модулей](SKECS.Samples/README.ru.md) · [Тесты](SKECS.Tests) |
 | Прочитать или воспроизвести измерения | [Бенчмарки ECS](SKECS.Benchmarks/README.ru.md) · [Бенчмарки SpaceBattle](SpaceBattle.Benchmarks/README.ru.md) · [Отчёт Space Battle](docs/space-battle/REPORT.ru.md) |
 | Запустить игру | [Desktop](SpaceBattle.Game/README.ru.md) · [Web](SpaceBattle.Web/README.ru.md) |
 
 `SKECS.Benchmarks/` объединяет бенчмарки SKECS, сравнение пяти ECS и анализ результатов. `SpaceBattle.Benchmarks/` объединяет замеры и анализ игровой нагрузки. Сырые данные и кеши находятся в игнорируемом `artifacts/`; публикуются итоговые отчёты и графики.
 
 ## Быстрый старт
+
+Установите `ShortKedr.SKECS` 0.2.0 из релиза на GitHub и запустите пример
+библиотеки в консольном приложении .NET. В руководстве по установке также
+описаны Unity и Godot. Среды выполнения, проверенные при выпуске 0.2.0,
+перечислены в примечаниях к релизу. [Установить 0.2.0](https://shortkedr.github.io/skecs/0.2.0/ru/guide/installation.html) · [Запустить пример](https://shortkedr.github.io/skecs/0.2.0/ru/guide/sample.html) · [Проверенные среды](https://shortkedr.github.io/skecs/0.2.0/ru/guide/release-notes.html#проверенные-среды-выполнения)
+
+## Сборка из исходников
 
 Нужен .NET SDK с поддержкой .NET 8. Запускайте из корня репозитория. Эти
 настройки PowerShell сохраняют кеши инструментов и пакетов внутри проекта:
@@ -38,11 +45,6 @@ $env:NUGET_PACKAGES = "$PWD/artifacts/tooling/nuget-packages"
 dotnet run --project SKECS.Sample/SKECS.Sample.csproj -c Release
 dotnet test SKECS.Tests/SKECS.Tests.csproj -c Release
 ```
-
-Для использования SKECS в своём приложении добавьте ссылку на проект
-[SKECS.csproj](SKECS/SKECS.csproj). [Руководство библиотеки](docs/skecs/README.ru.md)
-содержит минимальный пример запроса и объясняет владение сущностями, ссылки
-на компоненты, структурные изменения и обход чанков.
 
 ## Space Battle
 
@@ -61,8 +63,7 @@ Headless-замеры проверяют каждый тик против отд
 
 ## Статус и подтверждения
 
-Сейчас библиотека работает на CPU; системы и запросы выполняются последовательно.
-Текущие unit-тесты и игровые checksum не доказывают равенство между платформами.
+Ядро релиза 0.2.0 работает на CPU с последовательными системами и запросами.
 Результаты бенчмарков относятся к конкретным машинам, версиям и нагрузкам;
 методика и ограничения описаны в каждом отчёте.
 

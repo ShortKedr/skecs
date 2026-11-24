@@ -3,14 +3,26 @@ import { readFileSync } from 'node:fs'
 
 const version = process.env.SKECS_DOCS_VERSION
 if (!version || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Build with scripts/docs.mjs to select a registered release')
-const metadata = JSON.parse(readFileSync(new URL(`./cache/releases/${version}/repository.json`, import.meta.url), 'utf8'))
+const draft = process.env.SKECS_DOCS_DRAFT_VERSION
+if (draft && !/^\d+\.\d+\.\d+$/.test(draft)) throw new Error('Invalid working guide version')
+const outputRoot = draft ? `cache/draft/${draft}/` : ''
+const metadata = JSON.parse(readFileSync(new URL(`./${outputRoot}cache/releases/${version}/repository.json`, import.meta.url), 'utf8'))
 const { release: repository } = metadata
 const api = repository.api
 const docsBase = process.env.SKECS_DOCS_BASE || '/'
 const releaseBase = `${docsBase}${version}/`
 
+type Link = { text: string, link: string }
+type Module = { title: { en: string, ru: string }, version: string, route: string, guides: { en: Link[], ru: Link[] }, api: Link[] }
+
 function locale(ru: boolean) {
   const base = ru ? '/ru' : ''
+  const language = ru ? 'ru' : 'en'
+  const modules: Module[] = repository.modules ?? []
+  const moduleLabel = ru ? 'Модули' : 'Modules'
+  const moduleLinks = modules.map(module => ({
+    text: `${module.title[language]} ${module.version}`, link: `${base}/${module.route}`
+  }))
   const types = api.map((item: { text: string, link: string }) => ({
     text: item.text.replaceAll('<', '&lt;').replaceAll('>', '&gt;'), link: base + item.link
   }))
@@ -34,6 +46,23 @@ function locale(ru: boolean) {
     ] },
     { text: ru ? 'Другие типы API' : 'More API types', collapsed: true, items: types.filter(item => !commonTypes.includes(item)) }
   ]
+  if (moduleLinks.length) sidebar.push({ text: moduleLabel, items: moduleLinks })
+  const moduleSidebars = Object.fromEntries(modules.map((module, index) => [
+    moduleLinks[index].link,
+    [
+      { text: moduleLinks[index].text, items: [
+        { text: ru ? 'Обзор' : 'Overview', link: moduleLinks[index].link },
+        ...module.guides[language].map(item => ({ text: item.text, link: base + item.link })),
+        { text: ru ? 'Рабочий пример' : 'Runnable example', link: moduleLinks[index].link + 'guide/sample' }
+      ] },
+      { text: ru ? 'Справочник API' : 'API reference', items: [
+        { text: ru ? 'Обзор API' : 'API overview', link: moduleLinks[index].link + 'api/' },
+        ...module.api.map(item => ({
+          text: item.text.replaceAll('<', '&lt;').replaceAll('>', '&gt;'), link: base + item.link
+        }))
+      ] }
+    ]
+  ]))
   return {
     label: ru ? 'Русский' : 'English',
     lang: ru ? 'ru-RU' : 'en',
@@ -44,9 +73,10 @@ function locale(ru: boolean) {
       nav: [
         { text: ru ? 'Руководства' : 'Manual', link: `${base}/guide/using` },
         { text: 'API', link: `${base}/api/` },
-        { text: ru ? 'Пример' : 'Sample', link: `${base}/guide/sample` }
+        { text: ru ? 'Пример' : 'Sample', link: `${base}/guide/sample` },
+        ...(moduleLinks.length ? [{ text: moduleLabel, items: moduleLinks }] : [])
       ],
-      sidebar: { [`${base}/`]: sidebar },
+      sidebar: { ...moduleSidebars, [`${base}/`]: sidebar },
       outline: { label: ru ? 'На этой странице' : 'On this page', level: [2, 3] },
       docFooter: { prev: ru ? 'Предыдущая' : 'Previous page', next: ru ? 'Следующая' : 'Next page' },
       sidebarMenuLabel: ru ? 'Разделы' : 'Menu',
@@ -63,11 +93,13 @@ function locale(ru: boolean) {
 export default defineConfig({
   title: `${repository.product} ${version}`,
   base: releaseBase,
-  srcDir: `.vitepress/cache/releases/${version}/pages`,
-  outDir: `.vitepress/dist/${version}`,
-  cacheDir: `.vitepress/cache/vite/${version}`,
+  srcDir: `.vitepress/${outputRoot}cache/releases/${version}/pages`,
+  outDir: `.vitepress/${outputRoot}dist/${version}`,
+  cacheDir: `.vitepress/${outputRoot}cache/vite/${version}`,
   cleanUrls: true,
   appearance: 'dark',
+  // Windows can report EPERM when parallel page renders create the same nested module directory.
+  buildConcurrency: process.platform === 'win32' && repository.modules?.length ? 1 : undefined,
   srcExclude: ['node_modules/**'],
   head: [['link', { rel: 'icon', type: 'image/png', href: `${releaseBase}logo-32.png` }]],
   locales: { root: locale(false), ru: locale(true) },

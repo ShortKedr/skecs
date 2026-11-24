@@ -12,6 +12,8 @@ The maintained tool set serves CI, current benchmark execution and analysis, or 
 | Portable measurement metadata | [BenchmarkMachineInfo.cs](BenchmarkMachineInfo.cs), [BenchmarkMachineLabel.cs](BenchmarkMachineLabel.cs) | Benchmark and game projects |
 | Bilingual documentation checks | [check_docs.py](check_docs.py), [tests](test_check_docs.py) | Library and Pages CI |
 | Package and release verification | [release](release), [consumer fixtures](release-consumers/README.md) | Library/release CI and the release validation harness |
+| Local build, test, and replay operations | [Agentic CLI](Agentic/), [runnable sample](../SKECS.Samples/README.md#prepare-the-agentic-test-operation) | Developers and local automation |
+| ECS replay and execution-mode checks | [Determinism](../SKECS.Determinism/), [ExecutionConformance](../SKECS.ExecutionConformance/) | Replay CI and local conformance runs |
 | Web build and packaging | [build-space-battle-web.ps1](build-space-battle-web.ps1), [web dependencies](web/package.json) | [Pages CI](../.github/workflows/space-battle-pages.yml), cover and scene builds |
 | Browser smoke and iOS diagnostics | [check-web.mjs](web/check-web.mjs), [run-ios-smoke.mjs](web/run-ios-smoke.mjs) | Pages CI |
 | Cover capture and validation | [cover.py](space-battle/cover.py) | [Cover CI](../.github/workflows/space-battle-cover.yml) |
@@ -26,7 +28,7 @@ Mono CI covers the compiler-study, CPU-profile, build-audit and summary modules 
 
 ## Programmatic validation harness
 
-There is no separate repository-owned AI harness configuration. The supported harness consists of the documented browser/scene/asset checks below and their shared helpers. These checks validate current application behavior; they are not ECS performance measurements.
+The browser, scene, and asset checks below validate current SpaceBattle behavior. Use the benchmark tools for timed ECS comparisons and the Agentic CLI for supported local development operations.
 
 | Contract | Checks |
 | --- | --- |

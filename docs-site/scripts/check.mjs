@@ -3,12 +3,16 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { validateRegistry, workingGuideVersion } from './releases.mjs'
 
 const site = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const dist = join(site, '.vitepress/dist')
 const docsBase = process.env.SKECS_DOCS_BASE || '/'
 const demoPath = `${docsBase}demo/`
 const registry = JSON.parse(readFileSync(join(site, 'releases.json'), 'utf8'))
+validateRegistry(registry)
+const draftVersion = workingGuideVersion(process.argv.slice(2), registry)
+const outputRoot = draftVersion ? join(site, '.vitepress/cache/draft', draftVersion) : join(site, '.vitepress')
+const dist = join(outputRoot, 'dist')
 assert.ok(existsSync(join(dist, 'index.html')), 'Build the site before checking it')
 function* htmlFiles(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -41,17 +45,23 @@ for (const [file, html] of contents) {
     links++
   }
 }
-for (const release of registry.releases) {
- const metadata = JSON.parse(readFileSync(join(site, '.vitepress/cache/releases', release.version, 'repository.json'), 'utf8'))
- assert.equal(metadata.release.packageSha256, release.packageSha256)
+function checkPackageRejections(component) {
  for (const [field, value, message] of [
    ['packageSha256', '0'.repeat(64), /checksum mismatch/],
    ['sourceCommit', '0'.repeat(40), /commit does not match/]
  ]) {
-   const rejected = spawnSync('python', [join(site, 'scripts/package.py'), JSON.stringify({ ...release, [field]: value })], { encoding: 'utf8' })
+   const rejected = spawnSync('python', [join(site, 'scripts/package.py'), JSON.stringify({ ...component, [field]: value })], { encoding: 'utf8' })
    assert.notEqual(rejected.status, 0, 'Changed release inputs must be rejected')
    assert.match(rejected.stderr, message)
  }
+}
+for (const release of registry.releases) {
+ const cache = join(outputRoot, 'cache/releases', release.version)
+ const metadata = JSON.parse(readFileSync(join(cache, 'repository.json'), 'utf8'))
+ assert.equal(metadata.release.packageSha256, release.packageSha256)
+ checkPackageRejections(release)
+ assert.deepEqual(metadata.release.modules.map(item => item.id), (release.modules ?? []).map(item => item.id))
+ for (const module of release.modules ?? []) checkPackageRejections(module)
  for (const locale of ['', 'ru/']) {
   const prefix = release.version + '/' + locale
   for (const page of ['index', 'guide/sample', ...release.guides.map(item => 'guide/' + item.route), 'api/index', ...['World', 'Query-2', 'RawChunkView'].map(name => `api/${release.product}.${name}`)]) {
@@ -72,7 +82,7 @@ for (const release of registry.releases) {
   assert.ok(sample.includes('Matching archetypes:'), 'The full sample must be included')
   assert.ok(!sample.includes('&lt;&lt;&lt;'), 'A snippet import was rendered literally')
   const apiFiles = files.filter(file => file.startsWith(join(dist, prefix, 'api') + sep))
-  const generatedPages = readdirSync(join(site, '.vitepress/cache/releases', release.version, 'api')).filter(name => name.endsWith('.md'))
+  const generatedPages = readdirSync(join(cache, 'api')).filter(name => name.endsWith('.md'))
   assert.equal(apiFiles.length, generatedPages.length + 1, 'Every generated API page and the overview must render')
   const query = contents.get(join(dist, prefix, `api/${release.product}.Query-2.html`))
   assert.ok(query.includes('Query&lt;T1, T2&gt;'), 'Generic type parameters must remain visible')
@@ -83,6 +93,29 @@ for (const release of registry.releases) {
   assert.ok(home.includes('docs-version-select'), 'Every locale needs the version selector')
   assert.ok(home.includes(`${release.packageId}`), 'Show exact selected package identity')
   assert.ok(home.includes(release.version), 'Show selected release version')
+  for (const module of release.modules ?? []) {
+    const modulePath = `modules/${module.id}/${module.version}/`
+    const modulePrefix = prefix + modulePath
+    assert.ok(home.includes(`href="${docsBase}${modulePrefix}"`), `Missing home link to ${modulePrefix}`)
+    for (const page of ['index', 'guide/sample', 'api/index', ...module.guides.map(item => 'guide/' + item.route)]) {
+      assert.ok(contents.has(join(dist, modulePrefix, page + '.html')), `Missing ${modulePrefix}${page}`)
+    }
+    const moduleApi = readdirSync(join(cache, modulePath, 'api')).filter(name => name.endsWith('.md'))
+    assert.ok(moduleApi.length > 0, 'The module artifact needs a generated API reference')
+    for (const page of moduleApi) {
+      assert.ok(contents.has(join(dist, modulePrefix, 'api', page.replace(/\.md$/, '.html'))), `Missing ${modulePrefix}api/${page}`)
+    }
+    const overview = contents.get(join(dist, modulePrefix, 'index.html'))
+    assert.ok(overview.includes(module.packageId) && overview.includes(module.version), 'Show exact module artifact identity')
+    if (module.migrationFrom) {
+      const installation = contents.get(join(dist, modulePrefix, 'guide/installation.html'))
+      const article = installation?.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1]
+      for (const route of ['migration', 'release-notes']) {
+        const target = `${docsBase}${modulePrefix}guide/${route}`
+        assert.ok(article?.includes(`href="${target}.html"`) || article?.includes(`href="${target}"`), `Installation must link to ${target}`)
+      }
+    }
+  }
   for (const [file, html] of contents) {
     if (!file.startsWith(join(dist, prefix))) continue
     for (const match of html.matchAll(/href="(\/[^"#?]*)/g)) {

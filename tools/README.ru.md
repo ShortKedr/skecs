@@ -12,6 +12,8 @@
 | Переносимые метаданные измерений | [BenchmarkMachineInfo.cs](BenchmarkMachineInfo.cs), [BenchmarkMachineLabel.cs](BenchmarkMachineLabel.cs) | Проекты бенчмарков и игры |
 | Проверка двуязычной документации | [check_docs.py](check_docs.py), [тесты](test_check_docs.py) | CI библиотеки и Pages |
 | Проверка пакетов и релизов | [release](release), [consumer fixtures](release-consumers) | CI библиотеки/релизов и harness проверки релиза |
+| Локальная сборка, тесты и сравнение повторов | [Agentic CLI](Agentic/), [рабочий пример](../SKECS.Samples/README.ru.md#подготовка-операции-agentic) | Разработчики и локальная автоматизация |
+| Проверки повторов ECS и режимов выполнения | [Determinism](../SKECS.Determinism/), [ExecutionConformance](../SKECS.ExecutionConformance/) | CI повторов и локальные проверки |
 | Сборка и упаковка Web | [build-space-battle-web.ps1](build-space-battle-web.ps1), [Web-зависимости](web/package.json) | [Pages CI](../.github/workflows/space-battle-pages.yml), сборки обложки и сцен |
 | Browser smoke и диагностика iOS | [check-web.mjs](web/check-web.mjs), [run-ios-smoke.mjs](web/run-ios-smoke.mjs) | Pages CI |
 | Снимок и проверка обложки | [cover.py](space-battle/cover.py) | [CI обложки](../.github/workflows/space-battle-cover.yml) |
@@ -25,7 +27,7 @@ Mono CI охватывает модули и тесты compiler-study, CPU-prof
 
 ## Программный harness проверки
 
-Отдельной конфигурации AI harness в репозитории нет. Поддерживаемый harness состоит из документированных проверок браузера, сцен и ассетов ниже и их общих помощников. Эти проверки валидируют текущее поведение приложения; они не измеряют производительность ECS.
+Перечисленные ниже проверки браузера, сцен и ассетов проверяют текущее поведение SpaceBattle. Для замера производительности ECS используйте инструменты бенчмарков, для поддерживаемых локальных операций разработки — Agentic CLI.
 
 | Контракт | Проверки |
 | --- | --- |

@@ -19,14 +19,21 @@ autonomous Space Battle sample.
 
 | Your goal | Where to go |
 | --- | --- |
-| Use the library | [Release documentation](https://shortkedr.github.io/skecs/) · [Quickstart](#quickstart) · [Package installation](docs/skecs/INSTALL.md) · [API and lifetime rules](docs/skecs/README.md) · [Sample source](SKECS.Sample/Program.cs) |
-| Work on SKECS | [Module samples](SKECS.Samples/README.md) · [Implemented optimizations](docs/SKECS_OPTIMIZATION.md) · [Tests](SKECS.Tests) |
+| Use the library | [Release documentation](https://shortkedr.github.io/skecs/) · [Quickstart](#quickstart) · [API and lifetime rules](https://shortkedr.github.io/skecs/0.2.0/guide/using.html) |
+| Work on SKECS | [Build from source](#build-from-source) · [Module samples](SKECS.Samples/README.md) · [Tests](SKECS.Tests) |
 | Read or reproduce measurements | [ECS benchmarks](SKECS.Benchmarks/README.md) · [SpaceBattle benchmarks](SpaceBattle.Benchmarks/README.md) · [Space Battle report](docs/space-battle/REPORT.md) |
 | Run the game | [Desktop](SpaceBattle.Game/README.md) · [Web](SpaceBattle.Web/README.md) |
 
 `SKECS.Benchmarks/` owns SKECS benchmarks, five-framework comparisons and result analysis. `SpaceBattle.Benchmarks/` owns game workload measurements and analysis. Raw data and caches stay in ignored `artifacts/`; final reports and charts are published.
 
 ## Quickstart
+
+Install `ShortKedr.SKECS` 0.2.0 from the GitHub release and run the packaged
+library sample in a .NET console app. Unity and Godot installation instructions
+are in the same release guide. The 0.2.0 notes list the consumer runtimes
+verified at release time. [Install 0.2.0](https://shortkedr.github.io/skecs/0.2.0/guide/installation.html) · [Run the sample](https://shortkedr.github.io/skecs/0.2.0/guide/sample.html) · [Verified runtimes](https://shortkedr.github.io/skecs/0.2.0/guide/release-notes.html#verified-runtimes)
+
+## Build from source
 
 Use a .NET SDK that supports .NET 8 and run from the repository root. These
 PowerShell settings keep tool and package caches inside the project:
@@ -38,11 +45,6 @@ $env:NUGET_PACKAGES = "$PWD/artifacts/tooling/nuget-packages"
 dotnet run --project SKECS.Sample/SKECS.Sample.csproj -c Release
 dotnet test SKECS.Tests/SKECS.Tests.csproj -c Release
 ```
-
-To use SKECS in your application, add a project reference to
-[SKECS.csproj](SKECS/SKECS.csproj). The [library guide](docs/skecs/README.md)
-contains a minimal query example and explains entity ownership, component
-references, structural changes, and chunk iteration.
 
 ## Space Battle
 
@@ -61,8 +63,7 @@ outside the simulation timer; see the [architecture](docs/space-battle/ARCHITECT
 
 ## Status and evidence
 
-The library currently runs on CPU with sequential systems and queries.
-Current unit tests and game checksums do not establish cross-platform parity.
+The released 0.2.0 core runs on CPU with sequential systems and queries.
 Benchmark results describe particular machines, revisions, and workloads;
 see each report for its method and limitations.
 

@@ -10,9 +10,15 @@ SECS 0.1.0 см. [руководство по миграции](MIGRATION.ru.md)
 
 ## Приложения .NET
 
-Используйте релизный `ShortKedr.SKECS.0.2.0.nupkg` как источник
-NuGet. Поместите его, например, в каталог `packages/` и создайте рядом с
-проектом формата SDK файл `NuGet.Config`:
+Для быстрой проверки создайте консольный проект с помощью установленного .NET SDK.
+
+```powershell
+dotnet new console -o SkecsQuickstart
+cd SkecsQuickstart
+```
+
+Поместите скачанный `ShortKedr.SKECS.0.2.0.nupkg` в каталог `packages/` внутри
+проекта. Сохраните эту конфигурацию в файле `NuGet.Config` рядом с файлом проекта.
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -33,6 +39,9 @@ dotnet add package ShortKedr.SKECS --version 0.2.0
 локальном офлайн-источнике.
 
 Перед выбором целевой среды выполните [проверки потребителей](../../tools/release-consumers) для пакета SKECS 0.2.0.
+Точные версии сред, проверенных с этим выпуском, указаны в
+[примечаниях к релизу](RELEASE_NOTES_0.2.0.ru.md#проверенные-среды-выполнения).
+Актуальные сроки поддержки приведены в [политике поддержки .NET](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core).
 
 ## Unity
 
@@ -75,6 +84,7 @@ dotnet restore YourGodotProject.csproj --configfile NuGet.Config
 Проверочные проекты создают сущность, запускают запрос, читают изменённый
 компонент и освобождают мир:
 
+<!-- docs-example -->
 ```csharp
 using SKECS;
 
@@ -93,6 +103,10 @@ struct Increment : IQueryProcessor<Position>
     public void Execute(Entity entity, ref Position position) => position.X++;
 }
 ```
+
+Для быстрой проверки вставьте код в `Program.cs` и выполните
+`dotnet run -c Release`. Проверка завершится успешно, если запрос увеличит
+позицию с `2` до `3`.
 
 Компоненты SKECS должны быть unmanaged-структурами. `World` не поддерживает
 одновременный доступ из нескольких потоков; структурные изменения и

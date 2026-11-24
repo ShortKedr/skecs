@@ -12,8 +12,11 @@ SpaceBattle is an AI fleet battle and a realistic ECS comparison workload. SKECS
 | --- | --- |
 | Watch in a browser or run locally | [Web client](../../SpaceBattle.Web/README.md) |
 | Run desktop and learn its controls | [Desktop client](../../SpaceBattle.Game/README.md) |
+| Run headless replay validation or reproduce the campaign | [SpaceBattle benchmark CLI](../../SpaceBattle.Benchmarks/README.md) |
 | Read the single high game workload comparison | [Current benchmark report](REPORT.md) |
 | Understand the current stages, components and mutation boundaries | [Current architecture](ARCHITECTURE.md) |
+| Inspect the state hashing used for replay comparison | [SpaceBattle.Replay](../../SpaceBattle.Replay/) |
+| Check the experimental GPU paths | [Browser WebGPU](../../SpaceBattle.Web/EXPERIMENTAL_NOTICE.md) · [GA runtime](../../SKECS.GA/EXPERIMENTAL_NOTICE.md) |
 | Find and record real combat moments | [Scene search and capture](../../tools/space-battle/scenes/README.md) |
 
 ## Current Gameplay
@@ -45,6 +48,8 @@ dotnet run --project SpaceBattle.Benchmarks -c Release -- verify space-battle
 ```
 
 The current suite measures five ECS implementations on one real game workload: profile `high`, preset `game`, gameplay `ChurnMultiplier=2`, and 108000 measured ticks after 600 separate warmup ticks. It adds no synthetic churn or diagnostic entity pools. The report records full Step totals, nine stage means, 600-tick HUD windows and short opening phases. Each runner compares tick zero and every measured tick with a separate SKECS reference replay. External state export, hashing and comparison run after the Step timer and per-tick allocation counter stop. See the [architecture](ARCHITECTURE.md) for the simulation and validation boundaries.
+
+Run `validate space-battle` to check mechanics and replay parity without measuring the full campaign. For performance comparisons, use the framework revisions, runtime, and configuration in the [current report](REPORT.md). The experimental GA paths have separate device and workload evidence.
 
 Raw JSON, tick CSV/gzip, metadata and hashes remain local in ignored `artifacts/benchmarks/current/space-battle`. Published Markdown reports and SVG charts live under `docs/space-battle`. `report` and `verify` validate archives and recompute complete tick evidence using .NET. A fresh clone can read publications; regenerating them requires retained local raw inputs.
 
