@@ -1132,6 +1132,7 @@ import { verifyBuild, loadAtlasBundle, browserContract } from "./web-atlases.js"
         throw new Error("Unsupported simulation runtime mode: " + runtimeMode);
       }
       if (bridge.BrowserContract?.() !== browserContract) throw new Error("Mixed cached WASM/application contract. Reload the page.");
+      $("build-version").textContent = bridgeExports.BattleBridge.BuildVersion();
       assetState ||= await loadAtlasBundle(buildIdentity, { decodeImages: !imageLess });
       const data = assetState.bundle.atlases;
       sprites = new Map(data.ships.sprites.map(sprite => [sprite.class, sprite]));

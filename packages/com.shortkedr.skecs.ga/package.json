@@ -1,8 +1,8 @@
 {
   "name": "com.shortkedr.skecs.ga",
-  "version": "0.1.0-preview.1",
-  "displayName": "SKECS GA",
-  "description": "Deterministic SKECS systems with generated CPU plans and Unity compute shaders.",
+  "version": "0.1.1-experimental.1",
+  "displayName": "SKECS GA (Experimental)",
+  "description": "Experimental SKECS systems with generated CPU plans and Unity compute shaders. See EXPERIMENTAL_NOTICE.md for deterministic replay limits.",
   "unity": "6000.3",
   "license": "MIT"
 }

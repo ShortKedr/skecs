@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.JavaScript;
 using System.Runtime.Versioning;
@@ -102,6 +103,10 @@ public static unsafe partial class BattleBridge
 
     [JSExport]
     public static string BrowserContract() => "png-assets-v1";
+
+    [JSExport]
+    public static string BuildVersion() => typeof(BattleBridge).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
 
     // Bounded diagnostic Step only; no snapshot/export and no alternate game rules.
     [JSExport]

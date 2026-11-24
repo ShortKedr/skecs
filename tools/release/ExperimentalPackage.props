@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <VersionSuffix>experimental.1</VersionSuffix>
+    <PackageReadmeFile>EXPERIMENTAL_NOTICE.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Remove="EXPERIMENTAL_NOTICE.md" />
+    <None Include="EXPERIMENTAL_NOTICE.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

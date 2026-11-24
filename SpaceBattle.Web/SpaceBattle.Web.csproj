@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+  <Import Project="../tools/release/ExperimentalPackage.props" />
+  <ItemGroup>
+    <Content Include="EXPERIMENTAL_NOTICE.md" Link="wwwroot/EXPERIMENTAL_NOTICE.md" CopyToPublishDirectory="PreserveNewest" Pack="false" />
+  </ItemGroup>
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
