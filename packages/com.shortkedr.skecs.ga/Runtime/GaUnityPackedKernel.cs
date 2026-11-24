@@ -165,17 +165,28 @@ namespace SKECS.GA.Unity
         {
             private readonly uint[] destination;
             private readonly string label;
-            private readonly TaskCompletionSource<bool> completion =
-                new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            private readonly TaskCompletionSource<bool> completion;
             private AsyncGPUReadbackRequest request;
 
             internal Readback(GraphicsBuffer buffer, uint[] destination, string label)
             {
                 this.destination = destination;
                 this.label = label;
+                bool poll = Application.platform == RuntimePlatform.WebGLPlayer;
+                completion = new TaskCompletionSource<bool>(poll ? TaskCreationOptions.None :
+                    TaskCreationOptions.RunContinuationsAsynchronously);
                 try
                 {
-                    request = AsyncGPUReadback.Request(buffer, checked(destination.Length * WordStride), 0, Finish);
+                    int bytes = checked(destination.Length * WordStride);
+                    if (poll)
+                    {
+                        request = AsyncGPUReadback.Request(buffer, bytes, 0);
+                        _ = PollAsync();
+                    }
+                    else
+                    {
+                        request = AsyncGPUReadback.Request(buffer, bytes, 0, Finish);
+                    }
                 }
                 catch (Exception error)
                 {
@@ -184,6 +195,21 @@ namespace SKECS.GA.Unity
             }
 
             internal Task Completion => completion.Task;
+
+            private async Task PollAsync()
+            {
+                // Unity WebGPU can advance requests in the player loop without invoking the managed callback.
+                try
+                {
+                    while (!Completion.IsCompleted && !request.done)
+                        await Task.Yield();
+                    Finish(request);
+                }
+                catch (Exception error)
+                {
+                    completion.TrySetException(error);
+                }
+            }
 
             private void Finish(AsyncGPUReadbackRequest result)
             {
