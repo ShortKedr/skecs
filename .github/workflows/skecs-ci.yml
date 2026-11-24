@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
   workflow_call:
     inputs:
       require-unity:
@@ -14,9 +15,14 @@ on:
 permissions:
   contents: read
 
+env:
+  # Dispatch qualifies the source of the existing local skecs-v0.2.0 tag.
+  SKECS_SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && '98bf6b22ac8d9a122ce1baba8201ccad02c51465' || github.sha }}
+
 jobs:
   benchmark-tools:
     name: Native benchmark tools (${{ matrix.os }})
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
@@ -43,6 +49,7 @@ jobs:
 
   package:
     name: Build, test, pack, .NET 8 and 10
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
@@ -50,7 +57,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && env.SKECS_SOURCE_COMMIT || '' }}
           persist-credentials: false
+      - name: Verify candidate checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$SKECS_SOURCE_COMMIT"
+          echo "Package source commit: $SKECS_SOURCE_COMMIT"
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
@@ -73,24 +86,24 @@ jobs:
       - name: Test consumer migration CLI
         run: dotnet test skecs-migration/Skecs.Migration.Tests/Skecs.Migration.Tests.csproj -c Release
       - name: Pack the exact source commit
-        run: dotnet pack SKECS/SKECS.csproj -c Release --no-build -o artifacts/release -p:RepositoryCommit="$GITHUB_SHA"
+        run: dotnet pack SKECS/SKECS.csproj -c Release --no-build -o artifacts/release -p:RepositoryCommit="$SKECS_SOURCE_COMMIT"
       - name: Verify package metadata and content
         run: >-
           python tools/release/verify_package.py
           artifacts/release/ShortKedr.SKECS.${{ steps.version.outputs.version }}.nupkg
-          --version "${{ steps.version.outputs.version }}" --commit "$GITHUB_SHA"
+          --version "${{ steps.version.outputs.version }}" --commit "$SKECS_SOURCE_COMMIT"
       - name: Build and inspect the Unity archive
         run: >-
           python tools/release/make_unity_zip.py
           --package artifacts/release/ShortKedr.SKECS.${{ steps.version.outputs.version }}.nupkg
           --output artifacts/release/SKECS.Unity.${{ steps.version.outputs.version }}.zip
-          --version "${{ steps.version.outputs.version }}" --commit "$GITHUB_SHA"
+          --version "${{ steps.version.outputs.version }}" --commit "$SKECS_SOURCE_COMMIT"
       - name: Verify Unity ZIP bytes and manifest
         run: >-
           python tools/release/verify_unity_zip.py
           --package artifacts/release/ShortKedr.SKECS.${{ steps.version.outputs.version }}.nupkg
           --unity-zip artifacts/release/SKECS.Unity.${{ steps.version.outputs.version }}.zip
-          --version "${{ steps.version.outputs.version }}" --commit "$GITHUB_SHA"
+          --version "${{ steps.version.outputs.version }}" --commit "$SKECS_SOURCE_COMMIT"
       - name: Run package-backed .NET 8 consumer
         shell: pwsh
         run: ./tools/release-consumers/Invoke-DotNetSmoke.ps1 -PackageDirectory artifacts/release -Framework net8.0 -Version "${{ steps.version.outputs.version }}"
@@ -106,7 +119,7 @@ jobs:
             $runtime = dotnet --list-runtimes | Where-Object { $_ -match "^Microsoft.NETCore.App $major\." } | Select-Object -Last 1
             if (-not $runtime) { throw "Missing .NET $major runtime" }
             $runtime = ($runtime -split ' \[', 2)[0]
-            python tools/release/record_evidence.py --package "artifacts/release/ShortKedr.SKECS.$env:VERSION.nupkg" --kind "dotnet$major" --version "$env:VERSION" --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID" --runtime "$runtime" --os ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) --output "artifacts/release/evidence/dotnet$major.json"
+            python tools/release/record_evidence.py --package "artifacts/release/ShortKedr.SKECS.$env:VERSION.nupkg" --kind "dotnet$major" --version "$env:VERSION" --commit "$env:SKECS_SOURCE_COMMIT" --run-id "$env:GITHUB_RUN_ID" --runtime "$runtime" --os ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) --output "artifacts/release/evidence/dotnet$major.json"
             if ($LASTEXITCODE -ne 0) { throw 'Could not record .NET evidence' }
           }
       - uses: actions/upload-artifact@v7
@@ -134,7 +147,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && env.SKECS_SOURCE_COMMIT || '' }}
           persist-credentials: false
+      - name: Verify candidate checkout
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:SKECS_SOURCE_COMMIT) { throw 'Checkout differs from package source commit.' }
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
@@ -156,7 +174,7 @@ jobs:
           $release = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full').Release
           if ($release -lt 528040) { throw 'Requires .NET Framework 4.8 or later' }
           $runtime = ".NET Framework 4.8-compatible (registry release $release)"
-          python tools/release/record_evidence.py --package "artifacts/release/ShortKedr.SKECS.$env:VERSION.nupkg" --kind framework --version "$env:VERSION" --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID" --runtime "$runtime" --os ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) --output artifacts/release/evidence/framework.json
+          python tools/release/record_evidence.py --package "artifacts/release/ShortKedr.SKECS.$env:VERSION.nupkg" --kind framework --version "$env:VERSION" --commit "$env:SKECS_SOURCE_COMMIT" --run-id "$env:GITHUB_RUN_ID" --runtime "$runtime" --os ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) --output artifacts/release/evidence/framework.json
           if ($LASTEXITCODE -ne 0) { throw 'Could not record Framework evidence' }
       - uses: actions/upload-artifact@v7
         with:
@@ -173,7 +191,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && env.SKECS_SOURCE_COMMIT || '' }}
           persist-credentials: false
+      - name: Verify candidate checkout
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$SKECS_SOURCE_COMMIT"
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 8.0.x
@@ -208,7 +230,7 @@ jobs:
           VERSION: ${{ needs.package.outputs.version }}
         run: |
           $runtime = 'Godot ' + (Get-Content artifacts/release/godot-version.txt -Raw).Trim()
-          python tools/release/record_evidence.py --package "artifacts/release/ShortKedr.SKECS.$env:VERSION.nupkg" --kind godot --version "$env:VERSION" --commit "$env:GITHUB_SHA" --run-id "$env:GITHUB_RUN_ID" --runtime "$runtime" --os ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) --output artifacts/release/evidence/godot.json
+          python tools/release/record_evidence.py --package "artifacts/release/ShortKedr.SKECS.$env:VERSION.nupkg" --kind godot --version "$env:VERSION" --commit "$env:SKECS_SOURCE_COMMIT" --run-id "$env:GITHUB_RUN_ID" --runtime "$runtime" --os ([System.Runtime.InteropServices.RuntimeInformation]::OSDescription) --output artifacts/release/evidence/godot.json
           if ($LASTEXITCODE -ne 0) { throw 'Could not record Godot evidence' }
       - uses: actions/upload-artifact@v7
         with:
@@ -324,4 +346,4 @@ jobs:
           if [ "$REQUIRE_UNITY" = true ]; then
             test "$UNITY" = success || { echo "Required Unity matrix is incomplete: $UNITY"; exit 1; }
           fi
-          echo 'Required SKECS package and consumer checks passed.'
+          echo "Required SKECS package and consumer checks passed for $SKECS_SOURCE_COMMIT."
