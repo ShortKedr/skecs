@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+    <LangVersion>12.0</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
@@ -12,5 +13,9 @@
     <EmbeddedResource Include="Slang/GaFixedV1.slang" LogicalName="SKECS.GA.GaFixedV1.slang" />
     <EmbeddedResource Include="Slang/GaSnapshotV1.slang" LogicalName="SKECS.GA.GaSnapshotV1.slang" />
     <InternalsVisibleTo Include="Ga.Conformance" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <!-- The Unity Editor imports HLSL directly. Native packagers launch SDK tools on .NET 8. -->
+    <Compile Remove="GaArtifactPackager.cs;GaOpenGlCompiler.cs;GaWebGpuCompiler.cs" />
   </ItemGroup>
 </Project>

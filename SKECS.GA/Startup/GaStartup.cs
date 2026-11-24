@@ -104,7 +104,8 @@ public sealed class GaStartupResult : IDisposable
 
     public IGaPreparedKernel GetPreparedKernel(string systemId)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed)
+            throw new ObjectDisposedException(GetType().FullName);
         if (!Succeeded)
             throw new InvalidOperationException("GA startup failed.");
         return _kernels[systemId];
@@ -135,9 +136,11 @@ public static class GaStartup
         GaPolicy policy, IReadOnlyList<GaSystemRequest> systems, IReadOnlyList<IGaDevice> devices,
         bool allowExperimental, bool asynchronous)
     {
-        ArgumentNullException.ThrowIfNull(systems);
-        ArgumentNullException.ThrowIfNull(devices);
-        if (!Enum.IsDefined(policy))
+        if (systems is null)
+            throw new ArgumentNullException(nameof(systems));
+        if (devices is null)
+            throw new ArgumentNullException(nameof(devices));
+        if (!GaEnum.IsDefined(policy))
             throw new ArgumentOutOfRangeException(nameof(policy));
 
         var ids = new HashSet<string>(StringComparer.Ordinal);

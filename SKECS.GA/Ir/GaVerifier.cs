@@ -22,7 +22,7 @@ internal static class GaVerifier
             Require(field.Path is not null && (field.Path.Length == 0
                     ? program.TickResourceFields.Count == 1
                     : !string.IsNullOrWhiteSpace(field.Path) && !field.Path.Contains('[')) &&
-                resourcePaths.Add(field.Path) && Enum.IsDefined(field.Type) &&
+                resourcePaths.Add(field.Path) && GaEnum.IsDefined(field.Type) &&
                 (field.ClrEnumType is null || (field.Type is GaScalar.Int32 or GaScalar.UInt32 &&
                     !string.IsNullOrWhiteSpace(field.ClrEnumType))));
         }
@@ -33,7 +33,7 @@ internal static class GaVerifier
         {
             Require(field.Path is not null && (field.Path.Length == 0 ? program.BufferFields.Count == 1 :
                     !string.IsNullOrWhiteSpace(field.Path) && !field.Path.Contains('[')) &&
-                bufferPaths.Add(field.Path) && Enum.IsDefined(field.Type) &&
+                bufferPaths.Add(field.Path) && GaEnum.IsDefined(field.Type) &&
                 (field.ClrEnumType is null || (field.Type is GaScalar.Int32 or GaScalar.UInt32 &&
                     !string.IsNullOrWhiteSpace(field.ClrEnumType))));
         }
@@ -41,18 +41,18 @@ internal static class GaVerifier
         var arraySlots = new HashSet<int>();
         var components = new Dictionary<string, GaComponent>();
         foreach (var component in program.Components)
-            Require(!string.IsNullOrWhiteSpace(component.Id) && Enum.IsDefined(component.Access) &&
-                Enum.IsDefined(component.Origin) &&
+            Require(!string.IsNullOrWhiteSpace(component.Id) && GaEnum.IsDefined(component.Access) &&
+                GaEnum.IsDefined(component.Origin) &&
                 (component.Origin != GaComponentOrigin.Optional || component.Access == GaFieldAccess.Read) &&
                 (component.Origin != GaComponentOrigin.Own ||
                     component.OwnSource.File is not null && component.OwnSource.Start >= 0 && component.OwnSource.Length > 0) &&
                 components.TryAdd(component.Id, component));
         var fields = new HashSet<(string Component, string Path)>();
         foreach (var field in program.Fields)
-            Require(components.TryGetValue(field.Component, out var component) && Enum.IsDefined(field.Access)
+            Require(components.TryGetValue(field.Component, out var component) && GaEnum.IsDefined(field.Access)
                 && (component.Access == field.Access || field.Access == GaFieldAccess.Read)
                 && !string.IsNullOrWhiteSpace(field.Path) && fields.Add((field.Component, field.Path))
-                && Enum.IsDefined(field.Type));
+                && GaEnum.IsDefined(field.Type));
         var removalComponents = new HashSet<string>(StringComparer.Ordinal);
         Require(program.RemovalComponents.Count <= GaOutputRecord.MaximumComponentRemovals);
         foreach (var component in program.RemovalComponents)
@@ -73,7 +73,7 @@ internal static class GaVerifier
             Require(!string.IsNullOrWhiteSpace(type.Id) && eventTypes.Add((type.Id, type.IsContribution)));
             CheckPayloadFields(type.Fields, allowScalar: true);
         }
-        Require(program.Locals.All(Enum.IsDefined) && program.TicketLocalCount >= 0);
+        Require(program.Locals.All(GaEnum.IsDefined) && program.TicketLocalCount >= 0);
         int eventCapacity = CheckStatement(program.Body, new HashSet<int>(), new HashSet<int>());
         Require(declaredTickets.Count == program.TicketLocalCount &&
             arraySlots.Count == program.Fields.Count(field => field.Path.Contains('[')));
@@ -81,7 +81,7 @@ internal static class GaVerifier
             throw new GaEventCapacityException($"An invocation may produce more than {GaEventPacket.MaximumCapacityPerSource.ToString(System.Globalization.CultureInfo.InvariantCulture)} events and commands.");
         int outputWords = GaOutputRecord.Words + program.OutputPayloadWords +
             (usesDomainOrder ? GaOutputRecord.DomainWordCount : 0);
-        if ((long)eventCapacity * outputWords > Array.MaxLength)
+        if ((long)eventCapacity * outputWords > GaPackedWords.MaximumLength)
             throw new GaEventCapacityException("The packed output of one invocation exceeds the supported buffer size.");
         return (usesFixed, usesSnapshot, usesCommands, usesDomainOrder, eventCapacity);
 
@@ -256,7 +256,7 @@ internal static class GaVerifier
             var paths = new HashSet<string>(StringComparer.Ordinal);
             foreach (var field in fields)
                 Require((!string.IsNullOrWhiteSpace(field.Path) || allowScalar && field.Path == "" && fields.Count == 1) &&
-                    paths.Add(field.Path) && Enum.IsDefined(field.Type) && (field.ClrEnumType is null ||
+                    paths.Add(field.Path) && GaEnum.IsDefined(field.Type) && (field.ClrEnumType is null ||
                         field.Type is GaScalar.Int32 or GaScalar.UInt32 && !string.IsNullOrWhiteSpace(field.ClrEnumType)));
         }
 
@@ -273,7 +273,7 @@ internal static class GaVerifier
 
         void CheckValue(GaValue value, HashSet<int> assigned)
         {
-            Require(Enum.IsDefined(value.Type));
+            Require(GaEnum.IsDefined(value.Type));
             usesFixed |= value.Type == GaScalar.Fixed;
             switch (value)
             {

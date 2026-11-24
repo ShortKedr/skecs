@@ -40,7 +40,8 @@ public sealed class GaArtifactBundle
         GaArtifactManifest manifest, string expectedContentId, ReadOnlySpan<byte> artifact,
         ReadOnlySpan<byte> reflection, ReadOnlySpan<byte> sourceMap)
     {
-        ArgumentNullException.ThrowIfNull(manifest);
+        if (manifest is null)
+            throw new ArgumentNullException(nameof(manifest));
         GaArtifactManifest.ValidateDigest(expectedContentId, "expected manifest");
         var normalized = manifest.Normalize();
         if (normalized.GetContentId() != expectedContentId)
@@ -76,6 +77,8 @@ public sealed class GaArtifactBundle
             "glsl_es_310" => artifact.StartsWith("#version 310 es\n"u8),
             _ => false
         }),
+        GaArtifactFormat.UnityCompute => artifact.StartsWith("#pragma kernel main\n"u8) &&
+            artifact.IndexOf((byte)0) < 0,
         _ => false
     };
 

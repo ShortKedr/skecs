@@ -27,7 +27,8 @@ public readonly struct GaComponentAddition
     public static GaComponentAddition For<T>(GaAdditionDecoder<T> decode, int payloadWords,
         ReadOnlySpan<int> booleanOffsets) where T : unmanaged
     {
-        ArgumentNullException.ThrowIfNull(decode);
+        if (decode is null)
+            throw new ArgumentNullException(nameof(decode));
         if ((uint)payloadWords > GaOutputRecord.MaximumAdditionPayloadWords)
             throw new ArgumentOutOfRangeException(nameof(payloadWords));
         foreach (int offset in booleanOffsets)
@@ -41,7 +42,7 @@ public readonly struct GaComponentAddition
 
     internal void Validate(ReadOnlySpan<uint> payload)
     {
-        if (payload.Length < PayloadWords || payload[PayloadWords..].IndexOfAnyExcept(0u) >= 0)
+        if (payload.Length < PayloadWords || GaPackedWords.HasNonZeroWord(payload[PayloadWords..]))
             throw new InvalidDataException("A GA addition has invalid payload length or padding.");
         foreach (int offset in _booleans)
             if (payload[offset] > 1u)

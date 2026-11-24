@@ -212,7 +212,7 @@ public readonly record struct GaOutputRecord
             additions[ComponentIndex].Validate(payload);
         else if (IsTypedOutput)
             eventTypes[ComponentIndex].Validate(payload);
-        else if (payload.IndexOfAnyExcept(0u) >= 0)
+        else if (GaPackedWords.HasNonZeroWord(payload))
             throw new InvalidDataException("A GA output record has unexpected payload words.");
     }
 

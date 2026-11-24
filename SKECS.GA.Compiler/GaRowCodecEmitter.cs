@@ -7,10 +7,17 @@ namespace SKECS.GA;
 /// <summary>Emits typed packing and writeback for the canonical rows of a deterministic job.</summary>
 public static class GaRowCodecEmitter
 {
-    public static string Emit(GaProgram program, string className = "GaRowCodec")
+    public static string Emit(GaProgram program, string className = "GaRowCodec") =>
+        Emit(program, className, unityCompatible: false);
+
+    /// <summary>Emits a row codec compatible with Unity's C# and BCL profile.</summary>
+    public static string EmitUnity(GaProgram program, string className = "GaRowCodec") =>
+        Emit(program, className, unityCompatible: true);
+
+    private static string Emit(GaProgram program, string className, bool unityCompatible)
     {
-        ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(className);
+        if (program is null) throw new ArgumentNullException(nameof(program));
+        if (className is null) throw new ArgumentNullException(nameof(className));
         if (!SyntaxFacts.IsValidIdentifier(className) || className.StartsWith('@') ||
             className is "SystemId" or "SourceDigest" or "IrDigest" or "ComponentSchemaDigest"
                 or "WordsPerRow" or "EventCapacity" or "UsesSnapshot" or "SnapshotSchema" or "UsesCommands" or "UsesDomainOrder" or "ComponentRemovals"
@@ -23,8 +30,8 @@ public static class GaRowCodecEmitter
                 || className.StartsWith("__GaDecodeEvent", StringComparison.Ordinal))
             throw new ArgumentException("The codec needs a C# class identifier outside its member names.", nameof(className));
 
-        var writes = WrittenFields(program.Body).Distinct().Order().ToArray();
-        return new Emitter(program, writes).Emit(className);
+        var writes = WrittenFields(program.Body).Distinct().OrderBy(index => index).ToArray();
+        return new Emitter(program, writes, unityCompatible).Emit(className);
     }
 
     internal static IEnumerable<int> WrittenFields(GaStatement statement) => statement switch
@@ -38,7 +45,7 @@ public static class GaRowCodecEmitter
         _ => []
     };
 
-    private sealed class Emitter(GaProgram program, int[] writes)
+    private sealed class Emitter(GaProgram program, int[] writes, bool unityCompatible)
     {
         private const string Job = "global::SKECS.DeterministicJob<TInput>";
         private const string ReadJob = "global::SKECS.DeterministicBatchReadJob<TInput>";
@@ -94,18 +101,18 @@ public static class GaRowCodecEmitter
             Line($"public static global::System.ReadOnlySpan<{RemovalType}> ComponentRemovals => {removals};");
             Line($"public const int AdditionPayloadWords = {Number(program.AdditionPayloadWords)};");
             if (program.AdditionComponents.Count != 0)
-                GaAdditionEmitter.EmitTable(program, "AdditionTable", Line);
+                GaAdditionEmitter.EmitTable(program, "AdditionTable", Line, unityCompatible);
             string additions = program.AdditionComponents.Count == 0 ? "default" : "AdditionTable";
             Line($"public static global::System.ReadOnlySpan<{GaAdditionEmitter.AdditionType}> ComponentAdditions => {additions};");
             Line($"public const int EventPayloadWords = {Number(program.EventPayloadWords)};");
             Line($"public const int EventTypeCount = {Number(program.EventTypes.Count)};");
             Line($"public const int ReductionTypeCount = {Number(program.ReductionTypeCount)};");
             if (program.ReductionTypeCount != 0)
-                GaAdditionEmitter.EmitEventTable(program, "CreateEventTypes", Line);
+                GaAdditionEmitter.EmitEventTable(program, "CreateEventTypes", Line, unityCompatible);
             else
             {
                 if (program.EventTypes.Count != 0)
-                    GaAdditionEmitter.EmitEventTable(program, "EventTable", Line);
+                    GaAdditionEmitter.EmitEventTable(program, "EventTable", Line, unityCompatible);
                 string events = program.EventTypes.Count == 0 ? "default" : "EventTable";
                 Line($"public static global::System.ReadOnlySpan<{GaAdditionEmitter.EventType}> EventTypes => {events};");
             }
@@ -320,7 +327,7 @@ public static class GaRowCodecEmitter
         }
 
         private IEnumerable<int> ComponentIndexes(IEnumerable<int> fields) =>
-            fields.Select(index => _components[program.Fields[index].Component]).Distinct().Order();
+            fields.Select(index => _components[program.Fields[index].Component]).Distinct().OrderBy(index => index);
 
         private void ReadComponent(int index) =>
             Line($"var component{Number(index)} = job.Read<{program.Components[index].Id}>(row);");

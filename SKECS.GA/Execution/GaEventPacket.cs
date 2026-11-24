@@ -42,7 +42,8 @@ public readonly ref struct GaEventPacket
         GaEventDecoder<TEvent> decode)
         where TInput : unmanaged where TEvent : unmanaged
     {
-        ArgumentNullException.ThrowIfNull(decode);
+        if (decode is null)
+            throw new ArgumentNullException(nameof(decode));
         if ((uint)successfulRows > job.Count)
             throw new ArgumentOutOfRangeException(nameof(successfulRows));
         if ((uint)firstSource > SourceCount || successfulRows > SourceCount - firstSource)
@@ -54,7 +55,8 @@ public readonly ref struct GaEventPacket
     public void ApplyLogicalJob<TInput, TEvent>(DeterministicJob<TInput> job, int source, GaEventDecoder<TEvent> decode)
         where TInput : unmanaged where TEvent : unmanaged
     {
-        ArgumentNullException.ThrowIfNull(decode);
+        if (decode is null)
+            throw new ArgumentNullException(nameof(decode));
         if ((uint)source >= SourceCount)
             throw new ArgumentOutOfRangeException(nameof(source));
         Apply(source, job.ForJob(), decode);

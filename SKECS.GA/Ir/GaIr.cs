@@ -134,7 +134,10 @@ public sealed class GaProgram
         string? tickResourceType = null, GaTickResourceField[]? tickResourceFields = null,
         string? bufferType = null, GaBufferField[]? bufferFields = null, GaEventType[]? eventTypes = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(systemId);
+        if (systemId is null)
+            throw new ArgumentNullException(nameof(systemId));
+        if (string.IsNullOrWhiteSpace(systemId))
+            throw new ArgumentException("The value cannot be an empty string or composed entirely of whitespace.", nameof(systemId));
         SystemId = systemId;
         SourceDigest = sourceDigest;
         Components = Array.AsReadOnly((GaComponent[])components.Clone());

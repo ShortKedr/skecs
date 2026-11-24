@@ -158,7 +158,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 declaration.ConstructorArguments is not [
                     { Kind: TypedConstantKind.Type, Value: INamedTypeSymbol component },
                     { Kind: TypedConstantKind.Enum, Value: int mode }] ||
-                !IsOwnComponent(component) || !Enum.IsDefined((GaOwnAccess)mode))
+                !IsOwnComponent(component) || !GaEnum.IsDefined((GaOwnAccess)mode))
                 throw new GaLoweringException(location, "Declare a portable own component and access mode with the runtime GaAccess attribute.");
 
             string id = QualifiedName(component);
@@ -225,7 +225,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         var fields = new GaScalar[layout.Values.Length];
         for (int index = 0; index < fields.Length; index++)
         {
-            if (layout.Values[index] is not { Kind: TypedConstantKind.Enum, Value: int value } || !Enum.IsDefined((GaScalar)value))
+            if (layout.Values[index] is not { Kind: TypedConstantKind.Enum, Value: int value } || !GaEnum.IsDefined((GaScalar)value))
                 throw new GaLoweringException(location, "A snapshot layout field must be Bool, Int32, UInt32 or Fixed.");
             fields[index] = (GaScalar)value;
         }
@@ -1272,7 +1272,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 lowered = new GaBoundValue(binding.Slot, binding.Value, lowered, binding.Source);
             }
             if (!SymbolEqualityComparer.Default.Equals(definition.ContainingType, entry.ContainingType))
-                _externalHelperSources.Add(definition.GetDocumentationCommentId() + "\n" + declaration.ToFullString().ReplaceLineEndings("\n"));
+                _externalHelperSources.Add(definition.GetDocumentationCommentId() + "\n" +
+                    GaCompilerText.NormalizeLineEndings(declaration.ToFullString()));
             return lowered;
         }
         finally

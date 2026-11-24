@@ -15,8 +15,10 @@ public sealed class GaSnapshotCpuBatch<TInput> : IDeterministicBatchProcessor<TI
 
     public GaSnapshotCpuBatch(GaTickSnapshot snapshot, ExecuteJob execute, string? snapshotSchema)
     {
-        ArgumentNullException.ThrowIfNull(snapshot);
-        ArgumentNullException.ThrowIfNull(execute);
+        if (snapshot is null)
+            throw new ArgumentNullException(nameof(snapshot));
+        if (execute is null)
+            throw new ArgumentNullException(nameof(execute));
         if (snapshotSchema is not null && !GaSnapshotLayout.IsValidSchema(snapshotSchema))
             throw new ArgumentException("Invalid GA snapshot schema.", nameof(snapshotSchema));
         _snapshot = new GaTickSnapshot.Reader(snapshot, snapshotSchema);

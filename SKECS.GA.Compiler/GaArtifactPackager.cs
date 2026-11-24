@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace SKECS.GA;
 
@@ -61,8 +60,7 @@ internal static class GaArtifactPackager
         ArgumentException.ThrowIfNullOrWhiteSpace(slangExecutablePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(artifactName);
-        if (artifactName.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_')))
-            throw new ArgumentException("Use an ASCII artifact filename without an extension.", nameof(artifactName));
+        GaShaderBundle.ValidateArtifactName(artifactName);
 
         // DXBC and DXIL use the same explicit storage registers.
         var module = format switch
@@ -127,38 +125,9 @@ internal static class GaArtifactPackager
             (bindings, usage) = ParseReflection(lines.ToArray(), toolchain, workgroupX);
         }
         byte[] binary = await File.ReadAllBytesAsync(binaryPath).ConfigureAwait(false);
-        byte[] sourceMap = JsonSerializer.SerializeToUtf8Bytes(module.FaultSources.ToArray(),
-            GaManifestJsonContext.Default.GaSourceSpanArray);
-        var manifest = new GaArtifactManifest(GaArtifactManifest.CurrentSchemaVersion,
-            new GaContractIdentity(program.SystemId, simulationContractId, program.SourceDigest,
-                GaIrDigest.Program(program), GaIrDigest.Schema(program), GaProgram.NumericVersion,
-                GaProgram.SubsetVersion, GaProgram.IrVersion)
-            {
-                EventCapacity = program.EventCapacity,
-                UsesSnapshot = program.UsesSnapshot,
-                SnapshotSchema = program.SnapshotLayout?.Schema,
-                TickResourceType = program.TickResourceType,
-                TickResourceWords = program.TickResourceWords,
-                BufferSchema = program.BufferSchema,
-                BufferRowWords = program.BufferRowWords,
-                UsesCommands = program.UsesCommands,
-                ComponentRemovalCount = program.RemovalComponents.Count,
-                ComponentAdditionCount = program.AdditionComponents.Count,
-                AdditionPayloadWords = program.AdditionPayloadWords,
-                EventTypeCount = program.EventTypes.Count,
-                EventPayloadWords = program.EventPayloadWords,
-                ReductionTypeCount = program.ReductionTypeCount,
-                UsesDomainOrder = program.UsesDomainOrder
-            },
-            toolchain, GaSlangModule.EntryPoint, bindings, usage,
-            new GaKernelRequirements(program.UsesFixed ? GaComputeProfiles.WideFixedEmulated : GaComputeProfiles.Portable32,
-                [], workgroupX, 1, 1, 0, 0),
-            GaArtifactManifest.ComputeDigest(binary), GaArtifactManifest.ComputeDigest(reflection),
-            GaArtifactManifest.ComputeDigest(sourceMap));
-        var bundle = GaArtifactBundle.Load(manifest, manifest.GetContentId(), binary, reflection, sourceMap);
-        await File.WriteAllBytesAsync(stem + ".source-map.json", sourceMap).ConfigureAwait(false);
-        await File.WriteAllBytesAsync(stem + ".manifest.json", manifest.GetCanonicalBytes()).ConfigureAwait(false);
-        await File.WriteAllTextAsync(stem + ".content-id", bundle.ContentId + "\n").ConfigureAwait(false);
+        var bundle = GaShaderBundle.Create(program, simulationContractId, toolchain, GaSlangModule.EntryPoint, workgroupX,
+            bindings, usage, module.FaultSources, binary, reflection);
+        await GaShaderBundle.WriteMetadata(stem, bundle).ConfigureAwait(false);
         return bundle;
     }
 

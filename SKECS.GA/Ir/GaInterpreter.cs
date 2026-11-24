@@ -11,7 +11,8 @@ public static class GaInterpreter
 {
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row)
     {
-        ArgumentNullException.ThrowIfNull(program);
+        if (program is null)
+            throw new ArgumentNullException(nameof(program));
         RequireUnpackedSupport(program);
         if (program.UsesCommands)
             throw new InvalidOperationException("Use the Execute overload with ordered output storage for this program.");
@@ -54,7 +55,8 @@ public static class GaInterpreter
     public static GaKernelFault? Execute(GaProgram program, Span<uint> row, ICollection<GaOutputRecord> outputs,
         GaSnapshotPacket? snapshot, ReadOnlySpan<uint> tickResources, GaBufferPacket? buffer)
     {
-        ArgumentNullException.ThrowIfNull(outputs);
+        if (outputs is null)
+            throw new ArgumentNullException(nameof(outputs));
         return ExecuteCore(program, row, Span<int>.Empty, out _, snapshot, outputs, default, packed: false, tickResources, buffer);
     }
 
@@ -86,7 +88,8 @@ public static class GaInterpreter
         GaSnapshotPacket? snapshot, ICollection<GaOutputRecord>? outputs, Span<uint> records, bool packed,
         ReadOnlySpan<uint> tickResources = default, GaBufferPacket? buffer = null)
     {
-        ArgumentNullException.ThrowIfNull(program);
+        if (program is null)
+            throw new ArgumentNullException(nameof(program));
         eventCount = 0;
         if (!packed)
         {

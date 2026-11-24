@@ -23,7 +23,8 @@ public readonly struct GaTypedEvent
     public static GaTypedEvent For<T>(GaEventDecoder<T> decode, int payloadWords,
         ReadOnlySpan<int> booleanOffsets) where T : unmanaged
     {
-        ArgumentNullException.ThrowIfNull(decode);
+        if (decode is null)
+            throw new ArgumentNullException(nameof(decode));
         return Bind((source, payload) => source.Emit(decode(payload)), payloadWords, booleanOffsets, false);
     }
 
@@ -31,7 +32,8 @@ public readonly struct GaTypedEvent
     public static GaTypedEvent ForContribution<T>(DeterministicReduction<T> reduction, GaEventDecoder<T> decode,
         int payloadWords, ReadOnlySpan<int> booleanOffsets) where T : unmanaged
     {
-        ArgumentNullException.ThrowIfNull(decode);
+        if (decode is null)
+            throw new ArgumentNullException(nameof(decode));
         return Bind((source, payload) => source.Contribute(reduction, decode(payload)),
             payloadWords, booleanOffsets, true);
     }
@@ -48,7 +50,7 @@ public readonly struct GaTypedEvent
 
     internal void Validate(ReadOnlySpan<uint> payload)
     {
-        if (payload.Length < PayloadWords || payload[PayloadWords..].IndexOfAnyExcept(0u) >= 0)
+        if (payload.Length < PayloadWords || GaPackedWords.HasNonZeroWord(payload[PayloadWords..]))
             throw new InvalidDataException("A GA typed output has invalid payload length or padding.");
         foreach (int offset in _booleans)
             if (payload[offset] > 1u)

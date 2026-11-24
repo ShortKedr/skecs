@@ -8,18 +8,25 @@ namespace SKECS.GA;
 public static class GaCpuAdapterEmitter
 {
     /// <summary>Emits an adapter with a Register method for the given GA program.</summary>
-    public static string Emit(GaProgram program, string className = "GaCpuAdapter")
+    public static string Emit(GaProgram program, string className = "GaCpuAdapter") =>
+        Emit(program, className, unityCompatible: false);
+
+    /// <summary>Emits an adapter compatible with Unity's C# and BCL profile.</summary>
+    public static string EmitUnity(GaProgram program, string className = "GaCpuAdapter") =>
+        Emit(program, className, unityCompatible: true);
+
+    private static string Emit(GaProgram program, string className, bool unityCompatible)
     {
-        ArgumentNullException.ThrowIfNull(program);
-        ArgumentNullException.ThrowIfNull(className);
+        if (program is null) throw new ArgumentNullException(nameof(program));
+        if (className is null) throw new ArgumentNullException(nameof(className));
         if (!SyntaxFacts.IsValidIdentifier(className) || className.StartsWith('@') ||
             className == "Register" || className.StartsWith("__Ga", StringComparison.Ordinal))
             throw new ArgumentException("The adapter needs a C# class identifier outside its member names.", nameof(className));
 
-        return new Emitter(program).Emit(className);
+        return new Emitter(program, unityCompatible).Emit(className);
     }
 
-    private sealed class Emitter(GaProgram program)
+    private sealed class Emitter(GaProgram program, bool unityCompatible)
     {
         private const string FixedType = "global::SKECS.Numerics.Fixed";
         private const string OutputType = "global::SKECS.GA.GaOutputRecord";
@@ -77,12 +84,12 @@ public static class GaCpuAdapterEmitter
             }
             if (program.AdditionComponents.Count != 0)
             {
-                GaAdditionEmitter.EmitTable(program, "__GaAdditions", Line);
+                GaAdditionEmitter.EmitTable(program, "__GaAdditions", Line, unityCompatible);
                 Line();
             }
             if (program.EventTypes.Count != 0)
             {
-                GaAdditionEmitter.EmitEventTable(program, BindsReductions ? "__GaCreateEvents" : "__GaEvents", Line);
+                GaAdditionEmitter.EmitEventTable(program, BindsReductions ? "__GaCreateEvents" : "__GaEvents", Line, unityCompatible);
                 Line();
             }
             Register(grouped: false);
@@ -128,7 +135,9 @@ public static class GaCpuAdapterEmitter
             if (program.TickResourceType is null)
                 Line("    where TInput : unmanaged");
             Open();
-            Line($"global::System.ArgumentNullException.ThrowIfNull({owner});");
+            Line(unityCompatible
+                ? $"if ({owner} is null) throw new global::System.ArgumentNullException(nameof({owner}));"
+                : $"global::System.ArgumentNullException.ThrowIfNull({owner});");
             if (!grouped && program.UsesDomainOrder)
             {
                 Line("throw new global::System.InvalidOperationException(\"A GA kernel with domain order requires a keyed commit group.\");");
@@ -249,7 +258,7 @@ public static class GaCpuAdapterEmitter
             for (int index = 0; index < program.TicketLocalCount; index++)
                 Line($"int ticket{Number(index)} = -1;");
             _code.Append(body);
-            foreach (int index in _writable.Order())
+            foreach (int index in _writable.OrderBy(index => index))
                 Line($"job.Write(row, component{Number(index)});");
             if (program.EventCapacity != 0)
             {

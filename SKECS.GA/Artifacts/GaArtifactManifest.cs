@@ -46,7 +46,7 @@ public sealed record GaContractIdentity(
     public bool UsesDomainOrder { get; init; }
 }
 
-public enum GaArtifactFormat { SpirV, Dxil, Dxbc, MetalLibrary, Wgsl, Glsl }
+public enum GaArtifactFormat { SpirV, Dxil, Dxbc, MetalLibrary, Wgsl, Glsl, UnityCompute }
 
 public sealed record GaToolchain(
     string SlangVersion, string DownstreamVersion, [property: JsonRequired] GaArtifactFormat Format, string TargetProfile,
@@ -57,7 +57,7 @@ public enum GaResourceAccess { Read, Write, ReadWrite }
 public enum GaBindingNamespace
 {
     VulkanDescriptor, VulkanPushConstants, D3DConstantBuffer, D3DResource, D3DUnorderedAccess,
-    D3DSampler, MetalBuffer, MetalTexture, MetalSampler, WebGpuBinding, OpenGlShaderStorage
+    D3DSampler, MetalBuffer, MetalTexture, MetalSampler, WebGpuBinding, OpenGlShaderStorage, UnityComputeProperty
 }
 
 public sealed record GaLayoutField(
@@ -106,8 +106,26 @@ public sealed record GaArtifactManifest(
         return manifest.Normalize();
     }
 
-    public static string ComputeDigest(ReadOnlySpan<byte> bytes) =>
-        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    public static string ComputeDigest(ReadOnlySpan<byte> bytes)
+    {
+#if NET8_0_OR_GREATER
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+#else
+        using var sha256 = SHA256.Create();
+        Span<byte> digest = stackalloc byte[32];
+        if (!sha256.TryComputeHash(bytes, digest, out _))
+            throw new CryptographicException("The SHA-256 digest could not be computed.");
+
+        const string hex = "0123456789abcdef";
+        Span<char> chars = stackalloc char[64];
+        for (var i = 0; i < digest.Length; i++)
+        {
+            chars[2 * i] = hex[digest[i] >> 4];
+            chars[2 * i + 1] = hex[digest[i] & 15];
+        }
+        return new string(chars);
+#endif
+    }
 
     internal GaArtifactManifest Normalize()
     {
@@ -170,11 +188,14 @@ public sealed record GaArtifactManifest(
         ValidateDigest(ReflectionDigest, "reflection");
         ValidateDigest(SourceMapDigest, "source map");
 
-        if (Toolchain is null || !Enum.IsDefined(Toolchain.Format))
+        if (Toolchain is null || !GaEnum.IsDefined(Toolchain.Format))
             throw Invalid("Missing or unknown target format.");
         ValidateText(Toolchain.SlangVersion, "Slang version");
         ValidateText(Toolchain.DownstreamVersion, "downstream toolchain version");
         ValidateText(Toolchain.TargetProfile, "target profile");
+        if (Toolchain.Format == GaArtifactFormat.UnityCompute &&
+            (Toolchain.TargetProfile != GaUnityComputeAbi.TargetProfile || EntryPoint != GaUnityComputeAbi.MainKernel))
+            throw Invalid("Invalid Unity compute target profile or entry point.");
         var toolchain = Toolchain with
         {
             Options = CopyText(Toolchain.Options, "compiler options", ordered: true),
@@ -232,7 +253,7 @@ public sealed record GaArtifactManifest(
     private GaResourceBinding NormalizeBinding(GaResourceBinding binding)
     {
         ValidateText(binding.LogicalResourceId, "logical resource ID");
-        if (!Enum.IsDefined(binding.Namespace) || !Enum.IsDefined(binding.Kind) || !Enum.IsDefined(binding.Access) ||
+        if (!GaEnum.IsDefined(binding.Namespace) || !GaEnum.IsDefined(binding.Kind) || !GaEnum.IsDefined(binding.Access) ||
             binding.Space < 0 || binding.Index < 0 || binding.Count < 1)
             throw Invalid("Invalid resource binding.");
         var validNamespace = Toolchain.Format switch
@@ -246,6 +267,9 @@ public sealed record GaArtifactManifest(
             GaArtifactFormat.Wgsl => binding.Namespace == GaBindingNamespace.WebGpuBinding,
             GaArtifactFormat.Glsl => binding.Namespace == GaBindingNamespace.OpenGlShaderStorage &&
                 binding.Space == 0 && binding.Kind == GaResourceKind.StorageBuffer,
+            GaArtifactFormat.UnityCompute => binding.Namespace == GaBindingNamespace.UnityComputeProperty &&
+                binding.Space == 0 && binding.Count == 1 &&
+                binding.Kind is GaResourceKind.StorageBuffer or GaResourceKind.UniformBuffer,
             _ => false
         };
         if (!validNamespace)

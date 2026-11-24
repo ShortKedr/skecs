@@ -108,11 +108,18 @@ public class GaBatchProcessor<TInput> : IDeterministicBatchProcessor<TInput> whe
         ReadOnlySpan<GaComponentRemoval> componentRemovals, ReadOnlySpan<GaComponentAddition> componentAdditions,
         GaTickResourceCodec<TInput> tickResource, GaTickBuffer? buffer, ReadOnlySpan<GaTypedEvent> eventTypes)
     {
-        ArgumentNullException.ThrowIfNull(startup);
-        ArgumentException.ThrowIfNullOrWhiteSpace(systemId);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(wordsPerRow);
-        ArgumentNullException.ThrowIfNull(pack);
-        ArgumentNullException.ThrowIfNull(apply);
+        if (startup is null)
+            throw new ArgumentNullException(nameof(startup));
+        if (systemId is null)
+            throw new ArgumentNullException(nameof(systemId));
+        if (string.IsNullOrWhiteSpace(systemId))
+            throw new ArgumentException("The value cannot be an empty string or composed entirely of whitespace.", nameof(systemId));
+        if (wordsPerRow <= 0)
+            throw new ArgumentOutOfRangeException(nameof(wordsPerRow), wordsPerRow, "Value must be positive.");
+        if (pack is null)
+            throw new ArgumentNullException(nameof(pack));
+        if (apply is null)
+            throw new ArgumentNullException(nameof(apply));
         if (tickResource.Pack is null
                 ? tickResource.TypeId is not null || tickResource.WordCount != 0
                 : string.IsNullOrWhiteSpace(tickResource.TypeId) || tickResource.WordCount < 0)

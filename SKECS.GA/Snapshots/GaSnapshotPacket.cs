@@ -115,7 +115,8 @@ public sealed class GaSnapshotPacket
     public static GaSnapshotPacket FromRows(GaSnapshotLayout layout, ReadOnlySpan<GaSnapshotKey> keys,
         ReadOnlySpan<uint> packedRows)
     {
-        ArgumentNullException.ThrowIfNull(layout);
+        if (layout is null)
+            throw new ArgumentNullException(nameof(layout));
         if ((long)keys.Length * layout.ValueWordCount != packedRows.Length)
             throw new ArgumentException("Snapshot payload length does not match the layout and keys.", nameof(packedRows));
         int length = GetPacketLength(layout, keys.Length);
@@ -153,9 +154,12 @@ public sealed class GaSnapshotPacket
     public static GaSnapshotPacket Capture<T>(World world, GaSnapshotLayout layout, GaSnapshotPack<T> pack)
         where T : unmanaged
     {
-        ArgumentNullException.ThrowIfNull(world);
-        ArgumentNullException.ThrowIfNull(layout);
-        ArgumentNullException.ThrowIfNull(pack);
+        if (world is null)
+            throw new ArgumentNullException(nameof(world));
+        if (layout is null)
+            throw new ArgumentNullException(nameof(layout));
+        if (pack is null)
+            throw new ArgumentNullException(nameof(pack));
         var checkpoint = world.OpenCheckpoint();
         var words = new List<uint> { FormatVersion, 0, (uint)layout.ValueWordCount };
         var values = new uint[layout.ValueWordCount];
@@ -259,7 +263,7 @@ public sealed class GaSnapshotPacket
     private static int GetPacketLength(GaSnapshotLayout layout, int rowCount)
     {
         long length = HeaderWordCount + (long)rowCount * layout.RowWordCount;
-        if (length > Array.MaxLength)
+        if (length > GaPackedWords.MaximumLength)
             throw new ArgumentException("Snapshot dimensions exceed the maximum managed packet length.");
         return (int)length;
     }

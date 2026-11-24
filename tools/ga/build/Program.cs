@@ -23,7 +23,7 @@ if (args is ["--help"] or ["-h"])
 
         Optional properties
           sourceRoot (.), adapterClass (GaCpuAdapter), policy (auto), slangAdapter
-          target (vulkan, d3d12, d3d11, opengl, gles, or webgpu)
+          target (vulkan, d3d12, d3d11, opengl, gles, webgpu, or unity-compute)
           dxcDirectory (d3d12), fxcDirectory (d3d11), spirvCrossExecutable (opengl or gles)
           OpenGL also uses the pinned spirv-opt.exe in the SPIRV-Cross directory.
           slangCompilerExecutable (webgpu) uses the pinned slangc.exe and adjacent slang.dll.
@@ -80,8 +80,14 @@ try
     if (result.Program is not { } program)
         return 1;
 
-    string cpuSource = GaCpuAdapterEmitter.Emit(program, request.AdapterClass).ReplaceLineEndings("\n");
-    string codecSource = GaRowCodecEmitter.Emit(program, request.AdapterClass + "RowCodec").ReplaceLineEndings("\n");
+    bool unityCompute = request.Target == "unity-compute";
+    string codecClass = request.AdapterClass + "RowCodec";
+    string cpuSource = (unityCompute
+        ? GaCpuAdapterEmitter.EmitUnity(program, request.AdapterClass)
+        : GaCpuAdapterEmitter.Emit(program, request.AdapterClass)).ReplaceLineEndings("\n");
+    string codecSource = (unityCompute
+        ? GaRowCodecEmitter.EmitUnity(program, codecClass)
+        : GaRowCodecEmitter.Emit(program, codecClass)).ReplaceLineEndings("\n");
     var parseOptions = (CSharpParseOptions)method.DeclaringSyntaxReferences[0].SyntaxTree.Options;
     var adapterTree = CSharpSyntaxTree.ParseText(cpuSource, parseOptions, path: "ga-adapter.g.cs", encoding: Encoding.UTF8);
     var codecTree = CSharpSyntaxTree.ParseText(codecSource, parseOptions, path: "ga-row-codec.g.cs", encoding: Encoding.UTF8);
@@ -198,10 +204,11 @@ static async Task<GpuBuildResult> BuildGpu(
 {
     if (request.Policy == GaPolicy.CpuOnly)
         return new GpuBuildResult(GpuBuildStatus.NotRequested);
+    bool unityCompute = request.Target == "unity-compute";
     bool webGpu = request.Target == "webgpu";
-    string? executable = webGpu ? request.SlangCompilerExecutable : request.SlangAdapter;
-    string? slang = executable is null ? null : Path.GetFullPath(executable, requestDirectory);
-    if (slang is null || !File.Exists(slang))
+    string? executable = unityCompute ? null : webGpu ? request.SlangCompilerExecutable : request.SlangAdapter;
+    string slang = executable is null ? "" : Path.GetFullPath(executable, requestDirectory);
+    if (!unityCompute && !File.Exists(slang))
         return webGpu
             ? new GpuBuildResult(GpuBuildStatus.Unavailable, Code: "SlangCompilerMissing",
                 Detail: "Supply the pinned slangc.exe to build a WebGPU package.")
@@ -236,6 +243,8 @@ static async Task<GpuBuildResult> BuildGpu(
     {
         var bundle = request.Target switch
         {
+            "unity-compute" => await GaUnityComputePackager.Build(program, request.SimulationContractId, staging,
+                request.ArtifactName, request.WorkgroupX),
             "webgpu" => await GaWebGpuPackager.Build(program, request.SimulationContractId, slang,
                 staging, request.ArtifactName, request.WorkgroupX),
             "opengl" => await GaOpenGlPackager.Build(program, request.SimulationContractId, slang, cross!,

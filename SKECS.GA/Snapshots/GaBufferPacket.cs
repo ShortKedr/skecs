@@ -7,7 +7,10 @@ public sealed class GaBufferPacket
 
     internal GaBufferPacket(string schema, int rowWords, uint[] words)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        if (schema is null)
+            throw new ArgumentNullException(nameof(schema));
+        if (string.IsNullOrWhiteSpace(schema))
+            throw new ArgumentException("The value cannot be an empty string or composed entirely of whitespace.", nameof(schema));
         Schema = schema;
         RowWords = rowWords;
         _words = words;
@@ -21,8 +24,10 @@ public sealed class GaBufferPacket
     /// <summary>Copies already-packed rows without the row-count header.</summary>
     public static GaBufferPacket FromWords(string schema, int rowWords, int count, ReadOnlySpan<uint> words)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(rowWords);
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (rowWords < 0)
+            throw new ArgumentOutOfRangeException(nameof(rowWords), rowWords, "Value must be non-negative.");
+        if (count < 0)
+            throw new ArgumentOutOfRangeException(nameof(count), count, "Value must be non-negative.");
         if (words.Length != (long)rowWords * count)
             throw new ArgumentException("The packed words must match the row count and buffer width.", nameof(words));
         var packet = Allocate(rowWords, count);
@@ -46,10 +51,12 @@ public sealed class GaBufferPacket
 
     internal static uint[] Allocate(int rowWords, int count)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(rowWords);
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (rowWords < 0)
+            throw new ArgumentOutOfRangeException(nameof(rowWords), rowWords, "Value must be non-negative.");
+        if (count < 0)
+            throw new ArgumentOutOfRangeException(nameof(count), count, "Value must be non-negative.");
         long length = 1L + (long)rowWords * count;
-        if (length > Array.MaxLength)
+        if (length > GaPackedWords.MaximumLength)
             throw new ArgumentException("The packed read buffer exceeds the maximum array length.", nameof(count));
         var words = new uint[(int)length];
         words[0] = (uint)count;
@@ -75,8 +82,12 @@ public readonly record struct GaBufferCodec<T>(string Schema, int RowWords, GaPa
     /// <summary>Packs data into owned words. The source span is never retained.</summary>
     public GaBufferPacket Capture(ReadOnlySpan<T> rows)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(Schema);
-        ArgumentNullException.ThrowIfNull(Pack);
+        if (Schema is null)
+            throw new ArgumentNullException(nameof(Schema));
+        if (string.IsNullOrWhiteSpace(Schema))
+            throw new ArgumentException("The value cannot be an empty string or composed entirely of whitespace.", nameof(Schema));
+        if (Pack is null)
+            throw new ArgumentNullException(nameof(Pack));
         var words = GaBufferPacket.Allocate(RowWords, rows.Length);
         if (RowWords != 0)
             for (int row = 0; row < rows.Length; row++)

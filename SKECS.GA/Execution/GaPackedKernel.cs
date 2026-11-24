@@ -30,13 +30,13 @@ public sealed class GaPackedDispatchResult
         var words = Faults.Slice(row * FaultStride, FaultStride);
         if (words[0] == 0)
         {
-            if (words[1..].IndexOfAnyExcept(0u) >= 0)
+            if (GaPackedWords.HasNonZeroWord(words[1..]))
                 throw new InvalidDataException("A successful GA row returned fault metadata.");
             return null;
         }
         var kind = (GaFaultKind)words[0];
         uint site = words[3];
-        if (!Enum.IsDefined(kind) || site >= _sourceMap.Count)
+        if (!GaEnum.IsDefined(kind) || site >= _sourceMap.Count)
             throw new InvalidDataException("A GA row returned a fault outside the artifact source map.");
         return new GaKernelFault(kind, words[1] | ((ulong)words[2] << 32), _sourceMap[(int)site]);
     }
@@ -104,6 +104,7 @@ public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
     private readonly uint _maxBufferBytes;
     private readonly int _tickResourceWords;
     private readonly int? _bufferRowWords;
+    private readonly int _expectedRowWidthWords;
     private readonly IReadOnlyList<GaSourceSpan> _sourceMap;
     private Task<GaPackedDispatchResult>? _active;
     private Task? _releaseTask;
@@ -123,18 +124,31 @@ public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
 
     protected GaPackedKernel(uint workgroupSize, uint maxGroups, uint maxBufferBytes,
         IReadOnlyList<GaSourceSpan> sourceMap, int tickResourceWords, int? bufferRowWords)
+        : this(workgroupSize, maxGroups, maxBufferBytes, sourceMap, tickResourceWords, bufferRowWords, 0)
     {
-        ArgumentOutOfRangeException.ThrowIfZero(workgroupSize);
-        ArgumentOutOfRangeException.ThrowIfNegative(tickResourceWords);
+    }
+
+    /// <summary>Prepares a packed kernel with an expected input row width. Zero accepts any positive width.</summary>
+    protected GaPackedKernel(uint workgroupSize, uint maxGroups, uint maxBufferBytes,
+        IReadOnlyList<GaSourceSpan> sourceMap, int tickResourceWords, int? bufferRowWords, int expectedRowWidthWords)
+    {
+        if (workgroupSize == 0)
+            throw new ArgumentOutOfRangeException(nameof(workgroupSize), workgroupSize, "Value must be non-zero.");
+        if (tickResourceWords < 0)
+            throw new ArgumentOutOfRangeException(nameof(tickResourceWords), tickResourceWords, "Value must be non-negative.");
         if (bufferRowWords < 0)
             throw new ArgumentOutOfRangeException(nameof(bufferRowWords));
-        ArgumentNullException.ThrowIfNull(sourceMap);
+        if (expectedRowWidthWords < 0)
+            throw new ArgumentOutOfRangeException(nameof(expectedRowWidthWords), expectedRowWidthWords, "Value must be non-negative.");
+        if (sourceMap is null)
+            throw new ArgumentNullException(nameof(sourceMap));
         _workgroupSize = workgroupSize;
         _maxGroups = maxGroups;
         _maxBufferBytes = maxBufferBytes;
         _sourceMap = sourceMap;
         _tickResourceWords = tickResourceWords;
         _bufferRowWords = bufferRowWords;
+        _expectedRowWidthWords = expectedRowWidthWords;
     }
 
     protected virtual bool SupportsBlockingDispatch => true;
@@ -144,8 +158,9 @@ public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _active is null ? ValueTask.CompletedTask : new ValueTask(_active);
+            if (_disposed)
+                throw new ObjectDisposedException(GetType().FullName);
+            return _active is null ? default : new ValueTask(_active);
         }
     }
 
@@ -164,7 +179,8 @@ public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_disposed)
+                throw new ObjectDisposedException(GetType().FullName);
             cancellationToken.ThrowIfCancellationRequested();
             if (_active is { IsCompleted: false })
                 throw new InvalidOperationException("The previous graphics submission is still pending.");
@@ -172,7 +188,10 @@ public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
                 throw new InvalidOperationException("The graphics kernel failed its previous submission.", _active.Exception);
             if (rowWidthWords <= 0 || input.IsEmpty)
                 throw new ArgumentException("Graphics input needs a row count and a positive row width.");
-            ArgumentOutOfRangeException.ThrowIfNegative(additionalOutputWords);
+            if (_expectedRowWidthWords > 0 && rowWidthWords != _expectedRowWidthWords)
+                throw new ArgumentException("The row width differs from the prepared graphics kernel layout.", nameof(rowWidthWords));
+            if (additionalOutputWords < 0)
+                throw new ArgumentOutOfRangeException(nameof(additionalOutputWords), additionalOutputWords, "Value must be non-negative.");
 
             long count = input[0];
             long rowWords = count * rowWidthWords;
@@ -190,8 +209,8 @@ public abstract class GaPackedKernel : IGaPreparedKernel, IAsyncDisposable
             long outputLength = rowWords + additionalOutputWords;
             long inputLength = (long)input.Length + snapshot.Length;
             var groups = (count + _workgroupSize - 1) / _workgroupSize;
-            if (groups > _maxGroups || inputLength > Array.MaxLength || outputLength > Array.MaxLength ||
-                faultLength > Array.MaxLength || inputLength * sizeof(uint) > _maxBufferBytes ||
+            if (groups > _maxGroups || inputLength > GaPackedWords.MaximumLength || outputLength > GaPackedWords.MaximumLength ||
+                faultLength > GaPackedWords.MaximumLength || inputLength * sizeof(uint) > _maxBufferBytes ||
                 outputLength * sizeof(uint) > _maxBufferBytes || faultLength * sizeof(uint) > _maxBufferBytes)
                 throw new ArgumentException("The payload exceeds the device's compute limits.", nameof(input));
 

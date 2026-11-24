@@ -13,8 +13,10 @@ public sealed class GaTickSnapshot
     /// <summary>Supplies a snapshot captured before a tick begins.</summary>
     public void Bind(long tickIndex, GaSnapshotPacket packet)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(tickIndex);
-        ArgumentNullException.ThrowIfNull(packet);
+        if (tickIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(tickIndex), tickIndex, "Value must be non-negative.");
+        if (packet is null)
+            throw new ArgumentNullException(nameof(packet));
         if (tickIndex <= _lastExternalTick || tickIndex <= _currentTick)
             throw new InvalidOperationException("A bound snapshot cannot be replaced for the same or an earlier tick.");
         _external = new Binding(new Position(tickIndex, default, 0, 0), packet);
@@ -31,8 +33,10 @@ public sealed class GaTickSnapshot
     public DeterministicSnapshotPreparation<TInput> Prepare<TInput, T>(GaSnapshotLayout layout, GaSnapshotPack<T> pack)
         where TInput : unmanaged where T : unmanaged
     {
-        ArgumentNullException.ThrowIfNull(layout);
-        ArgumentNullException.ThrowIfNull(pack);
+        if (layout is null)
+            throw new ArgumentNullException(nameof(layout));
+        if (pack is null)
+            throw new ArgumentNullException(nameof(pack));
         return source =>
         {
             var position = new Position(source.TickIndex, source.Stage, source.SystemOrder, source.KernelOrder);

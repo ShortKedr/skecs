@@ -12,10 +12,16 @@ public sealed class GaBufferCpuBatch<TInput> : IDeterministicBatchProcessor<TInp
     public GaBufferCpuBatch(GaTickBuffer buffer, string schema, int rowWords, ExecuteJob execute,
         GaTickSnapshot? snapshot = null, string? snapshotSchema = null)
     {
-        ArgumentNullException.ThrowIfNull(buffer);
-        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
-        ArgumentOutOfRangeException.ThrowIfNegative(rowWords);
-        ArgumentNullException.ThrowIfNull(execute);
+        if (buffer is null)
+            throw new ArgumentNullException(nameof(buffer));
+        if (schema is null)
+            throw new ArgumentNullException(nameof(schema));
+        if (string.IsNullOrWhiteSpace(schema))
+            throw new ArgumentException("The value cannot be an empty string or composed entirely of whitespace.", nameof(schema));
+        if (rowWords < 0)
+            throw new ArgumentOutOfRangeException(nameof(rowWords), rowWords, "Value must be non-negative.");
+        if (execute is null)
+            throw new ArgumentNullException(nameof(execute));
         if (snapshotSchema is not null && (snapshot is null || !GaSnapshotLayout.IsValidSchema(snapshotSchema)))
             throw new ArgumentException("A snapshot schema requires a matching snapshot binding.", nameof(snapshotSchema));
         _buffer = new GaTickBuffer.Reader(buffer, schema, rowWords);

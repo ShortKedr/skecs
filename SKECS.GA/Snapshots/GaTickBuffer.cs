@@ -10,8 +10,10 @@ public sealed class GaTickBuffer
     /// <summary>Binds a packet to a future tick. Binding later ticks does not replace an active packet.</summary>
     public void Bind(long tickIndex, GaBufferPacket packet)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(tickIndex);
-        ArgumentNullException.ThrowIfNull(packet);
+        if (tickIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(tickIndex), tickIndex, "Value must be non-negative.");
+        if (packet is null)
+            throw new ArgumentNullException(nameof(packet));
         if (tickIndex <= _tick || !_pending.TryAdd(tickIndex, packet))
             throw new InvalidOperationException("A read buffer cannot replace a packet for a bound or active tick.");
     }
