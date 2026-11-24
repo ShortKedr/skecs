@@ -2,36 +2,14 @@ English | [Русский](INSTALL.ru.md)
 
 # Install SKECS 0.2.0 Branch
 
-SKECS 0.2.0 Branch introduces the breaking rename from SECS 0.1.0. This guide
-shows how to build a local SKECS package from the repository root:
-
-```powershell
-dotnet pack SKECS/SKECS.csproj -c Release -o artifacts/release
-```
-
-The resulting `ShortKedr.SKECS.0.2.0.nupkg` is a local candidate. These
-instructions use a local package source. Keep a copy with your project for
-repeatable restore. See the [0.2.0 Branch release notes](RELEASE_NOTES_0.2.0.md)
-for the migration steps.
-
-## Migrate from SECS 0.1.0
-
-The published [`secs-v0.1.0` Cone release](https://github.com/ShortKedr/skecs/releases/tag/secs-v0.1.0)
-remains available with its `ShortKedr.SECS` package, `SECS` namespace, and
-original release assets. SKECS 0.2.0 is a breaking rename. Update consumers:
-
-- Replace the `ShortKedr.SECS` package reference with `ShortKedr.SKECS` version
-  `0.2.0`.
-- Change `using SECS;` to `using SKECS;`.
-- If building from source, change `SECS/SECS.csproj` to `SKECS/SKECS.csproj`.
-- If importing a Unity DLL directly, replace `SECS.dll` with `SKECS.dll`.
-
-The former package, namespace, assembly and project paths are not compatibility
-aliases. Keep them only when remaining on the historical 0.1.0 release.
+Download [`ShortKedr.SKECS.0.2.0.nupkg`](https://github.com/ShortKedr/skecs/releases/download/skecs-v0.2.0/ShortKedr.SKECS.0.2.0.nupkg)
+from the [SKECS 0.2.0 Branch release](https://github.com/ShortKedr/skecs/releases/tag/skecs-v0.2.0) and keep it beside
+your project for repeatable restores. To upgrade from SECS 0.1.0, see the
+[migration guide](MIGRATION.md) and [release notes](RELEASE_NOTES_0.2.0.md).
 
 ## .NET applications
 
-Use the locally built `ShortKedr.SKECS.0.2.0.nupkg` as a NuGet source. For an
+Use the released `ShortKedr.SKECS.0.2.0.nupkg` as a NuGet source. For an
 SDK-style project, place the package in a directory such as `packages/` and put
 this `NuGet.Config` beside the project:
 
@@ -53,15 +31,15 @@ The `netstandard2.0` asset used by .NET Framework 4.8 depends on
 `System.Memory`; NuGet.org supplies that dependency unless it is also available
 in an offline package source.
 
-Run the [consumer checks](../../tools/release-consumers) against the built SKECS package before relying on a target runtime.
+Run the [consumer checks](../../tools/release-consumers) against the SKECS 0.2.0 package before relying on a target runtime.
 
 ## Unity
 
-The local [Unity ZIP builder](../../tools/release/make_unity_zip.py) packages
-the same DLLs as the local `.nupkg`. In a Unity 2022.3 LTS or Unity 6 project,
+Download [`SKECS.Unity.0.2.0.zip`](https://github.com/ShortKedr/skecs/releases/download/skecs-v0.2.0/SKECS.Unity.0.2.0.zip).
+Its `netstandard2.1` DLL matches the NuGet package. In a Unity 2022.3 LTS or Unity 6 project,
 choose the **.NET Standard 2.1** API Compatibility Level. Copy all DLLs from
 `lib/netstandard2.1/` in the ZIP into `Assets/Plugins/` and allow Unity to
-reimport. The ZIP also includes the MIT license and this guide. Use the `SKECS`
+reimport. The ZIP also includes the MIT license and installation notes. Use the `SKECS`
 namespace in a C# script. The basic
 `World`, `Query<T>().ForEach`, and `Get<T>`
 API requires no `unsafe` setting in the consuming project. Direct chunk-pointer

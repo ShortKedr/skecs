@@ -28,6 +28,7 @@ DOCUMENTS = [
     'docs/benchmarks/current/SUPPLEMENT.md',
     'docs/promo/space-battle/README.md',
     'docs/skecs/INSTALL.md',
+    'docs/skecs/MIGRATION.md',
     'docs/skecs/README.md',
     'docs/skecs/RELEASE_NOTES_0.2.0.md',
     'docs/space-battle/ARCHITECTURE.md',

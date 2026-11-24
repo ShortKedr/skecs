@@ -2,37 +2,15 @@
 
 # Установка SKECS 0.2.0 Branch
 
-SKECS 0.2.0 Branch включает несовместимое переименование SECS 0.1.0. Здесь
-описана локальная сборка пакета SKECS из корня репозитория:
-
-```powershell
-dotnet pack SKECS/SKECS.csproj -c Release -o artifacts/release
-```
-
-Полученный `ShortKedr.SKECS.0.2.0.nupkg` — локальный кандидат. Эта инструкция
-использует локальный источник пакетов. Сохраните копию вместе с проектом для
-повторяемого восстановления. См. [заметки к выпуску 0.2.0 Branch](RELEASE_NOTES_0.2.0.ru.md)
-с шагами миграции.
-
-## Переход с SECS 0.1.0
-
-Опубликованный выпуск [`secs-v0.1.0` Cone](https://github.com/ShortKedr/skecs/releases/tag/secs-v0.1.0)
-по-прежнему доступен с пакетом `ShortKedr.SECS`, пространством имён `SECS` и
-исходными файлами выпуска. В SKECS 0.2.0 переименование несовместимое. Обновите
-потребителей:
-
-- Замените ссылку на пакет `ShortKedr.SECS` на `ShortKedr.SKECS` версии `0.2.0`.
-- Замените `using SECS;` на `using SKECS;`.
-- При сборке из исходников измените `SECS/SECS.csproj` на `SKECS/SKECS.csproj`.
-- При прямом импорте DLL в Unity замените `SECS.dll` на `SKECS.dll`.
-
-Старые имена пакета, пространства имён, сборки и пути проектов не являются
-псевдонимами совместимости. Оставайтесь на них только при использовании
-исторического выпуска 0.1.0.
+Скачайте [`ShortKedr.SKECS.0.2.0.nupkg`](https://github.com/ShortKedr/skecs/releases/download/skecs-v0.2.0/ShortKedr.SKECS.0.2.0.nupkg)
+из [релиза SKECS 0.2.0 Branch](https://github.com/ShortKedr/skecs/releases/tag/skecs-v0.2.0) и сохраните
+его рядом с проектом для повторяемого восстановления пакетов. При обновлении с
+SECS 0.1.0 см. [руководство по миграции](MIGRATION.ru.md) и
+[примечания к релизу](RELEASE_NOTES_0.2.0.ru.md).
 
 ## Приложения .NET
 
-Используйте локально собранный `ShortKedr.SKECS.0.2.0.nupkg` как источник
+Используйте релизный `ShortKedr.SKECS.0.2.0.nupkg` как источник
 NuGet. Поместите его, например, в каталог `packages/` и создайте рядом с
 проектом формата SDK файл `NuGet.Config`:
 
@@ -54,15 +32,15 @@ dotnet add package ShortKedr.SKECS --version 0.2.0
 `System.Memory`. NuGet.org предоставляет эту зависимость, если её нет в
 локальном офлайн-источнике.
 
-Перед выбором целевой среды выполните [проверки потребителей](../../tools/release-consumers) для собранного пакета SKECS.
+Перед выбором целевой среды выполните [проверки потребителей](../../tools/release-consumers) для пакета SKECS 0.2.0.
 
 ## Unity
 
-Локальный [скрипт создания Unity ZIP](../../tools/release/make_unity_zip.py)
-упаковывает те же DLL, что и `.nupkg`. В проекте Unity 2022.3 LTS или Unity 6 выберите
+Скачайте [`SKECS.Unity.0.2.0.zip`](https://github.com/ShortKedr/skecs/releases/download/skecs-v0.2.0/SKECS.Unity.0.2.0.zip).
+Архив содержит ту же сборку `netstandard2.1`, что и пакет NuGet. В проекте Unity 2022.3 LTS или Unity 6 выберите
 профиль совместимости **.NET Standard 2.1**. Скопируйте все DLL из
 `lib/netstandard2.1/` ZIP в `Assets/Plugins/` и дождитесь импорта. В ZIP также
-входят лицензия MIT и эта инструкция. Подключите пространство имён `SKECS` в
+входят лицензия MIT и инструкция по установке. Подключите пространство имён `SKECS` в
 C#-скрипте. Базовые `World`,
 `Query<T>().ForEach` и `Get<T>` не требуют
 включения `unsafe` в проекте-потребителе. Для прямого доступа к указателям
