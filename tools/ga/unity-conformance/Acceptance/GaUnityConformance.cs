@@ -36,12 +36,14 @@ public static class GaUnityConformance
             var nested = UnityNestedFault.LoadAsset();
             var targetRead = UnityTargetRead.LoadAsset();
             var shotBurst = UnityShotBurst.LoadAsset();
-            Check(movement && nested && targetRead && shotBurst, "The packaged Unity GA assets are missing.");
+            var spatialParent = UnitySpatialParent.LoadAsset();
+            Check(movement && nested && targetRead && shotBurst && spatialParent, "The packaged Unity GA assets are missing.");
             var movementRequest = UnityMovement.CreateRequest(movement);
             var nestedRequest = UnityNestedFault.CreateRequest(nested);
             var requests = new[] { movementRequest, nestedRequest,
-                UnityTargetRead.CreateRequest(targetRead), UnityShotBurst.CreateRequest(shotBurst) };
-            var assets = new[] { movement, nested, targetRead, shotBurst };
+                UnityTargetRead.CreateRequest(targetRead), UnityShotBurst.CreateRequest(shotBurst),
+                UnitySpatialParent.CreateRequest(spatialParent) };
+            var assets = new[] { movement, nested, targetRead, shotBurst, spatialParent };
             var devices = GaUnityDevice.Discover(assets);
             cpuOnlyHost |= Application.platform == RuntimePlatform.WebGLPlayer && devices.Count == 0;
             Debug.Log($"GA_UNITY_DEVICE Unity={Application.unityVersion} api={SystemInfo.graphicsDeviceType} " +

@@ -1,11 +1,29 @@
-using System.Diagnostics;
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+#if NET8_0_OR_GREATER
 using System.Runtime.InteropServices;
+#endif
 using SKECS;
 using SKECS.GA;
 using SKECS.Numerics;
 using static FlatCandidates;
 
-internal readonly record struct Scenario(int Rows, uint Seed, int Chunk, int Budget);
+internal readonly struct SpatialCase
+{
+    internal SpatialCase(int rows, uint seed, int chunk, int budget) =>
+        (Rows, Seed, Chunk, Budget) = (rows, seed, chunk, budget);
+
+    internal int Rows { get; }
+    internal uint Seed { get; }
+    internal int Chunk { get; }
+    internal int Budget { get; }
+
+    public override string ToString() => $"rows={Rows}, seed={Seed}, chunk={Chunk}, budget={Budget}";
+}
 
 [Flags]
 internal enum Witness
@@ -16,17 +34,30 @@ internal enum Witness
     All = (1 << 14) - 1
 }
 
-internal readonly record struct Totals(long Queries, long Candidates, long Duplicates, long Exact, long Stale,
-    long Batches, Witness Witnesses)
+internal readonly struct SpatialCoverage
 {
-    public static Totals operator +(Totals a, Totals b) => new(a.Queries + b.Queries, a.Candidates + b.Candidates,
+    internal SpatialCoverage(long queries, long candidates, long duplicates, long exact, long stale, long batches, Witness witnesses)
+    {
+        (Queries, Candidates, Duplicates, Exact) = (queries, candidates, duplicates, exact);
+        (Stale, Batches, Witnesses) = (stale, batches, witnesses);
+    }
+
+    internal long Queries { get; }
+    internal long Candidates { get; }
+    internal long Duplicates { get; }
+    internal long Exact { get; }
+    internal long Stale { get; }
+    internal long Batches { get; }
+    internal Witness Witnesses { get; }
+
+    public static SpatialCoverage operator +(SpatialCoverage a, SpatialCoverage b) => new(a.Queries + b.Queries, a.Candidates + b.Candidates,
         a.Duplicates + b.Duplicates, a.Exact + b.Exact, a.Stale + b.Stale, a.Batches + b.Batches, a.Witnesses | b.Witnesses);
 }
 
 internal sealed class SpatialScenario
 {
-    private static readonly GaSnapshotLayout Layout = new([GaScalar.Bool, GaScalar.Bool, GaScalar.Fixed, GaScalar.Fixed]);
-    private readonly Scenario _scenario;
+    private static readonly GaSnapshotLayout Layout = new(new[] { GaScalar.Bool, GaScalar.Bool, GaScalar.Fixed, GaScalar.Fixed });
+    private readonly SpatialCase _scenario;
     private readonly World _world;
     private readonly Entity[] _turrets;
     private readonly FlatCandidates _index = new();
@@ -36,14 +67,14 @@ internal sealed class SpatialScenario
     private readonly Entity _originalParent;
     private SpatialMember? _oldTarget;
 
-    private SpatialScenario(Scenario scenario, World world)
+    private SpatialScenario(SpatialCase scenario, World world)
     {
         _scenario = scenario;
         _world = world;
         _turrets = new Entity[scenario.Rows];
         if (scenario.Rows == 0)
         {
-            _targets = [];
+            _targets = Array.Empty<Target>();
             return;
         }
         var fixtures = new (int Priority, RawBounds Bounds)[]
@@ -71,11 +102,34 @@ internal sealed class SpatialScenario
             _turrets[row] = world.CreateEntity(new TurretProbe());
     }
 
-#if GA_BROWSER_CONFORMANCE
-    public static async Task<Totals> Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
-#else
-    public static Totals Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
-#endif
+    internal static (SpatialCase[] Cases, int Ticks) SelectCases(string profile)
+    {
+        if (profile is "short" or "long")
+            return (new[] { new SpatialCase(65, 27, 127, 64) }, profile == "short" ? 1_000 : 100_000);
+        int[] rows = { 0, 1, 63, 64, 65, 127, 128, 129, 1024 };
+        uint[] seeds = { 0, 1, 27, 7331, uint.MaxValue };
+        int[] chunks = { 1, 64, 127, 256 };
+        int[] budgets = { 1, 3, 64 };
+        if (profile is not ("smoke" or "matrix"))
+            throw new ArgumentException($"Unknown SpatialParent profile '{profile}'.");
+        var scenarios = new List<SpatialCase>();
+        foreach (int rowCount in rows)
+        {
+            int firstSeed = profile == "matrix" ? 0 : scenarios.Count % seeds.Length;
+            int lastSeed = profile == "matrix" ? seeds.Length : firstSeed + 1;
+            for (int seed = firstSeed; seed < lastSeed; seed++)
+            {
+                int i = scenarios.Count;
+                scenarios.Add(new SpatialCase(rowCount, seeds[seed], chunks[i % chunks.Length], budgets[i % budgets.Length]));
+            }
+        }
+        return (scenarios.ToArray(), 8);
+    }
+
+    internal static async ValueTask<SpatialCoverage> Run(SpatialCase scenario, int ticks, bool useGpu, bool requireYield,
+        GaBufferCodec<SpatialMember> codec,
+        Action<DeterministicWorkload<byte>, GaTickBuffer, GaTickSnapshot, Action<GaBatchTimings>> register,
+        Func<DeterministicRunner<byte>, int, ValueTask<bool>> drain, Action<string> report)
     {
         using var world = new World(new WorldOptions(scenario.Chunk));
         var test = new SpatialScenario(scenario, world);
@@ -84,41 +138,44 @@ internal sealed class SpatialScenario
         var workload = new DeterministicWorkload<byte>();
         long deviceRows = 0;
         long batches = 0;
-        if (startup is null)
-            SpatialAdapter.Register(workload, SystemStage.Update, buffer, snapshot);
-        else
-            workload.AddBatchSystem(SystemStage.Update, SpatialAdapterRowCodec.CreateQuery(),
-                new GaBatchProcessor<byte>(startup, contract.SystemId, contract.SourceDigest, contract.IrDigest,
-                    contract.ComponentSchemaDigest, SpatialAdapterRowCodec.WordsPerRow, SpatialAdapterRowCodec.Pack<byte>,
-                    SpatialAdapterRowCodec.Apply<byte>, contract.EventCapacity, batch => { batches++; deviceRows += batch.Rows; },
-                    snapshot, false, [], [], default, buffer, SpatialAdapterRowCodec.EventTypes));
-
-#if GA_BROWSER_CONFORMANCE
-        using var runner = new DeterministicRunner<byte>(world, workload, workerCount: 1);
-#else
+        register(workload, buffer, snapshot, batch => { batches++; deviceRows += batch.Rows; });
         using var runner = new DeterministicRunner<byte>(world, workload);
-#endif
-        var total = default(Totals);
+        var total = default(SpatialCoverage);
         for (int tick = 1; tick <= ticks; tick++)
         {
             var (expected, packed, witnesses) = test.Prepare(tick, snapshot);
-            buffer.Bind(tick, SpatialAdapterRowCodec.Buffer.Capture(CollectionsMarshal.AsSpan(packed)));
-            CollectionsMarshal.AsSpan(packed).Clear(); // The captured resource owns its row data.
+            buffer.Bind(tick, CaptureBuffer(codec, packed));
             runner.BeginTick(tick, 0, Fixed.One);
-#if GA_BROWSER_CONFORMANCE
-            bool waitedForReadback = await Drain(runner, scenario.Budget);
-            if (startup is not null && scenario.Rows != 0 && !waitedForReadback)
-                throw new InvalidDataException($"WebGPU did not yield at {scenario}, tick {tick}.");
-#else
-            Drain(runner, scenario.Budget);
-#endif
-            if (startup is not null && deviceRows != (long)scenario.Rows * tick)
+            bool waited = await drain(runner, scenario.Budget);
+            if (requireYield && useGpu && scenario.Rows != 0 && !waited)
+                throw new InvalidDataException($"GPU work did not yield at {scenario}, tick {tick}.");
+            if (useGpu && deviceRows != (long)scenario.Rows * tick)
                 throw new InvalidDataException($"Incomplete device execution at {scenario}, tick {tick}.");
             total += test.Compare(runner.LastCompleted!, tick, expected, witnesses);
             if (tick % 1_000 == 0)
-                Console.WriteLine($"progress tick={tick}/{ticks} deviceBatches={batches} deviceRows={deviceRows}");
+                report($"progress tick={tick}/{ticks} deviceBatches={batches} deviceRows={deviceRows}");
         }
-        return total with { Batches = batches };
+        return new SpatialCoverage(total.Queries, total.Candidates, total.Duplicates, total.Exact, total.Stale, batches, total.Witnesses);
+    }
+
+    internal static void VerifyCoverage(SpatialCoverage total, bool useGpu)
+    {
+        if (total.Witnesses != Witness.All)
+            throw new InvalidDataException($"The corpus missed {Witness.All & ~total.Witnesses}.");
+        if (total.Queries <= 0 || (useGpu ? total.Batches <= 0 : total.Batches != 0))
+            throw new InvalidDataException("The corpus did not execute its selected route.");
+    }
+
+    private static GaBufferPacket CaptureBuffer(GaBufferCodec<SpatialMember> codec, List<SpatialMember> packed)
+    {
+#if NET8_0_OR_GREATER
+        var rows = CollectionsMarshal.AsSpan(packed);
+#else
+        var rows = packed.ToArray().AsSpan();
+#endif
+        var packet = codec.Capture(rows);
+        rows.Clear(); // The captured resource owns its row data.
+        return packet;
     }
 
     private (Expected[] Expected, List<SpatialMember> Packed, Witness Witnesses) Prepare(int tick, GaTickSnapshot snapshot)
@@ -191,7 +248,11 @@ internal sealed class SpatialScenario
             WriteRaw(isParent ? mount.X.Raw : 0);
             WriteRaw(isParent ? mount.Y.Raw : 0);
         }
+#if NET8_0_OR_GREATER
         return GaSnapshotPacket.FromRows(Layout, CollectionsMarshal.AsSpan(keys), CollectionsMarshal.AsSpan(words));
+#else
+        return GaSnapshotPacket.FromRows(Layout, keys.ToArray(), words.ToArray());
+#endif
 
         void WriteRaw(long value)
         {
@@ -265,14 +326,14 @@ internal sealed class SpatialScenario
             exact.Length == 0 ? 0 : best.Target.Priority, best.Score, witnesses);
     }
 
-    private Totals Compare(DeterministicTickResult result, int tick, Expected[] expected, Witness witnesses)
+    private SpatialCoverage Compare(DeterministicTickResult result, int tick, Expected[] expected, Witness witnesses)
     {
         if (result.TickIndex != tick || result.Events.Count != _turrets.Length)
             throw new InvalidDataException($"Wrong tick or event count at {_scenario}, tick {tick}.");
         int bufferRows = 0;
         if (expected.Length != 0)
             bufferRows = _turrets.Select(entity => _world.Get<TurretProbe>(entity)).Max(row => row.FirstCandidate + row.Candidates);
-        var totals = new Totals(0, 0, 0, 0, 0, 0, witnesses);
+        var totals = new SpatialCoverage(0, 0, 0, 0, 0, 0, witnesses);
         for (int row = 0; row < _turrets.Length; row++)
         {
             var item = result.Events[row];
@@ -294,7 +355,7 @@ internal sealed class SpatialScenario
                     $"actual parent={high.ParentAvailable} center=({high.WorldX.Raw},{high.WorldY.Raw}) " +
                     $"candidate={high.CandidateCount}/{high.DuplicateCount}/{high.StaleCount}/{high.CandidateStamp} " +
                     $"exact={high.ExactSet:x}/{high.ExactCount} winner={high.SelectedId}/{high.SelectedGeneration}/{high.Score.Raw}.");
-            totals += new Totals(1, want.Candidates, want.Duplicates, want.ExactCount, want.Stale, 0, want.Witnesses);
+            totals += new SpatialCoverage(1, want.Candidates, want.Duplicates, want.ExactCount, want.Stale, 0, want.Witnesses);
         }
         return totals;
     }
@@ -326,12 +387,12 @@ internal sealed class SpatialScenario
         switch (tick)
         {
             case 2:
-                _b = _b with { X = 24 * Unit };
+                _b.X = 24 * Unit;
                 _world.Get<Mount>(_b.Entity).X = Fixed.FromRaw(_b.X);
                 break;
             case 3:
                 _world.DestroyEntity(_a.Entity);
-                _a = _a with { Alive = false };
+                _a.Alive = false;
                 var old = _targets[10];
                 _oldTarget = new SpatialMember
                 {
@@ -339,7 +400,7 @@ internal sealed class SpatialScenario
                     Token = old.Token, Priority = old.Priority, Bounds = old.Bounds.ToComponent()
                 };
                 _world.DestroyEntity(old.Entity);
-                _targets[10] = old with { Alive = false };
+                _targets[10].Alive = false;
                 break;
             case 4:
                 var target = CreateTarget(10, 7, Point(4 * Unit, 0));
@@ -351,13 +412,13 @@ internal sealed class SpatialScenario
                 CheckReuse(_originalParent, _a.Entity);
                 break;
             case 6:
-                _a = _a with { X = Unit + 1 };
+                _a.X = Unit + 1;
                 _world.Get<Mount>(_a.Entity).X = Fixed.FromRaw(_a.X);
                 break;
             case 7:
-                var moved = _targets[10] with { Bounds = Point(-4 * Unit + 1, 0) };
+                ref var moved = ref _targets[10];
+                moved.Bounds = Point(-4 * Unit + 1, 0);
                 _world.Get<IndexedTarget>(moved.Entity).Bounds = moved.Bounds.ToComponent();
-                _targets[10] = moved;
                 break;
         }
     }
@@ -383,48 +444,62 @@ internal sealed class SpatialScenario
             throw new InvalidDataException("The world did not reuse the intended identity.");
     }
 
-#if GA_BROWSER_CONFORMANCE
-    private static async Task<bool> Drain(DeterministicRunner<byte> runner, int budget)
+    private struct Target
     {
-        var timer = Stopwatch.StartNew();
-        bool pending = false;
-        var status = runner.Advance(budget);
-        while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
-        {
-            pending = true;
-            await Task.Delay(1);
-            status = runner.Advance(budget);
-        }
-        if (status == DeterministicTickStatus.Faulted)
-            throw new InvalidOperationException("SpatialParent tick faulted.", runner.Fault);
-        if (status != DeterministicTickStatus.Completed)
-            throw new TimeoutException("SpatialParent stayed pending for 20 seconds.");
-        return pending;
-    }
-#else
-    private static void Drain(DeterministicRunner<byte> runner, int budget)
-    {
-        long started = Stopwatch.GetTimestamp();
-        var spin = new SpinWait();
-        while (true)
-        {
-            var status = runner.Advance(budget);
-            if (status == DeterministicTickStatus.Completed) return;
-            if (status == DeterministicTickStatus.Faulted)
-                throw new InvalidOperationException("SpatialParent tick faulted.", runner.Fault);
-            double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-            if (elapsed >= 20_000) throw new TimeoutException("SpatialParent stayed pending for 20 seconds.");
-            if (elapsed < 2) spin.SpinOnce(sleep1Threshold: -1);
-            else Thread.Sleep(1);
-        }
-    }
-#endif
+        internal Target(Entity entity, bool alive, int token, int priority, RawBounds bounds) =>
+            (Entity, Alive, Token, Priority, Bounds) = (entity, alive, token, priority, bounds);
 
-    private readonly record struct Target(Entity Entity, bool Alive, int Token, int Priority, RawBounds Bounds);
-    private readonly record struct Parent(Entity Entity, bool Alive, long X, long Y);
-    private readonly record struct Range(int Start, SpatialMember[] Members);
-    private readonly record struct Expected(bool Parent, long X, long Y, int Candidates, int Duplicates, int Stale,
-        uint Stamp, uint ExactSet, int ExactCount, int TargetId, int TargetGeneration, int Priority, long Score, Witness Witnesses);
+        internal Entity Entity;
+        internal bool Alive;
+        internal int Token;
+        internal int Priority;
+        internal RawBounds Bounds;
+    }
+
+    private struct Parent
+    {
+        internal Parent(Entity entity, bool alive, long x, long y) => (Entity, Alive, X, Y) = (entity, alive, x, y);
+        internal Entity Entity;
+        internal bool Alive;
+        internal long X;
+        internal long Y;
+    }
+
+    private readonly struct Range
+    {
+        internal Range(int start, SpatialMember[] members) => (Start, Members) = (start, members);
+        internal int Start { get; }
+        internal SpatialMember[] Members { get; }
+    }
+
+    private readonly struct Expected
+    {
+        internal Expected(bool parent, long x, long y, int candidates, int duplicates, int stale,
+            uint stamp, uint exactSet, int exactCount, int targetId, int targetGeneration, int priority, long score, Witness witnesses)
+        {
+            (Parent, X, Y, Candidates, Duplicates, Stale) = (parent, x, y, candidates, duplicates, stale);
+            (Stamp, ExactSet, ExactCount, TargetId, TargetGeneration) = (stamp, exactSet, exactCount, targetId, targetGeneration);
+            (Priority, Score, Witnesses) = (priority, score, witnesses);
+        }
+
+        internal bool Parent { get; }
+        internal long X { get; }
+        internal long Y { get; }
+        internal int Candidates { get; }
+        internal int Duplicates { get; }
+        internal int Stale { get; }
+        internal uint Stamp { get; }
+        internal uint ExactSet { get; }
+        internal int ExactCount { get; }
+        internal int TargetId { get; }
+        internal int TargetGeneration { get; }
+        internal int Priority { get; }
+        internal long Score { get; }
+        internal Witness Witnesses { get; }
+
+        public override string ToString() => $"parent={Parent} center=({X},{Y}) candidate={Candidates}/{Duplicates}/{Stale}/{Stamp} " +
+            $"exact={ExactSet:x}/{ExactCount} winner={TargetId}/{TargetGeneration}/{Score}";
+    }
     private struct Mount { public Fixed X, Y; }
     private struct IndexedTarget { public int Token, Priority; public SpatialBounds Bounds; }
 }

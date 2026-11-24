@@ -27,10 +27,12 @@ $kernels = Join-Path $project 'Assets/Kernels'
 $scenarios = Join-Path $project 'Assets/Scenarios'
 New-Item -ItemType Directory -Path $scenarios -Force | Out-Null
 $ga = Split-Path -Parent $PSScriptRoot
-foreach ($file in @('movement-conformance/MovementKernel.cs', 'target-read-conformance/TargetKernel.cs', 'shotburst-conformance/ShotKernels.cs')) {
+foreach ($file in @('movement-conformance/MovementKernel.cs', 'target-read-conformance/TargetKernel.cs',
+    'shotburst-conformance/ShotKernels.cs', 'spatial-parent-conformance/SpatialKernel.cs')) {
     Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $kernels
 }
-foreach ($file in @('target-read-conformance/TargetScenario.cs', 'shotburst-conformance/ShotBurstScenario.cs')) {
+foreach ($file in @('target-read-conformance/TargetScenario.cs', 'shotburst-conformance/ShotBurstScenario.cs',
+    'spatial-parent-conformance/SpatialScenario.cs', 'spatial-parent-conformance/FlatCandidates.cs')) {
     Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $scenarios
 }
 @{ dependencies = @{ 'com.shortkedr.skecs.ga' = "file:$packagePath" } } |

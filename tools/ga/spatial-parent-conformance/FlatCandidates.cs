@@ -1,7 +1,25 @@
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using SKECS.Numerics;
 
-internal readonly record struct RawBounds(long Left, long Bottom, long Right, long Top)
+internal readonly struct RawBounds : IEquatable<RawBounds>
 {
+    internal RawBounds(long left, long bottom, long right, long top) =>
+        (Left, Bottom, Right, Top) = (left, bottom, right, top);
+
+    internal long Left { get; }
+    internal long Bottom { get; }
+    internal long Right { get; }
+    internal long Top { get; }
+
+    public bool Equals(RawBounds other) =>
+        Left == other.Left && Bottom == other.Bottom && Right == other.Right && Top == other.Top;
+    public override bool Equals(object? obj) => obj is RawBounds other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(Left, Bottom, Right, Top);
+
     internal SpatialBounds ToComponent() => new()
     {
         Left = Fixed.FromRaw(Left), Bottom = Fixed.FromRaw(Bottom),

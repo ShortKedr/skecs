@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+using SKECS;
 using SKECS.GA;
 #if GA_BROWSER_CONFORMANCE
 using Microsoft.AspNetCore.Components;
@@ -51,7 +53,7 @@ using var startup = await GaStartup.SelectAsync(GaPolicy.RequireGpu, [new(contra
 #else
 if (args.Length is 1 or 2 && args[0] == "cpu")
 {
-    Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
+    await Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
     return;
 }
 if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
@@ -78,29 +80,21 @@ Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={d
     $"numericVersion={contract.NumericVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
     $"contentId={route.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
 Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
-#if GA_BROWSER_CONFORMANCE
 await Exercise(profile, startup);
-#else
-Exercise(profile, startup);
-#endif
 
-#if GA_BROWSER_CONFORMANCE
 async Task Exercise(string profile, GaStartupResult? startup)
-#else
-void Exercise(string profile, GaStartupResult? startup)
-#endif
 {
-    var (scenarios, ticks) = SelectCases(profile);
-    var totals = default(Totals);
-    foreach (var scenario in scenarios)
 #if GA_BROWSER_CONFORMANCE
-        totals += await SpatialScenario.Run(scenario, ticks, startup, contract);
+    const bool requireYield = true;
 #else
-        totals += SpatialScenario.Run(scenario, ticks, startup, contract);
+    const bool requireYield = false;
 #endif
-    Require(totals.Witnesses == Witness.All, $"The corpus missed {Witness.All & ~totals.Witnesses}.");
-    Require(totals.Queries > 0 && (startup is null ? totals.Batches == 0 : totals.Batches > 0),
-        "The corpus did not execute its selected route.");
+    var (scenarios, ticks) = SpatialScenario.SelectCases(profile);
+    var totals = default(SpatialCoverage);
+    foreach (var scenario in scenarios)
+        totals += await SpatialScenario.Run(scenario, ticks, startup is not null, requireYield,
+            SpatialAdapterRowCodec.Buffer, Register, Drain, Console.WriteLine);
+    SpatialScenario.VerifyCoverage(totals, startup is not null);
     Console.WriteLine($"SpatialParent route={(startup is null ? "cpu" : "gpu")} profile={profile} cases={scenarios.Length} " +
         $"ticks={ticks * scenarios.Length} queries={totals.Queries} candidateOccurrences={totals.Candidates} duplicates={totals.Duplicates} " +
         $"exactUnique={totals.Exact} staleTargets={totals.Stale} deviceRows={(startup is null ? 0 : totals.Queries)} " +
@@ -109,30 +103,54 @@ void Exercise(string profile, GaStartupResult? startup)
 #if GA_BROWSER_CONFORMANCE
     Console.WriteLine("WebGPU SpatialParent pendingReadback=passed");
 #endif
+
+    void Register(DeterministicWorkload<byte> workload, GaTickBuffer buffer, GaTickSnapshot snapshot, Action<GaBatchTimings> observe)
+    {
+        if (startup is null)
+            SpatialAdapter.Register(workload, SystemStage.Update, buffer, snapshot);
+        else
+            workload.AddBatchSystem(SystemStage.Update, SpatialAdapterRowCodec.CreateQuery(),
+                new GaBatchProcessor<byte>(startup, contract.SystemId, contract.SourceDigest, contract.IrDigest,
+                    contract.ComponentSchemaDigest, SpatialAdapterRowCodec.WordsPerRow, SpatialAdapterRowCodec.Pack<byte>,
+                    SpatialAdapterRowCodec.Apply<byte>, contract.EventCapacity, observe, snapshot,
+                    false, [], [], default, buffer, SpatialAdapterRowCodec.EventTypes));
+    }
 }
 
-static (Scenario[] Scenarios, int Ticks) SelectCases(string profile)
+#if GA_BROWSER_CONFORMANCE
+static async ValueTask<bool> Drain(DeterministicRunner<byte> runner, int budget)
+#else
+static ValueTask<bool> Drain(DeterministicRunner<byte> runner, int budget)
+#endif
 {
-    if (profile is "short" or "long")
-        return ([new(65, 27, 127, 64)], profile == "short" ? 1_000 : 100_000);
-    int[] rows = [0, 1, 63, 64, 65, 127, 128, 129, 1024];
-    uint[] seeds = [0, 1, 27, 7331, uint.MaxValue];
-    int[] chunks = [1, 64, 127, 256];
-    int[] budgets = [1, 3, 64];
-    if (profile is not ("smoke" or "matrix"))
-        throw new ArgumentException($"Unknown SpatialParent profile '{profile}'.");
-    var scenarios = new List<Scenario>();
-    foreach (int rowCount in rows)
+    var timer = Stopwatch.StartNew();
+    bool pending = false;
+#if !GA_BROWSER_CONFORMANCE
+    var spin = new SpinWait();
+#endif
+    var status = runner.Advance(budget);
+    while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
     {
-        int firstSeed = profile == "matrix" ? 0 : scenarios.Count % seeds.Length;
-        int lastSeed = profile == "matrix" ? seeds.Length : firstSeed + 1;
-        for (int seed = firstSeed; seed < lastSeed; seed++)
-        {
-            int i = scenarios.Count;
-            scenarios.Add(new Scenario(rowCount, seeds[seed], chunks[i % chunks.Length], budgets[i % budgets.Length]));
-        }
+        pending = true;
+#if GA_BROWSER_CONFORMANCE
+        await Task.Delay(1);
+#else
+        if (timer.Elapsed.TotalMilliseconds < 2)
+            spin.SpinOnce(sleep1Threshold: -1);
+        else
+            Thread.Sleep(1);
+#endif
+        status = runner.Advance(budget);
     }
-    return (scenarios.ToArray(), 8);
+    if (status == DeterministicTickStatus.Faulted)
+        throw new InvalidOperationException("SpatialParent tick faulted.", runner.Fault);
+    if (status != DeterministicTickStatus.Completed)
+        throw new TimeoutException("SpatialParent stayed pending for 20 seconds.");
+#if GA_BROWSER_CONFORMANCE
+    return pending;
+#else
+    return new ValueTask<bool>(pending);
+#endif
 }
 
 #if !GA_BROWSER_CONFORMANCE

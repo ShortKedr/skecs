@@ -1,0 +1,8 @@
+{
+  "source": "SpatialKernel.cs",
+  "systemType": "SpatialKernel",
+  "simulationContract": "spatial-parent/1",
+  "adapter": "UnitySpatialParent",
+  "inputType": "System.Byte",
+  "workgroup": 64
+}

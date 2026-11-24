@@ -14,6 +14,7 @@ internal static class GaUnityGameplayConformance
         const string profile = "matrix";
         await RunTargetRead(cpu, target, useGpu, singleWorker, profile);
         await RunShotBurst(cpu, target, useGpu, singleWorker, profile);
+        await RunSpatialParent(cpu, target, useGpu, profile);
     }
 
     private static async Task RunTargetRead(
@@ -62,11 +63,35 @@ internal static class GaUnityGameplayConformance
             "domainAndOrdinals=passed fixedAndRng=passed ticketIds=passed reusedSourceGeneration=passed");
     }
 
+    private static async Task RunSpatialParent(GaStartupResult cpu, GaStartupResult target, bool useGpu, string profile)
+    {
+        var (cases, ticks) = SpatialScenario.SelectCases(profile);
+        var cpuCoverage = default(SpatialCoverage);
+        var targetCoverage = default(SpatialCoverage);
+        var codec = UnitySpatialParentRows.Buffer;
+        foreach (var scenario in cases)
+        {
+            cpuCoverage += await SpatialScenario.Run(scenario, ticks, useGpu: false, requireYield: false, codec,
+                (workload, buffer, snapshot, observe) => UnitySpatialParent.Register(workload, SystemStage.Update, cpu, buffer, snapshot, observe: observe),
+                Drain, Debug.Log);
+            targetCoverage += await SpatialScenario.Run(scenario, ticks, useGpu, requireYield: useGpu, codec,
+                (workload, buffer, snapshot, observe) => UnitySpatialParent.Register(workload, SystemStage.Update, target, buffer, snapshot, observe: observe),
+                Drain, Debug.Log);
+        }
+        SpatialScenario.VerifyCoverage(cpuCoverage, useGpu: false);
+        SpatialScenario.VerifyCoverage(targetCoverage, useGpu);
+        Debug.Log($"GA_UNITY_SG07_OK profile={profile} cases={cases.Length} ticks={cases.Length * ticks} " +
+            $"queries={targetCoverage.Queries} candidateOccurrences={targetCoverage.Candidates} duplicates={targetCoverage.Duplicates} " +
+            $"exactUnique={targetCoverage.Exact} staleTargets={targetCoverage.Stale} deviceRows={(useGpu ? targetCoverage.Queries : 0)} " +
+            $"deviceBatches={targetCoverage.Batches} witnesses={targetCoverage.Witnesses} " +
+            "exactState=passed exactTypedEvents=passed bruteForceCoverage=passed sealAddClear=passed");
+    }
+
     private static async ValueTask<bool> Drain(DeterministicRunner<byte> runner, int budget)
     {
         var result = await GaUnityConformance.Advance(runner, budget);
         if (result.Status != DeterministicTickStatus.Completed)
-            throw new InvalidOperationException("TargetRead Unity tick did not complete.", runner.Fault);
+            throw new InvalidOperationException("Unity fixture tick did not complete.", runner.Fault);
         return result.Yielded;
     }
 
