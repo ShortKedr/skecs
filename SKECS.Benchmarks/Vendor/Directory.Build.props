@@ -1,5 +1,5 @@
 <Project>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'StaticLibrary' Or '$(MSBuildProjectName)' == 'MorpehLibrary'">
+  <PropertyGroup Condition="'$(ArtifactsPath)' == '' And '$(UseArtifactsOutput)' != 'true' And ('$(MSBuildProjectName)' == 'StaticLibrary' Or '$(MSBuildProjectName)' == 'MorpehLibrary')">
     <BaseIntermediateOutputPath>obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
   </PropertyGroup>

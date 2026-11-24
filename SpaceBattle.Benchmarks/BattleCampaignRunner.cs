@@ -8,7 +8,8 @@ public sealed class BattleCampaignRunner(Workspace workspace)
 {
     private const string BattleProject = "SpaceBattle.Benchmarks/SpaceBattle.Benchmarks.csproj";
     private const string DesktopProject = "SpaceBattle.Game/SpaceBattle.Game.csproj";
-    private readonly CampaignContext context = new(workspace, "space-battle");
+    internal const string CertificationName = "space-battle";
+    private readonly CampaignContext context = new(workspace, CertificationName);
     private static JsonNode Clone(JsonNode? node) => node?.DeepClone() ?? throw new InvalidDataException("Missing campaign field.");
 
     public async Task RunAsync(string suite, string? output, bool noBuild, bool includeDesktop, bool validateOnly, int ticks, int warmup)

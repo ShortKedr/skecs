@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using SpaceBattle.Benchmarks;
 
 namespace SKECS.BenchmarkTools;
 
@@ -75,7 +76,8 @@ internal static class BattleData
         {
             var path = pair.Key.Replace('\\', '/');
             return (path == name || path.EndsWith("/" + name, StringComparison.Ordinal)) &&
-                   (project == null || path.StartsWith(project + "/", StringComparison.Ordinal));
+                   (project == null || path.StartsWith(project + "/", StringComparison.Ordinal) ||
+                    path.StartsWith(CampaignContext.BinaryDirectory(BattleCampaignRunner.CertificationName, project) + "/", StringComparison.Ordinal));
         }).Select(pair => pair.Value.S()).ToArray();
         return matches.Length > 0 && matches.All(value => HashEquals(value, expected));
     }

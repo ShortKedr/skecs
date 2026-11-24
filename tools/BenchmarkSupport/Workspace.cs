@@ -106,12 +106,12 @@ public sealed class Workspace
             }
         }
     }
-    public SortedDictionary<string, string> Binaries(IEnumerable<string> projects)
+    public SortedDictionary<string, string> Binaries(IEnumerable<string> outputDirectories)
     {
         var hashes = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var project in projects)
+        foreach (var output in outputDirectories)
         {
-            var directory = PathFor(Path.Combine(Path.GetDirectoryName(project)!, "bin/Release/net8.0"));
+            var directory = PathFor(output);
             if (!Directory.Exists(directory)) throw new InvalidDataException("Build output missing: " + directory);
             foreach (var file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
                 if (file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".runtimeconfig.json", StringComparison.OrdinalIgnoreCase))

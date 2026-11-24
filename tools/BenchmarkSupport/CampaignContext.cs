@@ -14,7 +14,10 @@ public sealed class CampaignContext(Workspace workspace, string certificationNam
     public bool Dirty { get; private set; }
     public bool BuildSkipped { get; private set; }
     public static string Now() => DateTimeOffset.UtcNow.ToString("O");
-    public string FileFor(string project) => Workspace.PathFor(Path.Combine(Path.GetDirectoryName(project)!, "bin/Release/net8.0", Path.GetFileNameWithoutExtension(project) + ".dll"));
+    static string BuildDirectory(string name) => $"artifacts/benchmarks/build/{name}";
+    public static string BinaryDirectory(string name, string projectName) => $"{BuildDirectory(name)}/bin/{projectName}/release";
+    string OutputFor(string project) => BinaryDirectory(certificationName, Path.GetFileNameWithoutExtension(project));
+    public string FileFor(string project) => Workspace.PathFor(Path.Combine(OutputFor(project), Path.GetFileNameWithoutExtension(project) + ".dll"));
 
     public async Task BuildAsync(IEnumerable<string> projects, bool noBuild)
     {
@@ -24,7 +27,8 @@ public sealed class CampaignContext(Workspace workspace, string certificationNam
         BuildSkipped = noBuild;
         if (certificationName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || certificationName.Contains('/') || certificationName.Contains('\\'))
             throw new ArgumentException("Invalid build certification name.");
-        string snapshot = Workspace.ArtifactPath($"artifacts/benchmarks/build/{certificationName}.json");
+        string buildDirectory = Workspace.ArtifactPath(BuildDirectory(certificationName));
+        string snapshot = Workspace.ArtifactPath($"{BuildDirectory(certificationName)}.json");
         if (noBuild)
         {
             if (!File.Exists(snapshot)) throw new InvalidDataException("No certified benchmark build. Run without --no-build first.");
@@ -38,15 +42,16 @@ public sealed class CampaignContext(Workspace workspace, string certificationNam
         }
         else
         {
+            // The command host still has its ordinary build output open on Windows.
             foreach (var project in selected)
             {
-                await Host.RunAsync("dotnet", "restore", project, "--ignore-failed-sources", "--disable-parallel", "-p:NuGetAudit=false");
-                await Host.RunAsync("dotnet", "build", project, "-c", "Release", "--no-restore", "-m:1", "-nr:false", "-p:GeneratePackageOnBuild=false", "-p:UseSharedCompilation=false", "-p:NuGetAudit=false");
+                await Host.RunAsync("dotnet", "restore", project, "--artifacts-path", buildDirectory, "--ignore-failed-sources", "--disable-parallel", "-p:NuGetAudit=false");
+                await Host.RunAsync("dotnet", "build", project, "-c", "Release", "--artifacts-path", buildDirectory, "--no-restore", "-m:1", "-nr:false", "-p:GeneratePackageOnBuild=false", "-p:UseSharedCompilation=false", "-p:NuGetAudit=false");
             }
         }
         Workspace.AssertHashes(SourceHashes);
         if (!JsonNode.DeepEquals(Workspace.HashObject(SourceHashes), Workspace.HashObject(Workspace.Sources()))) throw new InvalidDataException("Source inventory changed during compilation.");
-        BinaryHashes = Workspace.Binaries(selected);
+        BinaryHashes = Workspace.Binaries(selected.Select(OutputFor));
         if (!noBuild) Workspace.Write(snapshot, new JsonObject { ["SourceHashes"] = Workspace.HashObject(SourceHashes), ["AssemblyHashes"] = Workspace.HashObject(BinaryHashes), ["Projects"] = new JsonArray(selected.Select(p => (JsonNode?)JsonValue.Create(p)).ToArray()) });
         Revision = await Host.CaptureAsync("git", ["rev-parse", "HEAD"], allowFailure: true);
         if (Revision.Length == 0) Revision = "source-tree";

@@ -10,8 +10,10 @@ public static class MicroReports
     static string RecordedKey(JsonElement hashes, params string[] candidates)
         => candidates.FirstOrDefault(candidate => hashes.TryGetProperty(candidate, out _))
             ?? throw new InvalidDataException("Missing recorded provenance: " + string.Join(" or ", candidates));
+    static readonly string CurrentEcsHost = EcsCampaignRunner.BinaryDirectory + "/SKECS.Benchmarks.dll";
+    const string PreviousEcsHost = "SKECS.Benchmarks/bin/Release/net8.0/SKECS.Benchmarks.dll";
     static string MeasurementKey(JsonElement manifest) => RecordedKey(manifest.GetProperty("assemblyHashes"),
-        "SKECS.Benchmarks/bin/Release/net8.0/SKECS.Benchmarks.dll", "Benchmarks.Local/bin/Release/net8.0/Comparison.dll");
+        CurrentEcsHost, PreviousEcsHost, "Benchmarks.Local/bin/Release/net8.0/Comparison.dll");
     static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
     static string Link(string directory, string root, string target) => Path.GetRelativePath(directory, Path.Combine(root, target)).Replace('\\', '/');
     static string Table(IEnumerable<string> headers, IEnumerable<IEnumerable<string>> rows)
@@ -140,7 +142,7 @@ public static class MicroReports
             var campaign = Load(campaignPath); Manifest(campaign);
             Require(S(campaign, "sourceRevision") == S(manifest, "sourceRevision") && Equal(campaign.GetProperty("sourceHashes"), manifest.GetProperty("sourceHashes")), "Comparison and supplement source snapshots differ");
             foreach (var assembly in campaign.GetProperty("assemblyHashes").EnumerateObject()
-                .Where(p => p.Name.StartsWith("Benchmarks.Local/bin/Release/net8.0/", StringComparison.Ordinal) || p.Name.StartsWith("SKECS.Benchmarks/bin/Release/net8.0/", StringComparison.Ordinal)))
+                .Where(p => p.Name.StartsWith("Benchmarks.Local/bin/Release/net8.0/", StringComparison.Ordinal) || p.Name.StartsWith("SKECS.Benchmarks/bin/Release/net8.0/", StringComparison.Ordinal) || p.Name.StartsWith(EcsCampaignRunner.BinaryDirectory + "/", StringComparison.Ordinal)))
                 Require(manifest.GetProperty("assemblyHashes").TryGetProperty(assembly.Name, out var digest) && assembly.Value.GetString()!.Equals(digest.GetString(), StringComparison.OrdinalIgnoreCase), "Comparison and supplement assemblies differ: " + assembly.Name);
         }
         var inputs = manifest.GetProperty("inputHashes");
@@ -154,8 +156,9 @@ public static class MicroReports
         string comparisonKey = manifest.GetProperty("assemblyHashes").TryGetProperty("Benchmarks.Local/bin/Release/net8.0/Comparison.dll", out _)
             ? "Benchmarks.Local/bin/Release/net8.0/Comparison.dll" : MeasurementKey(manifest);
         Require(S(manifest, "comparisonAssemblySha256").Equals(S(manifest.GetProperty("assemblyHashes"), comparisonKey), StringComparison.OrdinalIgnoreCase), "API assembly provenance mismatch");
-        OriginalExports(directory, secsData, manifest, "SKECS.Benchmarks/bin/Release/net8.0/SKECS.Benchmarks.dll");
-        OriginalExports(directory, legacyData, manifest, RecordedKey(manifest.GetProperty("assemblyHashes"), "SKECS.OtherBenchmarks/bin/Release/net8.0/SKECS.OtherBenchmarks.dll", "SKECS.Benchmarks/bin/Release/net8.0/SKECS.Benchmarks.dll"));
+        var assemblyHashes = manifest.GetProperty("assemblyHashes");
+        OriginalExports(directory, secsData, manifest, RecordedKey(assemblyHashes, CurrentEcsHost, PreviousEcsHost));
+        OriginalExports(directory, legacyData, manifest, RecordedKey(assemblyHashes, "SKECS.OtherBenchmarks/bin/Release/net8.0/SKECS.OtherBenchmarks.dll", CurrentEcsHost, PreviousEcsHost));
         var api = Api(apiData); Storage(storage);
         var secs = Bdn(secsData, ExpectedCurrent()); var legacy = Bdn(legacyData, ExpectedLegacy(root));
         Require(secs.Count == 34 && legacy.Count == 51, "Unexpected suite matrix size");

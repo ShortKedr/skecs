@@ -5,7 +5,9 @@ namespace SKECS.BenchmarkTools;
 public sealed class EcsCampaignRunner(Workspace workspace)
 {
     private const string Project = "SKECS.Benchmarks/SKECS.Benchmarks.csproj";
-    private readonly CampaignContext context = new(workspace, "ecs");
+    private const string CertificationName = "ecs";
+    internal static readonly string BinaryDirectory = CampaignContext.BinaryDirectory(CertificationName, "SKECS.Benchmarks");
+    private readonly CampaignContext context = new(workspace, CertificationName);
     private static JsonNode Clone(JsonNode? node) => node?.DeepClone() ?? throw new InvalidDataException("Missing campaign field.");
 
     public async Task RunAsync(string suite, string? output, bool noBuild, bool validateOnly)
@@ -64,7 +66,7 @@ public sealed class EcsCampaignRunner(Workspace workspace)
             var prior = Workspace.Read(comparison);
             if (prior["sourceRevision"]?.GetValue<string>() != context.Revision || !JsonNode.DeepEquals(prior["sourceHashes"], Workspace.HashObject(context.SourceHashes)))
                 throw new InvalidDataException("Comparison belongs to a different source snapshot. Run comparison first, or use a fresh --output for supplement.");
-            foreach (var pair in prior["assemblyHashes"]!.AsObject().Where(p => p.Key.StartsWith("SKECS.Benchmarks/bin/Release/net8.0/", StringComparison.Ordinal)))
+            foreach (var pair in prior["assemblyHashes"]!.AsObject().Where(p => p.Key.StartsWith(BinaryDirectory + "/", StringComparison.Ordinal)))
                 if (!context.BinaryHashes.TryGetValue(pair.Key, out var digest) || !string.Equals(pair.Value!.GetValue<string>(), digest, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException("Comparison binary differs; run comparison first or use a fresh --output: " + pair.Key);
         }

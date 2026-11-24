@@ -43,14 +43,18 @@ public sealed class RunnerTests
     public void BinarySnapshotCoversLibrariesAndRuntimeConfiguration()
     {
         using var fixture = new Fixture();
-        string prefix = "SKECS.Benchmarks/bin/Release/net8.0/";
+        string directory = "artifacts/benchmarks/build/ecs/bin/SKECS.Benchmarks/release";
+        string prefix = directory + "/";
         fixture.Write(prefix + "SKECS.Benchmarks.dll", "binary fixture");
         fixture.Write(prefix + "SKECS.dll", "core fixture");
         fixture.Write(prefix + "SKECS.Benchmarks.deps.json", "{}\n");
         fixture.Write(prefix + "SKECS.Benchmarks.runtimeconfig.json", "{}\n");
         fixture.Write(prefix + "SKECS.Benchmarks.pdb", "debug output");
         var workspace = new Workspace(fixture.Root);
-        var snapshot = workspace.Binaries(["SKECS.Benchmarks/SKECS.Benchmarks.csproj"]);
+        fixture.Write("SKECS.Benchmarks/bin/Release/net8.0/SKECS.dll", "launcher output");
+        var context = new CampaignContext(workspace, "ecs");
+        Assert.Equal(workspace.PathFor(prefix + "SKECS.Benchmarks.dll"), context.FileFor("SKECS.Benchmarks/SKECS.Benchmarks.csproj"));
+        var snapshot = workspace.Binaries([directory]);
         Assert.Equal(4, snapshot.Count);
         workspace.AssertHashes(snapshot);
         fixture.Write(prefix + "SKECS.dll", "changed assembly");
