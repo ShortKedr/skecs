@@ -1,0 +1,7 @@
+{
+  "source": "ShotKernels.cs",
+  "systemType": "ShotBurst",
+  "simulationContract": "shot-burst-capacity/1",
+  "adapter": "UnityShotBurst",
+  "workgroup": 64
+}

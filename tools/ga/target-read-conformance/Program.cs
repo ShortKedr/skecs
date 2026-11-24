@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+using SKECS;
 using SKECS.GA;
 #if GA_BROWSER_CONFORMANCE
 using Microsoft.AspNetCore.Components;
@@ -49,7 +51,7 @@ using var startup = await GaStartup.SelectAsync(GaPolicy.RequireGpu, [new(contra
 #else
 if (args.Length is 1 or 2 && args[0] == "cpu")
 {
-    Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
+    await Exercise(args.ElementAtOrDefault(1) ?? "matrix", null);
     return;
 }
 if (args.Length is not (4 or 5) || args[0] is not ("vulkan" or "d3d12" or "d3d11" or "opengl" or "gles" or "metal") ||
@@ -76,31 +78,20 @@ Console.WriteLine($"device={device.Info.Device} api={device.Info.Api} version={d
     $"numericVersion={contract.NumericVersion} artifact={manifest.ArtifactDigest} reflection={manifest.ReflectionDigest} " +
     $"contentId={route.ArtifactId} workgroup={manifest.Requirements.WorkgroupX}");
 Console.WriteLine($"toolchain={JsonSerializer.Serialize(manifest.Toolchain)}");
-#if GA_BROWSER_CONFORMANCE
 await Exercise(profile, startup);
-#else
-Exercise(profile, startup);
-#endif
 
-#if GA_BROWSER_CONFORMANCE
 async Task Exercise(string profile, GaStartupResult? startup)
-#else
-void Exercise(string profile, GaStartupResult? startup)
-#endif
 {
-    var (scenarios, ticks) = SelectCases(profile);
-    var coverage = default(Coverage);
-    foreach (var scenario in scenarios)
 #if GA_BROWSER_CONFORMANCE
-        coverage += await TargetScenario.Run(scenario with { Workers = 1 }, ticks, startup, contract);
+    const bool browser = true;
 #else
-        coverage += TargetScenario.Run(scenario, ticks, startup, contract);
+    const bool browser = false;
 #endif
-    Require(coverage.Rows > 0 && coverage.Self > 0 && coverage.Other > 0 && coverage.MissingTag > 0 &&
-        coverage.Destroyed > 0 && coverage.Stale > 0 && coverage.Reused > 0 && coverage.Bodyless > 0,
-        "The corpus missed a required target mode.");
-    Require(startup is null ? coverage.DeviceRows == 0 && coverage.DeviceBatches == 0 :
-        coverage.DeviceRows == coverage.Rows && coverage.DeviceBatches > 0, "Actual device work did not match expected routes.");
+    var (scenarios, ticks) = TargetScenario.SelectCases(profile, singleWorker: browser);
+    var coverage = default(TargetCoverage);
+    foreach (var scenario in scenarios)
+        coverage += await TargetScenario.Run(scenario, ticks, startup is not null, browser, Register, Drain, Console.WriteLine);
+    TargetScenario.VerifyCoverage(coverage, startup is not null);
     Console.WriteLine($"TargetRead route={(startup is null ? "cpu" : "gpu")} profile={profile} cases={scenarios.Length} " +
         $"ticks={scenarios.Length * ticks} rows={coverage.Rows} self={coverage.Self} other={coverage.Other} " +
         $"missingTag={coverage.MissingTag} destroyed={coverage.Destroyed} stale={coverage.Stale} reused={coverage.Reused} " +
@@ -109,32 +100,54 @@ void Exercise(string profile, GaStartupResult? startup)
 #if GA_BROWSER_CONFORMANCE
     Console.WriteLine("WebGPU TargetRead pendingReadback=passed");
 #endif
+
+    void Register(DeterministicWorkload<byte> workload, GaTickSnapshot snapshot, Action<GaBatchTimings> observe)
+    {
+        if (startup is null)
+            TargetAdapter.Register(workload, SystemStage.Update, snapshot);
+        else
+            workload.AddBatchSystem(SystemStage.Update, TargetAdapterRowCodec.CreateQuery(),
+                new GaBatchProcessor<byte>(startup, contract.SystemId, contract.SourceDigest, contract.IrDigest,
+                    contract.ComponentSchemaDigest, TargetAdapterRowCodec.WordsPerRow, TargetAdapterRowCodec.Pack<byte>,
+                    TargetAdapterRowCodec.Apply<byte>, contract.EventCapacity, observe, snapshot,
+                    false, [], [], default, null, TargetAdapterRowCodec.EventTypes));
+    }
 }
 
-static (Scenario[] Cases, int Ticks) SelectCases(string profile)
+#if GA_BROWSER_CONFORMANCE
+static async ValueTask<bool> Drain(DeterministicRunner<byte> runner, int budget)
+#else
+static ValueTask<bool> Drain(DeterministicRunner<byte> runner, int budget)
+#endif
 {
-    int[] rows = [0, 1, 63, 64, 65, 127, 128, 129, 1024];
-    uint[] seeds = [0, 1, 27, 7331, uint.MaxValue];
-    int[] chunks = [1, 64, 127, 256];
-    int[] budgets = [1, 3, 64];
-    int[] workers = [1, 2, Environment.ProcessorCount];
-    if (profile is "short" or "long")
-        return ([new(65, 27, 127, 64, 2)], profile == "short" ? 1_000 : 100_000);
-    if (profile is not ("smoke" or "matrix"))
-        throw new ArgumentException($"Unknown TargetRead profile '{profile}'.");
-    var scenarios = new List<Scenario>();
-    foreach (int rowCount in rows)
+    var timer = Stopwatch.StartNew();
+    bool pending = false;
+#if !GA_BROWSER_CONFORMANCE
+    var spin = new SpinWait();
+#endif
+    var status = runner.Advance(budget);
+    while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
     {
-        int firstSeed = profile == "matrix" ? 0 : scenarios.Count % seeds.Length;
-        int lastSeed = profile == "matrix" ? seeds.Length : firstSeed + 1;
-        for (int seed = firstSeed; seed < lastSeed; seed++)
-        {
-            int i = scenarios.Count;
-            scenarios.Add(new Scenario(rowCount, seeds[seed], chunks[i % chunks.Length],
-                budgets[i % budgets.Length], workers[i % workers.Length]));
-        }
+        pending = true;
+#if GA_BROWSER_CONFORMANCE
+        await Task.Delay(1);
+#else
+        if (timer.Elapsed.TotalMilliseconds < 2)
+            spin.SpinOnce(sleep1Threshold: -1);
+        else
+            Thread.Sleep(1);
+#endif
+        status = runner.Advance(budget);
     }
-    return (scenarios.ToArray(), 8);
+    if (status == DeterministicTickStatus.Faulted)
+        throw new InvalidOperationException("TargetRead tick faulted.", runner.Fault);
+    if (status != DeterministicTickStatus.Completed)
+        throw new TimeoutException("TargetRead stayed pending for 20 seconds.");
+#if GA_BROWSER_CONFORMANCE
+    return pending;
+#else
+    return new ValueTask<bool>(pending);
+#endif
 }
 
 #if !GA_BROWSER_CONFORMANCE

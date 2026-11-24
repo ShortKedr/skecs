@@ -1,0 +1,8 @@
+{
+  "source": "TargetKernel.cs",
+  "systemType": "TargetKernel",
+  "simulationContract": "target-read/1",
+  "adapter": "UnityTargetRead",
+  "inputType": "System.Byte",
+  "workgroup": 64
+}

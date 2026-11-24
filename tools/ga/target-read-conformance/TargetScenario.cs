@@ -1,13 +1,47 @@
-using System.Diagnostics;
+#nullable enable
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
 using SKECS;
 using SKECS.GA;
 using SKECS.Numerics;
 
-internal readonly record struct Scenario(int Rows, uint Seed, int Chunk, int Budget, int Workers);
-internal readonly record struct Coverage(long Rows, long Self, long Other, long MissingTag,
-    long Destroyed, long Stale, long Reused, long Bodyless, long DeviceRows, long DeviceBatches)
+internal readonly struct TargetCase
 {
-    public static Coverage operator +(Coverage left, Coverage right) => new(
+    internal TargetCase(int rows, uint seed, int chunk, int budget, int workers) =>
+        (Rows, Seed, Chunk, Budget, Workers) = (rows, seed, chunk, budget, workers);
+
+    internal int Rows { get; }
+    internal uint Seed { get; }
+    internal int Chunk { get; }
+    internal int Budget { get; }
+    internal int Workers { get; }
+
+    public override string ToString() => $"rows={Rows}, seed={Seed}, chunk={Chunk}, budget={Budget}, workers={Workers}";
+}
+
+internal readonly struct TargetCoverage
+{
+    internal TargetCoverage(long rows, long self, long other, long missingTag, long destroyed,
+        long stale, long reused, long bodyless, long deviceRows, long deviceBatches)
+    {
+        (Rows, Self, Other, MissingTag, Destroyed) = (rows, self, other, missingTag, destroyed);
+        (Stale, Reused, Bodyless, DeviceRows, DeviceBatches) = (stale, reused, bodyless, deviceRows, deviceBatches);
+    }
+
+    internal long Rows { get; }
+    internal long Self { get; }
+    internal long Other { get; }
+    internal long MissingTag { get; }
+    internal long Destroyed { get; }
+    internal long Stale { get; }
+    internal long Reused { get; }
+    internal long Bodyless { get; }
+    internal long DeviceRows { get; }
+    internal long DeviceBatches { get; }
+
+    public static TargetCoverage operator +(TargetCoverage left, TargetCoverage right) => new(
         left.Rows + right.Rows, left.Self + right.Self, left.Other + right.Other, left.MissingTag + right.MissingTag,
         left.Destroyed + right.Destroyed, left.Stale + right.Stale, left.Reused + right.Reused, left.Bodyless + right.Bodyless,
         left.DeviceRows + right.DeviceRows, left.DeviceBatches + right.DeviceBatches);
@@ -16,8 +50,8 @@ internal readonly record struct Coverage(long Rows, long Self, long Other, long 
 internal sealed class TargetScenario
 {
     private const long MissingPosition = -0x112233445566L;
-    private static readonly GaSnapshotLayout Layout = new([GaScalar.Bool, GaScalar.Bool, GaScalar.Fixed]);
-    private readonly Scenario _scenario;
+    private static readonly GaSnapshotLayout Layout = new(new[] { GaScalar.Bool, GaScalar.Bool, GaScalar.Fixed });
+    private readonly TargetCase _scenario;
     private readonly Entity[] _sources;
     private readonly long[] _positions;
     private readonly long[] _steps;
@@ -32,7 +66,7 @@ internal sealed class TargetScenario
     private long _recycledPosition;
     private bool _taggedPresent = true;
 
-    private TargetScenario(Scenario scenario, World world)
+    private TargetScenario(TargetCase scenario, World world)
     {
         _scenario = scenario;
         _sources = new Entity[scenario.Rows];
@@ -75,11 +109,35 @@ internal sealed class TargetScenario
     private long UntaggedPosition => -0x5566778899L - (_scenario.Seed & 255);
     private static TargetBody Body(long position) => new() { Position = Fixed.FromRaw(position) };
 
-#if GA_BROWSER_CONFORMANCE
-    public static async Task<Coverage> Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
-#else
-    public static Coverage Run(Scenario scenario, int ticks, GaStartupResult? startup, GaContractIdentity contract)
-#endif
+    internal static (TargetCase[] Cases, int Ticks) SelectCases(string profile, bool singleWorker)
+    {
+        int[] rows = { 0, 1, 63, 64, 65, 127, 128, 129, 1024 };
+        uint[] seeds = { 0, 1, 27, 7331, uint.MaxValue };
+        int[] chunks = { 1, 64, 127, 256 };
+        int[] budgets = { 1, 3, 64 };
+        int[] workers = singleWorker ? new[] { 1 } : new[] { 1, 2, Environment.ProcessorCount };
+        if (profile is "short" or "long")
+            return (new[] { new TargetCase(65, 27, 127, 64, singleWorker ? 1 : 2) }, profile == "short" ? 1_000 : 100_000);
+        if (profile is not ("smoke" or "matrix"))
+            throw new ArgumentException($"Unknown TargetRead profile '{profile}'.");
+        var scenarios = new List<TargetCase>();
+        foreach (int rowCount in rows)
+        {
+            int firstSeed = profile == "matrix" ? 0 : scenarios.Count % seeds.Length;
+            int lastSeed = profile == "matrix" ? seeds.Length : firstSeed + 1;
+            for (int seed = firstSeed; seed < lastSeed; seed++)
+            {
+                int i = scenarios.Count;
+                scenarios.Add(new TargetCase(rowCount, seeds[seed], chunks[i % chunks.Length],
+                    budgets[i % budgets.Length], workers[i % workers.Length]));
+            }
+        }
+        return (scenarios.ToArray(), 8);
+    }
+
+    internal static async ValueTask<TargetCoverage> Run(TargetCase scenario, int ticks, bool useGpu, bool requireYield,
+        Action<DeterministicWorkload<byte>, GaTickSnapshot, Action<GaBatchTimings>> register,
+        Func<DeterministicRunner<byte>, int, ValueTask<bool>> drain, Action<string> report)
     {
         using var world = new World(new WorldOptions(scenario.Chunk));
         var test = new TargetScenario(scenario, world);
@@ -87,17 +145,7 @@ internal sealed class TargetScenario
         var workload = new DeterministicWorkload<byte>();
         long deviceRows = 0;
         long deviceBatches = 0;
-        if (startup is null)
-            TargetAdapter.Register(workload, SystemStage.Update, snapshot);
-        else
-        {
-            workload.AddBatchSystem(SystemStage.Update, TargetAdapterRowCodec.CreateQuery(),
-                new GaBatchProcessor<byte>(startup, contract.SystemId, contract.SourceDigest, contract.IrDigest,
-                    contract.ComponentSchemaDigest, TargetAdapterRowCodec.WordsPerRow, TargetAdapterRowCodec.Pack<byte>,
-                    TargetAdapterRowCodec.Apply<byte>, contract.EventCapacity,
-                    batch => { deviceRows += batch.Rows; deviceBatches++; }, snapshot,
-                    false, [], [], default, null, TargetAdapterRowCodec.EventTypes));
-        }
+        register(workload, snapshot, batch => { deviceRows += batch.Rows; deviceBatches++; });
 
         using var runner = new DeterministicRunner<byte>(world, workload, scenario.Workers);
         for (int tick = 1; tick <= ticks; tick++)
@@ -109,21 +157,27 @@ internal sealed class TargetScenario
                 throw new InvalidDataException("Snapshot membership differs from the live fixture.");
             snapshot.Bind(tick, packet);
             runner.BeginTick(tick, 0, Fixed.One);
-#if GA_BROWSER_CONFORMANCE
-            bool waitedForReadback = await Drain(runner, scenario.Budget);
-            if (startup is not null && scenario.Rows != 0 && !waitedForReadback)
-                throw new InvalidDataException($"WebGPU did not yield at {scenario}, tick {tick}.");
-#else
-            Drain(runner, scenario.Budget);
-#endif
-            if (startup is not null && deviceRows != (long)scenario.Rows * tick)
+            bool waited = await drain(runner, scenario.Budget);
+            if (requireYield && useGpu && scenario.Rows != 0 && !waited)
+                throw new InvalidDataException($"GPU work did not yield at {scenario}, tick {tick}.");
+            if (useGpu && deviceRows != (long)scenario.Rows * tick)
                 throw new InvalidDataException($"GPU rows differ at {scenario}, tick {tick}.");
             test.VerifyTick(world, runner.LastCompleted!, tick);
             if (ticks >= 1_000 && tick % 1_000 == 0)
-                Console.WriteLine($"progress tick={tick}/{ticks} deviceRows={deviceRows} deviceBatches={deviceBatches}");
+                report($"progress tick={tick}/{ticks} deviceRows={deviceRows} deviceBatches={deviceBatches}");
         }
-        return new Coverage((long)scenario.Rows * ticks, test._counts[0], test._counts[1], test._counts[3],
+        return new TargetCoverage((long)scenario.Rows * ticks, test._counts[0], test._counts[1], test._counts[3],
             test._counts[4], test._counts[5], test._counts[6], test._counts[7], deviceRows, deviceBatches);
+    }
+
+    internal static void VerifyCoverage(TargetCoverage coverage, bool useGpu)
+    {
+        if (coverage.Rows <= 0 || coverage.Self <= 0 || coverage.Other <= 0 || coverage.MissingTag <= 0 ||
+            coverage.Destroyed <= 0 || coverage.Stale <= 0 || coverage.Reused <= 0 || coverage.Bodyless <= 0)
+            throw new InvalidDataException("The corpus missed a required target mode.");
+        if (useGpu ? coverage.DeviceRows != coverage.Rows || coverage.DeviceBatches <= 0 :
+            coverage.DeviceRows != 0 || coverage.DeviceBatches != 0)
+            throw new InvalidDataException("Actual device work did not match expected routes.");
     }
 
     private void PrepareWorld(World world, int tick)
@@ -204,8 +258,12 @@ internal sealed class TargetScenario
             words.Add((uint)raw);
             words.Add((uint)(raw >> 32));
         }
+#if NET8_0_OR_GREATER
         return GaSnapshotPacket.FromRows(Layout, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(keys),
             System.Runtime.InteropServices.CollectionsMarshal.AsSpan(words));
+#else
+        return GaSnapshotPacket.FromRows(Layout, keys.ToArray(), words.ToArray());
+#endif
     }
 
     private void VerifyTick(World world, DeterministicTickResult result, int tick)
@@ -256,46 +314,5 @@ internal sealed class TargetScenario
             throw new InvalidDataException($"Entity allocation differed: expected {id}/{generation}, got {actual.Id}/{actual.Version}.");
     }
 
-#if GA_BROWSER_CONFORMANCE
-    private static async Task<bool> Drain(DeterministicRunner<byte> runner, int budget)
-    {
-        var timer = Stopwatch.StartNew();
-        bool pending = false;
-        var status = runner.Advance(budget);
-        while (status == DeterministicTickStatus.Pending && timer.Elapsed < TimeSpan.FromSeconds(20))
-        {
-            pending = true;
-            await Task.Delay(1);
-            status = runner.Advance(budget);
-        }
-        if (status == DeterministicTickStatus.Faulted)
-            throw new InvalidOperationException("TargetRead tick faulted.", runner.Fault);
-        if (status != DeterministicTickStatus.Completed)
-            throw new TimeoutException("TargetRead stayed pending for 20 seconds.");
-        return pending;
-    }
-#else
-    private static void Drain(DeterministicRunner<byte> runner, int budget)
-    {
-        long started = Stopwatch.GetTimestamp();
-        var spin = new SpinWait();
-        while (true)
-        {
-            var status = runner.Advance(budget);
-            if (status == DeterministicTickStatus.Completed)
-                return;
-            if (status == DeterministicTickStatus.Faulted)
-                throw new InvalidOperationException("TargetRead tick faulted.", runner.Fault);
-            double elapsed = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-            if (elapsed >= 20_000)
-                throw new TimeoutException("TargetRead stayed pending for 20 seconds.");
-            if (elapsed < 2)
-                spin.SpinOnce(sleep1Threshold: -1);
-            else
-                Thread.Sleep(1);
-        }
-    }
-#endif
-
-    private struct TrackingTag;
+    private struct TrackingTag { }
 }

@@ -34,11 +34,14 @@ public static class GaUnityConformance
             bool cpuOnlyHost = Environment.GetCommandLineArgs().Contains("-ga-cpu");
             var movement = UnityMovement.LoadAsset();
             var nested = UnityNestedFault.LoadAsset();
-            Check(movement && nested, "The packaged Unity GA assets are missing.");
+            var targetRead = UnityTargetRead.LoadAsset();
+            var shotBurst = UnityShotBurst.LoadAsset();
+            Check(movement && nested && targetRead && shotBurst, "The packaged Unity GA assets are missing.");
             var movementRequest = UnityMovement.CreateRequest(movement);
             var nestedRequest = UnityNestedFault.CreateRequest(nested);
-            var requests = new[] { movementRequest, nestedRequest };
-            var assets = new[] { movement, nested };
+            var requests = new[] { movementRequest, nestedRequest,
+                UnityTargetRead.CreateRequest(targetRead), UnityShotBurst.CreateRequest(shotBurst) };
+            var assets = new[] { movement, nested, targetRead, shotBurst };
             var devices = GaUnityDevice.Discover(assets);
             cpuOnlyHost |= Application.platform == RuntimePlatform.WebGLPlayer && devices.Count == 0;
             Debug.Log($"GA_UNITY_DEVICE Unity={Application.unityVersion} api={SystemInfo.graphicsDeviceType} " +
@@ -64,6 +67,7 @@ public static class GaUnityConformance
                 Check(devices.Count == 0, "The CPU-only host must use a graphics device without GA compute.");
                 await CompareMovement(cpu, noCompute, 65, 1200, 0);
                 CompareFault(await RunNested(cpu), await RunNested(noCompute));
+                await GaUnityGameplayConformance.Run(cpu, noCompute);
                 Debug.Log("SKECS_GA_UNITY_OK policy=CpuOnly,Auto,RequireGpu deviceRows=0 ticks=1200 defaultAsync=passed");
                 return 0;
             }
@@ -94,6 +98,7 @@ public static class GaUnityConformance
             gpuRows += concurrentRows.Sum();
             CompareFault(await RunNested(cpu), await RunNested(gpu));
             await VerifyDiscard((GaPackedKernel)auto.GetPreparedKernel(nestedRequest.Contract.SystemId));
+            await GaUnityGameplayConformance.Run(cpu, gpu);
 
             Debug.Log($"SKECS_GA_UNITY_OK policy=CpuOnly,Auto,RequireGpu deviceRows={gpuRows} ticks=1200 " +
                 "fault=nested-divide-by-zero discard=passed concurrent=passed defaultAsync=passed qualification=Experimental");
@@ -134,8 +139,8 @@ public static class GaUnityConformance
             var frame = new MovementFrame { DeltaTime = Fixed.FromRaw(tick % 2 == 0 ? 1L << 31 : -(1L << 30)) };
             cpuRunner.BeginTick(tick, frame, frame.DeltaTime);
             targetRunner.BeginTick(tick, frame, frame.DeltaTime);
-            Check(await Advance(cpuRunner, 3) == DeterministicTickStatus.Completed, "Movement CPU tick faulted.", cpuRunner.Fault);
-            Check(await Advance(targetRunner, 1) == DeterministicTickStatus.Completed, "Movement target tick faulted.", targetRunner.Fault);
+            Check((await Advance(cpuRunner, 3)).Status == DeterministicTickStatus.Completed, "Movement CPU tick faulted.", cpuRunner.Fault);
+            Check((await Advance(targetRunner, 1)).Status == DeterministicTickStatus.Completed, "Movement target tick faulted.", targetRunner.Fault);
             Check(cpuRunner.LastCompleted.TickIndex == tick && targetRunner.LastCompleted.TickIndex == tick &&
                 cpuRunner.LastCompleted.Events.Count == 0 && targetRunner.LastCompleted.Events.Count == 0, "Unexpected movement publication.");
             Compare(tick);
@@ -189,13 +194,13 @@ public static class GaUnityConformance
         var work = UnityNestedFault.Register(new DeterministicWorkload<byte>(), SystemStage.Update, startup);
         using var runner = new DeterministicRunner<byte>(world, work);
         runner.BeginTick(0, 0, Fixed.One);
-        Check(await Advance(runner, 2) == DeterministicTickStatus.Completed, "Nested baseline tick faulted.", runner.Fault);
+        Check((await Advance(runner, 2)).Status == DeterministicTickStatus.Completed, "Nested baseline tick faulted.", runner.Fault);
         foreach (var entity in rows)
             Check(world.Get<NestedFaultRow>(entity).Result == 45, "Nested baseline returned the wrong sum.");
         world.Get<NestedFaultRow>(rows[65]).Divisor = 2;
         world.Get<NestedFaultRow>(rows[66]).Divisor = 1;
         runner.BeginTick(1, 0, Fixed.One);
-        var status = await Advance(runner, 2);
+        var status = (await Advance(runner, 2)).Status;
         Check(status == DeterministicTickStatus.Faulted && runner.LastCompleted.TickIndex == 0,
             "A nested fault was published as a completed tick.", runner.Fault);
         var fault = runner.Fault as GaExecutionException;
@@ -231,18 +236,21 @@ public static class GaUnityConformance
         }
     }
 
-    private static async Task<DeterministicTickStatus> Advance<T>(DeterministicRunner<T> runner, int budget) where T : unmanaged
+    internal static async ValueTask<(DeterministicTickStatus Status, bool Yielded)> Advance<T>(
+        DeterministicRunner<T> runner, int budget) where T : unmanaged
     {
         var timeout = Stopwatch.StartNew();
         var status = runner.Advance(budget);
+        bool yielded = false;
         while (status == DeterministicTickStatus.Pending)
         {
             if (timeout.Elapsed > TimeSpan.FromSeconds(25))
                 throw new TimeoutException("The Unity deterministic runner did not finish the tick.");
+            yielded = true;
             await Task.Yield();
             status = runner.Advance(budget);
         }
-        return status;
+        return (status, yielded);
     }
 
     private static void Check(bool condition, string message, Exception cause = null)

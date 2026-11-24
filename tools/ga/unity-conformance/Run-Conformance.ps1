@@ -54,9 +54,9 @@ if ($GraphicsApis.Count) {
 }
 $backend = if ($Lane -eq 'IL2CPP') { 'Il2Cpp' } else { 'Mono' }
 $generateArgs = $editorArgs + $graphicsArgs + @('-quit', '-executeMethod', "GaUnityConformanceBuild.Generate$backend")
-Invoke-UnityProcess $editor $generateArgs 'generate.log' 'SKECS GA generated 2 Unity kernel asset(s)' 300
+Invoke-UnityProcess $editor $generateArgs 'generate.log' 'SKECS GA generated 4 Unity kernel asset(s)' 300
 
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Acceptance/GaUnityConformance.cs') -Destination (Join-Path $project 'Assets')
+Copy-Item -Path (Join-Path $PSScriptRoot 'Acceptance/*.cs') -Destination (Join-Path $project 'Assets')
 $runArgs = @()
 if ($CpuOnly) {
     $runArgs = @('-nographics', '-ga-cpu')

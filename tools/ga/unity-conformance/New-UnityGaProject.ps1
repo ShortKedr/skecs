@@ -23,7 +23,16 @@ if (Test-Path -LiteralPath $project) {
 $manifest = Join-Path $project 'Packages'
 New-Item -ItemType Directory -Path $manifest -Force | Out-Null
 Copy-Item -Path (Join-Path $PSScriptRoot 'Project/*') -Destination $project -Recurse
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot '../movement-conformance/MovementKernel.cs') -Destination (Join-Path $project 'Assets/Kernels')
+$kernels = Join-Path $project 'Assets/Kernels'
+$scenarios = Join-Path $project 'Assets/Scenarios'
+New-Item -ItemType Directory -Path $scenarios -Force | Out-Null
+$ga = Split-Path -Parent $PSScriptRoot
+foreach ($file in @('movement-conformance/MovementKernel.cs', 'target-read-conformance/TargetKernel.cs', 'shotburst-conformance/ShotKernels.cs')) {
+    Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $kernels
+}
+foreach ($file in @('target-read-conformance/TargetScenario.cs', 'shotburst-conformance/ShotBurstScenario.cs')) {
+    Copy-Item -LiteralPath (Join-Path $ga $file) -Destination $scenarios
+}
 @{ dependencies = @{ 'com.shortkedr.skecs.ga' = "file:$packagePath" } } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $manifest 'manifest.json') -Encoding utf8NoBOM
 Write-Output $project
