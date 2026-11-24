@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 
 namespace SKECS.GA.Tests;
 
-public sealed class CompilerTests
+public sealed partial class CompilerTests
 {
     [Fact]
     public void MovementMatchesIndependentCSharpAcrossTicks()

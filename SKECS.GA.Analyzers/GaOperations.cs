@@ -68,6 +68,12 @@ public static partial class GaSemanticAnalysis
                     if (fieldInitializer.Target is not IFieldReferenceOperation { Field.IsStatic: false })
                         Report(Stream, location, "Initialize only instance fields in a GA output payload.");
                     break;
+                case ISimpleAssignmentOperation initializerAssignment when
+                    initializerAssignment.Parent is IObjectOrCollectionInitializerOperation valueInitializer &&
+                    IsPlainValueCreation(valueInitializer.Parent):
+                    if (initializerAssignment.Target is not IFieldReferenceOperation { Field.IsStatic: false })
+                        Report(Unknown, location, "Initialize only explicit instance fields in a portable value.");
+                    break;
                 case ISimpleAssignmentOperation assignment:
                     RequireWritable(assignment.Target, location);
                     break;
@@ -124,7 +130,10 @@ public static partial class GaSemanticAnalysis
                     if (payload.Arguments.Length != 0 || payload.Constructor is { IsImplicitlyDeclared: false })
                         Report(Stream, location, "Use a plain field initializer with no user-defined constructor in a GA output payload.");
                     break;
-                case IObjectOrCollectionInitializerOperation initializer when IsPackedOutputInitializer(initializer):
+                case IObjectOrCollectionInitializerOperation initializer when
+                    IsPackedOutputInitializer(initializer) || IsPlainValueCreation(initializer.Parent):
+                    break;
+                case IObjectCreationOperation creation when IsPlainValueCreation(creation):
                     break;
                 case IObjectCreationOperation creation when creation.Type?.IsValueType == true && creation.Initializer == null:
                     if (creation.Constructor is { IsImplicitlyDeclared: false } constructor)
@@ -600,6 +609,13 @@ public static partial class GaSemanticAnalysis
                     parameter.Parameter.RefKind is RefKind.In or RefKind.Ref))
                 Report(Stream, location, $"Use default, a plain field initializer, or an entry component as the {method.Name}<T> payload.");
         }
+
+        private static bool IsPlainValueCreation(IOperation? operation) => operation is IObjectCreationOperation
+        {
+            Type: INamedTypeSymbol { TypeKind: TypeKind.Struct, IsUnmanagedType: true, IsRefLikeType: false, IsTupleType: false },
+            Arguments.Length: 0,
+            Constructor: null or { IsImplicitlyDeclared: true }
+        };
 
         private bool IsPackedOutputInitializer(IOperation? operation) =>
             operation is IObjectOrCollectionInitializerOperation { Parent: IObjectCreationOperation creation } && IsPackedOutputValue(creation);

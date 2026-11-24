@@ -1,0 +1,9 @@
+{
+  "sources": ["Kernels.cs"],
+  "simulationContractId": "fixtures.ga.frontend/1",
+  "policy": "cpuOnly",
+  "target": "vulkan",
+  "languageVersion": "12.0",
+  "nullable": "enable",
+  "checkOverflow": false
+}

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GaSourceRoot Condition="'$(GaSourceRoot)' == ''">../../..</GaSourceRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="**/ga-adapter.g.cs;**/ga-row-codec.g.cs" />
+    <ProjectReference Include="$(GaSourceRoot)/SKECS.GA.Compiler/SKECS.GA.Compiler.csproj" />
+    <ProjectReference Include="$(GaSourceRoot)/SKECS.GA.Backend.Vulkan/SKECS.GA.Backend.Vulkan.csproj" />
+    <ProjectReference Include="$(GaSourceRoot)/SKECS.GA.Backend.D3D12/SKECS.GA.Backend.D3D12.csproj" />
+    <ProjectReference Include="$(GaSourceRoot)/SKECS/SKECS.csproj" />
+    <EmbeddedResource Include="Kernels.cs" LogicalName="Kernels.cs" />
+  </ItemGroup>
+</Project>

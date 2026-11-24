@@ -8,7 +8,7 @@ using SKECS.GA.Analysis;
 
 namespace SKECS.GA;
 
-internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol entry, CancellationToken cancellationToken)
+internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSymbol entry, CancellationToken cancellationToken)
 {
     private readonly Dictionary<IParameterSymbol, GaComponent> _components = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<ITypeSymbol, (GaComponent Component, int Index)> _declaredAccesses = new(SymbolEqualityComparer.Default);
@@ -52,12 +52,17 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         Dictionary<ITypeParameterSymbol, ITypeSymbol> Types)
     {
         internal Dictionary<int, Dictionary<string, GaSlot>> AggregateInputs { get; } = new();
+        internal Dictionary<ILocalSymbol, Dictionary<string, GaSlot>> AggregateLocals { get; } = new(SymbolEqualityComparer.Default);
     }
 
     private const int ReceiverInput = -1;
 
     private sealed record LoopControl(ILabelSymbol Exit, ILabelSymbol Continue, GaSlot State);
-    private sealed record HelperReturn(GaSlot Completed, GaSlot Result);
+    private sealed record HelperReturn(GaSlot Completed, GaSlot Result)
+    {
+        internal ITypeSymbol? AggregateType { get; init; }
+        internal Dictionary<string, GaSlot>? AggregateResult { get; init; }
+    }
     private const uint LoopRunning = 0;
     private const uint LoopContinue = 1;
     private const uint LoopBreak = 2;
@@ -241,8 +246,15 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             case IExpressionStatementOperation expression:
                 return LowerStatement(expression.Operation);
             case IReturnOperation { ReturnedValue: { } returned } when _helperReturn is { } exit:
-                return new GaBlock([new GaStore(exit.Result, LowerValue(returned)),
+                var result = exit.AggregateResult == null
+                    ? new GaStore(exit.Result, LowerValue(returned))
+                    : StoreAggregate(exit.AggregateType!, exit.AggregateResult, returned);
+                return new GaBlock([result,
                     new GaStore(exit.Completed, new GaConstant(GaScalar.Bool, 1, Source(operation)))]);
+            case IInvocationOperation invocation when IsAggregate(ResolveHelperType(invocation.Type)!):
+                var discarded = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
+                CaptureAggregate(ResolveHelperType(invocation.Type)!, invocation, discarded);
+                return BindingStatements(discarded);
             case IInvocationOperation invocation when _helperReturn != null:
                 if (invocation.TargetMethod.ReturnsVoid)
                     throw Unsupported(invocation, "Use a scalar-return call in a portable helper body.");
@@ -263,6 +275,15 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 return new GaBlock(group.Declarations.Select(LowerStatement).ToArray());
             case IVariableDeclarationOperation declaration:
                 return new GaBlock(declaration.Declarators.Select(LowerStatement).ToArray());
+            case IVariableDeclaratorOperation declarator when IsAggregate(ResolveHelperType(declarator.Symbol.Type)!) &&
+                declarator.Symbol.RefKind == RefKind.None && !_optionalLocals.ContainsKey(declarator.Symbol):
+                var aggregateBindings = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
+                var aggregateType = ResolveHelperType(declarator.Symbol.Type)!;
+                var aggregateLocal = declarator.Initializer?.Value is { } aggregateInitializer
+                    ? CaptureAggregate(aggregateType, aggregateInitializer, aggregateBindings)
+                    : CreateAggregate(aggregateType, declarator, aggregateBindings);
+                CurrentAggregateLocals.Add(declarator.Symbol, aggregateLocal);
+                return BindingStatements(aggregateBindings);
             case IVariableDeclaratorOperation declarator when _helperReturn != null:
                 var helperLocal = DeclareHelperLocal(_helper!, declarator);
                 return declarator.Initializer?.Value is { } helperInitializer
@@ -298,14 +319,6 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                     _ticketLocals.Add(declarator.Symbol, ticketSlot);
                     return new GaCreate(ticketSlot);
                 }
-                if (IsAggregate(declarator.Symbol.Type))
-                {
-                    if (declarator.Initializer?.Value is not { } initializer)
-                        throw Unsupported(declarator, "Initialize the value copy from a declared component or existing copy.");
-                    var bindings = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
-                    _aggregateLocals.Add(declarator.Symbol, CaptureAggregate(declarator.Symbol.Type, initializer, bindings));
-                    return new GaBlock(bindings.Select(binding => (GaStatement)new GaStore(binding.Slot, binding.Value)).ToArray());
-                }
                 var type = Scalar(declarator.Symbol.Type, declarator);
                 var local = AddLocal(type);
                 _locals.Add(declarator.Symbol, local);
@@ -314,14 +327,18 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                 _scalarDefaults.Add(new GaStore(local, new GaConstant(type, 0, Source(declarator))));
                 return new GaBlock([]);
             case ISimpleAssignmentOperation assignment when !assignment.IsRef:
+                if (IsAggregate(ResolveHelperType(assignment.Target.Type)!))
+                    return StoreAggregate(assignment.Target.Type!, AggregateDestination(assignment.Target), assignment.Value);
                 if (_helperReturn == null && FindInlineAccess(assignment.Target) is { } assignmentAccess)
                 {
                     var array = LowerArrayAccess(assignment.Target, assignmentAccess, writable: true);
                     return new GaArrayStore(array.Field, array.Index, null, LowerValue(assignment.Value), array.Source);
                 }
                 return new GaStore(WritableSlot(assignment.Target), LowerValue(assignment.Value));
-            case ICompoundAssignmentOperation compound when !compound.IsLifted &&
-                compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
+            case ICompoundAssignmentOperation compound when !compound.IsLifted:
+                if (IsAggregate(ResolveHelperType(compound.Target.Type)!))
+                    return LowerAggregateCompound(compound);
+
                 if (_helperReturn == null && FindInlineAccess(compound.Target) is { } compoundAccess)
                 {
                     var array = LowerArrayAccess(compound.Target, compoundAccess, writable: true);
@@ -426,6 +443,13 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
     private GaValue LowerCompound(ICompoundAssignmentOperation compound, GaSlot previous)
     {
         var oldValue = new GaLoad(previous, Source(compound.Target));
+        if (!compound.InConversion.IsIdentity || !compound.OutConversion.IsIdentity)
+        {
+            if (compound.OperatorMethod == null && compound.Target.Type?.TypeKind == TypeKind.Enum)
+                return Binary(previous.Type, compound.OperatorKind, oldValue,
+                    LowerValue(compound.Value), compound.IsChecked, compound);
+            return LowerConvertedCompound(compound, oldValue);
+        }
         if (compound.OperatorMethod is { } method && !IsBuiltinOrFixed(method))
             return LowerValueMember(compound, method, null, [compound.Value], oldValue: oldValue);
         return Binary(previous.Type, compound.OperatorKind, oldValue,
@@ -976,6 +1000,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             ILocalReferenceOperation local when _helper != null && _helper.Locals.TryGetValue(local.Local, out var slot) =>
                 new GaLoad(slot, source),
             IFieldReferenceOperation field when FindCapturedField(field) is { } captured => new GaLoad(captured, source),
+            IFieldReferenceOperation field when LowerAggregateProjection(field) is { } projected => projected,
             ILocalReferenceOperation or IFieldReferenceOperation => new GaLoad(Slot(operation), source),
             IParenthesizedOperation parentheses => LowerValue(parentheses.Operand),
             IConversionOperation conversion when conversion.OperatorMethod != null &&
@@ -1016,10 +1041,10 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
 
     private GaValue LowerHelper(IInvocationOperation invocation)
     {
-        var target = invocation.TargetMethod;
+        var target = SpecializeMethod(invocation.TargetMethod);
         var definition = target.OriginalDefinition.PartialImplementationPart ?? target.OriginalDefinition;
         if (target is not { IsStatic: true, MethodKind: MethodKind.Ordinary, ReturnsVoid: false,
-                ReturnsByRef: false, ReturnsByRefReadonly: false, ContainingType.IsGenericType: false } ||
+                ReturnsByRef: false, ReturnsByRefReadonly: false } ||
             definition.DeclaringSyntaxReferences is not [var reference] ||
             reference.GetSyntax(cancellationToken) is not MethodDeclarationSyntax declaration ||
             target.Parameters.Any(parameter => parameter.RefKind != RefKind.None || parameter.IsParams) ||
@@ -1036,26 +1061,29 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
 
         var source = Source(invocation);
         var parameters = new GaSlot[target.Parameters.Length];
+        var aggregateInputs = new Dictionary<int, Dictionary<string, GaSlot>>();
         var bindings = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
         // Named arguments still evaluate in source order. Bind each before entering the helper.
         foreach (var argument in invocation.Arguments.OrderBy(argument => argument.Syntax.SpanStart))
         {
-            var value = LowerValue(argument.Value);
             int ordinal = argument.Parameter!.Ordinal;
-            var slot = AddLocal(Scalar(ResolveHelperType(target.Parameters[ordinal].Type), argument));
+            var parameterType = ResolveHelperType(target.Parameters[ordinal].Type)!;
+            if (IsAggregate(parameterType))
+            {
+                aggregateInputs.Add(ordinal, CaptureAggregate(parameterType, argument.Value, bindings));
+                continue;
+            }
+            var value = LowerValue(argument.Value);
+            var slot = AddLocal(Scalar(parameterType, argument));
             parameters[ordinal] = slot;
             bindings.Add((slot, value, Source(argument)));
         }
 
-        var types = new Dictionary<ITypeParameterSymbol, ITypeSymbol>(SymbolEqualityComparer.Default);
-        for (int i = 0; i < definition.TypeParameters.Length; i++)
-        {
-            var type = ResolveHelperType(target.TypeArguments[i])!;
-            _ = Scalar(type, invocation);
-            types.Add(definition.TypeParameters[i], type);
-        }
+        var types = MemberTypes(target, invocation);
 
         var frame = new HelperFrame(parameters, new Dictionary<ILocalSymbol, GaSlot>(SymbolEqualityComparer.Default), types);
+        foreach (var (index, fields) in aggregateInputs)
+            frame.AggregateInputs.Add(index, fields);
         return LowerHelperBody(invocation, definition, declaration, block.Operations, null,
             Scalar(ResolveHelperType(target.ReturnType), invocation), frame, bindings);
     }
@@ -1073,15 +1101,17 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
     }
 
     private GaValue LowerValueMember(IOperation site, IMethodSymbol target, IOperation? receiver, IOperation[] arguments,
-        GaLoad? oldValue = null, int[]? ordinals = null)
+        GaValue? oldValue = null, int[]? ordinals = null,
+        Dictionary<string, GaSlot>? aggregateResult = null, IReadOnlyList<BoundOperand>? operands = null)
     {
-        var definition = target.OriginalDefinition;
+        target = SpecializeMethod(target);
+        var definition = target.OriginalDefinition.PartialImplementationPart ?? target.OriginalDefinition;
         if (target.ReturnsVoid || target.ReturnsByRef || target.ReturnsByRefReadonly ||
-            target.ContainingType.IsGenericType || target.IsVirtual || target.IsAbstract ||
+            target.IsVirtual || target.IsAbstract ||
             !target.ContainingType.StaticConstructors.IsEmpty ||
             !target.IsStatic && (receiver == null || target.ContainingType.TypeKind != TypeKind.Struct ||
                 !(target.IsReadOnly || target.ContainingType.IsReadOnly)) ||
-            arguments.Length + (oldValue == null ? 0 : 1) != target.Parameters.Length ||
+            (operands?.Count ?? arguments.Length + (oldValue == null ? 0 : 1)) != target.Parameters.Length ||
             target.Parameters.Any(parameter => parameter.RefKind != RefKind.None) ||
             definition.DeclaringSyntaxReferences is not [var reference])
             throw Unsupported(site, "Use a source-defined scalar operator, conversion, or static or readonly value getter.");
@@ -1102,6 +1132,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             PropertyDeclarationSyntax syntax => (syntax.ExpressionBody, (BlockSyntax?)null),
             IndexerDeclarationSyntax syntax => (syntax.ExpressionBody, (BlockSyntax?)null),
             ArrowExpressionClauseSyntax syntax => (syntax, (BlockSyntax?)null),
+            MethodDeclarationSyntax syntax => (syntax.ExpressionBody, syntax.Body),
             _ => ((ArrowExpressionClauseSyntax?)null, (BlockSyntax?)null)
         };
         if (block == null && bodySyntax != null)
@@ -1113,22 +1144,25 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
 
         IReadOnlyList<IOperation> operations = block == null ? [] : block.Operations;
         IOperation? expression = null;
-        var resultType = Scalar(target.ReturnType, site);
+        var resultType = aggregateResult == null ? Scalar(target.ReturnType, site) : GaScalar.Bool;
         if (operations.Count == 0)
         {
             expression = arrow == null ? null : model.GetOperation(arrow.Expression, cancellationToken);
             while (expression?.Parent is IConversionOperation { IsImplicit: true } conversion)
                 expression = conversion;
-            if (expression == null || Scalar(expression.Type, expression) != resultType)
+            if (expression == null || aggregateResult == null && Scalar(expression.Type, expression) != resultType)
                 throw Unsupported(site, "Use a source-defined body returning a portable scalar.");
         }
 
         var frame = new HelperFrame(new GaSlot[target.Parameters.Length],
             new Dictionary<ILocalSymbol, GaSlot>(SymbolEqualityComparer.Default),
-            new Dictionary<ITypeParameterSymbol, ITypeSymbol>(SymbolEqualityComparer.Default));
+            MemberTypes(target, site));
         var bindings = new List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)>();
         if (receiver != null)
             BindMemberInput(frame, ReceiverInput, target.ContainingType, receiver, bindings);
+        if (operands != null)
+            for (int i = 0; i < operands.Count; i++)
+                BindOperand(frame, i, target.Parameters[i].Type, operands[i], bindings, site);
         if (oldValue != null)
         {
             if (Scalar(target.Parameters[0].Type, site) != oldValue.Type ||
@@ -1143,7 +1177,10 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             int ordinal = ordinals == null ? i + (oldValue == null ? 0 : 1) : ordinals[i];
             BindMemberInput(frame, ordinal, target.Parameters[ordinal].Type, arguments[i], bindings);
         }
-        return LowerHelperBody(site, definition, declaration, operations, expression, resultType, frame, bindings);
+        return aggregateResult == null
+            ? LowerHelperBody(site, definition, declaration, operations, expression, resultType, frame, bindings)
+            : LowerAggregateHelperBody(site, definition, declaration, operations, expression,
+                target.ReturnType, aggregateResult, frame, bindings);
     }
 
     private void BindMemberInput(HelperFrame frame, int index, ITypeSymbol type, IOperation operation,
@@ -1161,54 +1198,6 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         bindings.Add((local, value, Source(operation)));
     }
 
-    private Dictionary<string, GaSlot> CaptureAggregate(ITypeSymbol type, IOperation operation,
-        List<(GaSlot Slot, GaValue Value, GaSourceSpan Source)> bindings)
-    {
-        var fields = new Dictionary<string, GaSlot>(StringComparer.Ordinal);
-        var source = Source(operation);
-        var path = new Stack<string>();
-        bool readOnly = false;
-        var root = ReadArrayFieldPath(UnwrapIdentity(operation), path, ref readOnly);
-        string prefix = path.Count == 0 ? "" : string.Join(".", path) + ".";
-        var capturedFields = FindCapturedFields(root);
-        var component = capturedFields == null ? ResolveStorage(root, operation) : null;
-        BindFields((INamedTypeSymbol)type, "", readOnly);
-        return fields;
-
-        void BindFields(INamedTypeSymbol aggregate, string fieldPrefix, bool parentReadOnly)
-        {
-            if (GetInlineArrayDeclaration(aggregate) != null || aggregate.GetAttributes().Any(attribute =>
-                attribute.AttributeClass?.ToDisplayString() == "System.Runtime.InteropServices.StructLayoutAttribute" &&
-                attribute.ConstructorArguments is [{ Value: int layout }] && layout != 0))
-                throw Unsupported(operation, "Capture only sequential structs with explicit scalar fields.");
-            foreach (var field in aggregate.GetMembers().OfType<IFieldSymbol>().Where(field => !field.IsStatic)
-                .OrderBy(field => field.MetadataName, StringComparer.Ordinal))
-            {
-                if (field.IsImplicitlyDeclared || field.IsFixedSizeBuffer || field.RefKind != RefKind.None ||
-                    field.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
-                    throw Unsupported(operation, "Capture only accessible explicit instance fields.");
-                string fieldPath = fieldPrefix + field.MetadataName;
-                bool fieldReadOnly = parentReadOnly || field.IsReadOnly;
-                if (IsAggregate(field.Type))
-                {
-                    BindFields((INamedTypeSymbol)field.Type, fieldPath + ".", fieldReadOnly);
-                    continue;
-                }
-                var scalar = Scalar(field.Type, operation);
-                string? enumType = field.Type.TypeKind == TypeKind.Enum ? QualifiedName(field.Type) : null;
-                GaSlot captured;
-                if (component != null)
-                    captured = FieldSlot(component, prefix + fieldPath, scalar, enumType,
-                        fieldReadOnly ? GaFieldAccess.Read : component.Access);
-                else if (!capturedFields!.TryGetValue(prefix + fieldPath, out captured))
-                    throw Unsupported(operation, "Capture a field path from a bound value operand or getter receiver.");
-                var local = AddLocal(scalar);
-                fields.Add(fieldPath, local);
-                bindings.Add((local, new GaLoad(captured, source), source));
-            }
-        }
-    }
-
     private static bool IsAggregate(ITypeSymbol type) => type is INamedTypeSymbol
         { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None, IsUnmanagedType: true,
             IsRefLikeType: false, IsTupleType: false } && !IsFixed(type);
@@ -1216,7 +1205,7 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
     private Dictionary<string, GaSlot>? FindCapturedFields(IOperation? root)
     {
         if (root is ILocalReferenceOperation local)
-            return _aggregateLocals.GetValueOrDefault(local.Local);
+            return CurrentAggregateLocals.GetValueOrDefault(local.Local);
         return root switch
         {
             IParameterReferenceOperation parameter => _helper?.AggregateInputs.GetValueOrDefault(parameter.Parameter.Ordinal),
@@ -1250,7 +1239,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         {
             if (operations.Count != 0 && operations[^1] is IReturnOperation { ReturnedValue: { } result } &&
                 operations.Take(operations.Count - 1).All(operation => operation is IVariableDeclarationGroupOperation group &&
-                    Declarators(group).All(declarator => declarator.Initializer != null)))
+                    Declarators(group).All(declarator => declarator.Initializer != null &&
+                        !IsAggregate(ResolveHelperType(declarator.Symbol.Type)!))))
             {
                 foreach (var group in operations.Take(operations.Count - 1).Cast<IVariableDeclarationGroupOperation>())
                 foreach (var declarator in Declarators(group))
@@ -1263,7 +1253,9 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
             }
 
             GaValue lowered = expression != null ? LowerValue(expression) :
-                operations.Any(operation => operation.DescendantsAndSelf().Any(part => part is ILoopOperation or ISwitchOperation))
+                operations.Any(operation => operation.DescendantsAndSelf().Any(part => part is ILoopOperation or ISwitchOperation ||
+                    part is IVariableDeclaratorOperation local && IsAggregate(ResolveHelperType(local.Symbol.Type)!) ||
+                    part is ISimpleAssignmentOperation assignment && IsAggregate(ResolveHelperType(assignment.Target.Type)!)))
                     ? LowerHelperStatements(operations, resultType, Source(site), frame)
                     : LowerHelperFlow(operations, resultType, Source(site), frame);
             for (int i = bindings.Count - 1; i >= 0; i--)
@@ -1381,14 +1373,17 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
                     return LowerEffect(expression.Operation);
                 case ISimpleAssignmentOperation { IsRef: false } assign:
                     return new GaStoredValue(WritableHelperLocal(frame, assign.Target), LowerValue(assign.Value), empty, position);
-                case ICompoundAssignmentOperation compound when !compound.IsLifted &&
-                    compound.InConversion.IsIdentity && compound.OutConversion.IsIdentity:
+                case ICompoundAssignmentOperation compound when !compound.IsLifted:
+                    if (IsAggregate(compound.Target.Type!))
+                        return new GaBlockValue(LowerAggregateCompound(compound), empty, position);
                     var destination = WritableHelperLocal(frame, compound.Target);
                     return new GaStoredValue(destination, LowerCompound(compound, destination), empty, position);
                 case IIncrementOrDecrementOperation change when IsBuiltinOrFixed(change.OperatorMethod) && !change.IsLifted:
                     var counter = WritableHelperLocal(frame, change.Target);
                     return new GaStoredValue(counter, LowerIncrement(change, counter), empty, position);
                 case IInvocationOperation { TargetMethod.ReturnsVoid: false } invocation:
+                    if (IsAggregate(ResolveHelperType(invocation.Type)!))
+                        return new GaBlockValue(LowerStatement(invocation), empty, position);
                     var value = LowerValue(invocation);
                     return new GaBoundValue(AddLocal(value.Type), value, empty, position);
                 case IEmptyOperation:
@@ -1400,8 +1395,9 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
 
     }
 
-    private static GaSlot WritableHelperLocal(HelperFrame frame, IOperation target) => Unwrap(target) switch
+    private GaSlot WritableHelperLocal(HelperFrame frame, IOperation target) => Unwrap(target) switch
     {
+        IFieldReferenceOperation field when FindCapturedField(field) is { } captured => captured,
         ILocalReferenceOperation local when frame.Locals.TryGetValue(local.Local, out var slot) => slot,
         IParameterReferenceOperation parameter when !frame.AggregateInputs.ContainsKey(parameter.Parameter.Ordinal) =>
             frame.Parameters[parameter.Parameter.Ordinal],
@@ -1673,7 +1669,8 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
     {
         if (_helperReturn != null)
             return WritableHelperLocal(_helper!, operation);
-        var slot = Slot(operation);
+        var slot = operation is IFieldReferenceOperation field && FindCapturedField(field) is { } captured
+            ? captured : Slot(operation);
         if (slot.IsField && _schema[slot.Index].Access != GaFieldAccess.ReadWrite)
             throw Unsupported(operation, "The target field was declared read-only.");
         return slot;
@@ -1822,9 +1819,23 @@ internal sealed class GaLowerer(CSharpCompilation compilation, IMethodSymbol ent
         attribute.AttributeClass?.ToDisplayString() == "System.Runtime.InteropServices.StructLayoutAttribute" &&
         attribute.ConstructorArguments[0].Value is 2);
 
-    private ITypeSymbol? ResolveHelperType(ITypeSymbol? type) =>
-        type is ITypeParameterSymbol parameter && _helper != null && _helper.Types.TryGetValue(parameter, out var argument)
-            ? argument : type;
+    private ITypeSymbol? ResolveHelperType(ITypeSymbol? type)
+    {
+        if (_helper == null)
+            return type;
+        if (type is ITypeParameterSymbol parameter && _helper.Types.TryGetValue(parameter, out var argument))
+            return argument;
+        if (type is not INamedTypeSymbol named)
+            return type;
+        var owner = ResolveHelperType(named.ContainingType) as INamedTypeSymbol;
+        var arguments = named.TypeArguments.Select(argument => ResolveHelperType(argument)!).ToArray();
+        if (SymbolEqualityComparer.Default.Equals(owner, named.ContainingType) &&
+            arguments.SequenceEqual(named.TypeArguments, SymbolEqualityComparer.Default))
+            return type;
+        var definition = owner == null ? named.ConstructedFrom : owner.GetTypeMembers(named.Name, named.Arity)
+            .Single(candidate => SymbolEqualityComparer.Default.Equals(candidate.OriginalDefinition, named.OriginalDefinition));
+        return named.Arity == 0 ? definition : definition.Construct(arguments);
+    }
 
     private static GaScalar Scalar(ITypeSymbol? type, IOperation operation)
     {
