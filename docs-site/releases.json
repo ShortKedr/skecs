@@ -1,5 +1,5 @@
 {
-  "defaultVersion": "0.1.0",
+  "defaultVersion": "0.2.0",
   "releases": [
     {
       "version": "0.1.0",
@@ -15,6 +15,26 @@
         { "source": "docs/secs/README", "route": "using" },
         { "source": "docs/secs/INSTALL", "route": "installation" },
         { "source": "docs/SECS_OPTIMIZATION", "route": "performance" }
+      ]
+    },
+    {
+      "version": "0.2.0",
+      "product": "SKECS",
+      "packageId": "ShortKedr.SKECS",
+      "sourceCommit": "98bf6b22ac8d9a122ce1baba8201ccad02c51465",
+      "docsCommit": "45401fc82124c49d4fd2bf8f272fce508fc22154",
+      "releaseUrl": "https://github.com/ShortKedr/skecs/releases/tag/skecs-v0.2.0",
+      "packageUrl": "https://github.com/ShortKedr/skecs/releases/download/skecs-v0.2.0/ShortKedr.SKECS.0.2.0.nupkg",
+      "packageSha256": "a7ebeb0eed4909438c04303dcb21d18326200524072b8d4beddb14816756a2ef",
+      "project": "SKECS/SKECS.csproj",
+      "sample": "SKECS.Sample/Program.cs",
+      "migrationFrom": "0.1.0",
+      "guides": [
+        { "source": "docs/skecs/README", "route": "using" },
+        { "source": "docs/skecs/INSTALL", "route": "installation" },
+        { "source": "docs/SKECS_OPTIMIZATION", "route": "performance" },
+        { "source": "docs/skecs/MIGRATION", "route": "migration" },
+        { "source": "docs/skecs/RELEASE_NOTES_0.2.0", "route": "release-notes" }
       ]
     }
   ]
