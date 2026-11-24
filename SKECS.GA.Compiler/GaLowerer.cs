@@ -335,10 +335,10 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                 return new GaBlock([]);
             case ISimpleAssignmentOperation assignment when !assignment.IsRef:
                 if (IsAggregate(ResolveHelperType(assignment.Target.Type)!))
-                    return FindInlineAccess(assignment.Target) is { } valueAccess
+                    return FindArrayAccess(assignment.Target) is { } valueAccess
                         ? LowerArrayValueStore(assignment.Target, valueAccess, assignment.Value, null)
                         : StoreAggregate(assignment.Target.Type!, AggregateDestination(assignment.Target), assignment.Value);
-                if (_helperReturn == null && FindInlineAccess(assignment.Target) is { } assignmentAccess)
+                if (_helperReturn == null && FindArrayAccess(assignment.Target) is { } assignmentAccess)
                 {
                     var array = LowerArrayAccess(assignment.Target, assignmentAccess, writable: true);
                     return new GaArrayStore(array.Field, array.Index, null, LowerValue(assignment.Value), array.Source);
@@ -346,11 +346,11 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                 return new GaStore(WritableSlot(assignment.Target), LowerValue(assignment.Value));
             case ICompoundAssignmentOperation compound when !compound.IsLifted:
                 if (IsAggregate(ResolveHelperType(compound.Target.Type)!))
-                    return FindInlineAccess(compound.Target) is { } valueCompoundAccess
+                    return FindArrayAccess(compound.Target) is { } valueCompoundAccess
                         ? LowerArrayValueStore(compound.Target, valueCompoundAccess, compound.Value, compound)
                         : LowerAggregateCompound(compound);
 
-                if (_helperReturn == null && FindInlineAccess(compound.Target) is { } compoundAccess)
+                if (_helperReturn == null && FindArrayAccess(compound.Target) is { } compoundAccess)
                 {
                     var array = LowerArrayAccess(compound.Target, compoundAccess, writable: true);
                     var previous = AddLocal(array.Type);
@@ -360,7 +360,7 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                 return new GaStore(slot, LowerCompound(compound, slot));
             case IIncrementOrDecrementOperation change when !change.IsLifted &&
                 (change.OperatorMethod == null || _helperReturn != null && IsBuiltinOrFixed(change.OperatorMethod)):
-                if (_helperReturn == null && FindInlineAccess(change.Target) is { } incrementAccess)
+                if (_helperReturn == null && FindArrayAccess(change.Target) is { } incrementAccess)
                 {
                     var array = LowerArrayAccess(change.Target, incrementAccess, writable: true);
                     var previous = AddLocal(array.Type);
@@ -992,7 +992,7 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                 _ => throw Unsupported(operation, "Only canonical 32-bit scalar constants are supported.")
             }, source);
 
-        if (FindInlineAccess(operation) is { } access)
+        if (FindArrayAccess(operation) is { } access)
             return LowerArrayAccess(operation, access, writable: false);
         if (IsResourcePath(operation))
             return LowerResourceRead(operation, type, source);
@@ -1738,7 +1738,7 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
     }
 
     private GaSlot FieldSlot(GaComponent component, string pathName, GaScalar type, string? enumType,
-        GaFieldAccess? access = null)
+        GaFieldAccess? access = null, string? fixedArrayType = null)
     {
         var key = (component.Id, pathName);
         if (_fields.TryGetValue(key, out var fieldSlot))
@@ -1747,58 +1747,79 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
         _fields.Add(key, fieldSlot);
         _schema.Add(new GaField(component.Id, pathName, type, access ?? component.Access)
         {
-            ClrEnumType = enumType
+            ClrEnumType = enumType,
+            FixedArrayType = fixedArrayType
         });
         return fieldSlot;
     }
 
-    private static IInlineArrayAccessOperation? FindInlineAccess(IOperation operation)
+    private readonly record struct ArrayAccess(IOperation Site, IOperation Storage, IOperation Index,
+        bool FixedArray = false, bool ReturnsReadOnly = false);
+
+    private readonly record struct ArrayLayout(GaComponent Component, string Prefix, string Suffix, int Length,
+        bool ReadOnlyStorage, string? FixedArrayType, bool ReturnsReadOnly);
+
+    private ArrayAccess? FindArrayAccess(IOperation operation)
     {
         IOperation? receiver = Unwrap(operation);
         while (receiver is IFieldReferenceOperation field)
             receiver = Unwrap(field.Instance);
-        return receiver as IInlineArrayAccessOperation;
+        return RecognizeArrayAccess(receiver);
     }
 
-    private GaArrayRead LowerArrayAccess(IOperation operation, IInlineArrayAccessOperation access, bool writable)
+    private ArrayAccess? RecognizeArrayAccess(IOperation? operation)
+    {
+        if (operation is IInlineArrayAccessOperation inline)
+            return new ArrayAccess(inline, inline.Instance, inline.Argument);
+        if (operation is not null && GaFixedArrayAccess.TryGet(operation, compilation, out var storage, out var index,
+            out bool readOnly))
+            return new ArrayAccess(operation, storage, index, FixedArray: true, ReturnsReadOnly: readOnly);
+        return null;
+    }
+
+    private GaArrayRead LowerArrayAccess(IOperation operation, ArrayAccess access, bool writable)
     {
         var layout = ReadArrayLayout(operation, access);
         var field = ArrayField(operation, layout, "", Scalar(operation.Type, operation), operation.Type, writable);
-        return new GaArrayRead(field, LowerValue(access.Argument), Source(access));
+        return new GaArrayRead(field, LowerValue(access.Index), Source(access.Site));
     }
 
-    private (GaComponent Component, string Prefix, string Suffix, int Length, bool ReadOnly)
-        ReadArrayLayout(IOperation operation, IInlineArrayAccessOperation access)
+    private ArrayLayout ReadArrayLayout(IOperation operation, ArrayAccess access)
     {
-        if (access.Argument.Type?.SpecialType != SpecialType.System_Int32 ||
-            access.Instance.Type is not INamedTypeSymbol { IsUnmanagedType: true } buffer ||
+        if (access.Index.Type?.SpecialType != SpecialType.System_Int32 ||
+            access.Storage.Type is not INamedTypeSymbol { IsUnmanagedType: true } buffer ||
             HasExplicitLayout(buffer))
-            throw Unsupported(access, "Use an Int32 element index on a portable inline array.");
+            throw Unsupported(access.Site, "Use an Int32 element index on a portable inline array.");
 
-        var declaration = GetInlineArrayDeclaration(buffer);
-        if (declaration?.ConstructorArguments is not [{ Value: int length }] || length <= 0)
-            throw Unsupported(access, "The inline array must declare a constant positive length with the runtime InlineArray attribute.");
+        int length = FixedArray16<int>.Length;
+        if (!access.FixedArray)
+        {
+            var declaration = GetInlineArrayDeclaration(buffer);
+            if (declaration?.ConstructorArguments is not [{ Value: int inlineLength }] || inlineLength <= 0)
+                throw Unsupported(access.Site, "The inline array must declare a constant positive length with the runtime InlineArray attribute.");
+            length = inlineLength;
+        }
 
         bool readOnly = false;
         var path = new Stack<string>();
         ReadArrayFieldPath(operation, path, ref readOnly);
         string suffix = path.Count == 0 ? "" : "." + string.Join(".", path);
         path.Clear();
-        var root = ReadArrayFieldPath(access.Instance, path, ref readOnly);
-        if (root is IInlineArrayAccessOperation)
-            throw Unsupported(access, "Use one inline array element index per component field path.");
-        return (ResolveStorage(root, access), string.Join(".", path), suffix, length, readOnly);
+        var root = ReadArrayFieldPath(access.Storage, path, ref readOnly);
+        if (RecognizeArrayAccess(root) is not null)
+            throw Unsupported(access.Site, "Use one inline array element index per component field path.");
+        return new ArrayLayout(ResolveStorage(root, access.Site), string.Join(".", path), suffix, length, readOnly,
+            access.FixedArray ? QualifiedName(buffer) : null, access.ReturnsReadOnly);
     }
 
-    private GaArrayField ArrayField(IOperation operation,
-        (GaComponent Component, string Prefix, string Suffix, int Length, bool ReadOnly) layout,
+    private GaArrayField ArrayField(IOperation operation, ArrayLayout layout,
         string fieldPath, GaScalar type, ITypeSymbol? clrType, bool writable, bool fieldReadOnly = false,
         bool replaceValue = false)
     {
-        var (component, prefix, suffix, length, readOnly) = layout;
+        var (component, prefix, suffix, length, readOnly, fixedArrayType, returnsReadOnly) = layout;
         suffix += fieldPath;
         var fieldAccess = readOnly || fieldReadOnly && !replaceValue ? GaFieldAccess.Read : component.Access;
-        if (writable && fieldAccess != GaFieldAccess.ReadWrite)
+        if (writable && (fieldAccess != GaFieldAccess.ReadWrite || returnsReadOnly))
             throw Unsupported(operation, "The target inline array field was declared read-only.");
         var key = (component.Id, prefix + "[]" + suffix);
         if (!_arrayFields.TryGetValue(key, out var group))
@@ -1808,7 +1829,7 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
             for (int index = 0; index < length; index++)
             {
                 string element = index.ToString(CultureInfo.InvariantCulture);
-                FieldSlot(component, $"{prefix}[{element}]{suffix}", type, enumType, fieldAccess);
+                FieldSlot(component, $"{prefix}[{element}]{suffix}", type, enumType, fieldAccess, fixedArrayType);
             }
             _arrayFields.Add(key, group);
         }

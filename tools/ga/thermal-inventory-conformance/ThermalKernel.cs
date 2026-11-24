@@ -1,6 +1,6 @@
-using System.Runtime.CompilerServices;
 using SKECS.GA;
 using SKECS.Numerics;
+using InventoryItems = SKECS.GA.FixedArray16<global::InventoryItem>;
 
 public struct ThermalFrame
 {
@@ -18,12 +18,6 @@ public struct InventoryItem
     public int Units;
     public Fixed Credit;
     public bool Enabled;
-}
-
-[InlineArray(16)]
-public struct InventoryItems
-{
-    private InventoryItem _first;
 }
 
 public struct InventoryState
@@ -48,7 +42,7 @@ public struct Shield
     public Fixed Charge;
 }
 
-public struct Docked;
+public struct Docked { }
 
 public struct CoolingKit
 {
@@ -117,20 +111,20 @@ public partial struct ThermalKernel
             shield = shield > frame.ShieldDrain ? shield - frame.ShieldDrain : zero;
         }
 
-        int units = inventory.State.Items[slot].Units;
+        int units = InventoryItems.At(ref inventory.State.Items, slot).Units;
         bool accepted = false;
         Fixed spent = zero;
-        if (docked && inventory.State.Items[slot].Enabled && units > 0)
+        if (docked && InventoryItems.At(ref inventory.State.Items, slot).Enabled && units > 0)
         {
-            Fixed cost = inventory.State.Items[slot].Credit + frame.TransferHeat;
+            Fixed cost = InventoryItems.At(ref inventory.State.Items, slot).Credit + frame.TransferHeat;
             if (heat + cost <= frame.HeatLimit)
             {
                 heat += cost;
                 spent = cost;
                 accepted = true;
                 units--;
-                inventory.State.Items[slot].Units = units;
-                inventory.State.Items[slot].Credit += frame.CreditStep;
+                InventoryItems.At(ref inventory.State.Items, slot).Units = units;
+                InventoryItems.At(ref inventory.State.Items, slot).Credit += frame.CreditStep;
             }
         }
         context.Own<Heat>().Temperature = heat;

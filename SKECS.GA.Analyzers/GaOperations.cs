@@ -124,7 +124,7 @@ public static partial class GaSemanticAnalysis
                         Report(Unknown, location, "Use a bounded loop with a stable integer limit and a unit step toward that limit.");
                     break;
                 case IInlineArrayAccessOperation access:
-                    AnalyzeInlineArrayAccess(access, location);
+                    AnalyzeArrayAccess(access.Instance, access.Argument, location);
                     break;
                 case IObjectCreationOperation payload when IsPackedOutputValue(payload):
                     if (payload.Arguments.Length != 0 || payload.Constructor is { IsImplicitlyDeclared: false })
@@ -170,11 +170,11 @@ public static partial class GaSemanticAnalysis
             base.Visit(operation);
         }
 
-        private void AnalyzeInlineArrayAccess(IInlineArrayAccessOperation access, Location location)
+        private void AnalyzeArrayAccess(IOperation storage, IOperation index, Location location)
         {
-            if (access.Argument.Type?.SpecialType != SpecialType.System_Int32)
+            if (index.Type?.SpecialType != SpecialType.System_Int32)
                 Report(Unknown, location, "Index an inline array element with Int32.");
-            var root = StorageRoot(access.Instance);
+            var root = StorageRoot(storage);
             bool query = root is IParameterSymbol parameter && Equal(parameter.ContainingSymbol, entry) &&
                 parameter.RefKind is (RefKind.In or RefKind.Ref);
             bool own = root is ITypeSymbol component && ownAccesses.ContainsKey(component);
@@ -192,6 +192,13 @@ public static partial class GaSemanticAnalysis
         {
             var method = invocation.TargetMethod;
             var location = invocation.Syntax.GetLocation();
+            if (GaFixedArrayAccess.TryGet(invocation, compilation, out var storage, out var index, out bool readOnly))
+            {
+                AnalyzeArrayAccess(storage, index, location);
+                if (!readOnly)
+                    RequireWritable(storage, location);
+                return;
+            }
             if (Equal(method.ContainingType, context) && method.Name == "Resource" && IsRuntimeSystemContext())
             {
                 if (!IsTickResourceCall(invocation))
@@ -529,8 +536,10 @@ public static partial class GaSemanticAnalysis
             return false;
         }
 
-        private static bool IsComponentReceiver(IOperation operation) =>
-            ParentOutsideParentheses(operation) is IFieldReferenceOperation or IInlineArrayAccessOperation;
+        private bool IsComponentReceiver(IOperation operation) =>
+            ParentOutsideParentheses(operation) is IFieldReferenceOperation or IInlineArrayAccessOperation ||
+            ParentOutsideParentheses(operation) is IArgumentOperation { Parameter.Ordinal: 0 } argument &&
+                GaFixedArrayAccess.TryGet(argument.Parent, compilation, out _, out _, out _);
 
         private static IOperation? ParentOutsideParentheses(IOperation operation)
         {
@@ -813,10 +822,12 @@ public static partial class GaSemanticAnalysis
                 VisitMethod(conversion.MethodSymbol, location);
         }
 
-        private static bool HasReadonlyStorage(IOperation? operation) => operation switch
+        private bool HasReadonlyStorage(IOperation? operation) => operation switch
         {
             IFieldReferenceOperation field => field.Field.IsReadOnly || HasReadonlyStorage(field.Instance),
             IInlineArrayAccessOperation array => HasReadonlyStorage(array.Instance),
+            IInvocationOperation invocation when GaFixedArrayAccess.TryGet(invocation, compilation, out var storage,
+                out _, out bool readOnly) => readOnly || HasReadonlyStorage(storage),
             IParenthesizedOperation parenthesized => HasReadonlyStorage(parenthesized.Operand),
             _ => false
         };
@@ -880,6 +891,8 @@ public static partial class GaSemanticAnalysis
             IDeclarationExpressionOperation declaration => StorageRoot(declaration.Expression),
             IFieldReferenceOperation field => StorageRoot(field.Instance),
             IInlineArrayAccessOperation array => StorageRoot(array.Instance),
+            IInvocationOperation invocation when GaFixedArrayAccess.TryGet(invocation, compilation, out var storage,
+                out _, out _) => StorageRoot(storage),
             IParenthesizedOperation parenthesized => StorageRoot(parenthesized.Operand),
             IInstanceReferenceOperation when callChain.Count != 0 => callChain[callChain.Count - 1],
             _ => null

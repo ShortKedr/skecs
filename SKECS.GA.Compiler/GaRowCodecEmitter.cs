@@ -329,7 +329,7 @@ public static class GaRowCodecEmitter
             };
             if (field.ClrEnumType != null)
                 value = $"({field.ClrEnumType})({value})";
-            Line(GaFieldPath.CSharpAssignment(Field(index), value, readonlyWrites.Contains(index)));
+            Line(GaFieldPath.CSharpAssignment(Field(index), value, readonlyWrites.Contains(index), unityCompatible));
         }
 
         private IEnumerable<int> ComponentIndexes(IEnumerable<int> fields) =>
@@ -341,7 +341,7 @@ public static class GaRowCodecEmitter
         private string Field(int index)
         {
             var field = program.Fields[index];
-            return GaFieldPath.CSharpAccess("component" + Number(_components[field.Component]), field.Path);
+            return GaFieldPath.CSharpAccess("component" + Number(_components[field.Component]), field);
         }
 
         private void Open()

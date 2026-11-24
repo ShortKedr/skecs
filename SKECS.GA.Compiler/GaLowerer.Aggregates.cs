@@ -112,7 +112,7 @@ internal sealed partial class GaLowerer
     {
         type = ResolveHelperType(type)!;
         operation = UnwrapIdentity(operation);
-        if (FindInlineAccess(operation) is { } arrayAccess)
+        if (FindArrayAccess(operation) is { } arrayAccess)
             return CaptureArrayValue(type, operation, arrayAccess, bindings);
         if (operation is IConversionOperation { OperatorMethod: null, Operand: IObjectCreationOperation or IConditionalOperation } targetTyped)
             return CaptureAggregate(type, targetTyped.Operand, bindings);

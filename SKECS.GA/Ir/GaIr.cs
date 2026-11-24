@@ -13,6 +13,8 @@ public sealed record GaComponent(string Id, GaFieldAccess Access)
 public sealed record GaField(string Component, string Path, GaScalar Type, GaFieldAccess Access)
 {
     public string? ClrEnumType { get; init; }
+    // Only the C# emitters need the physical container's accessor. Packed schemas use Path.
+    internal string? FixedArrayType { get; init; }
 }
 public readonly record struct GaSourceSpan(string File, int Start, int Length);
 public sealed record GaTickResourceField(string Path, GaScalar Type, string? ClrEnumType);

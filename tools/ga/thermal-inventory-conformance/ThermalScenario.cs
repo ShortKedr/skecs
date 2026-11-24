@@ -2,6 +2,7 @@ using System.Diagnostics;
 using SKECS;
 using SKECS.GA;
 using SKECS.Numerics;
+using InventoryItems = SKECS.GA.FixedArray16<global::InventoryItem>;
 
 internal readonly record struct Scenario(int Rows, uint Seed, int Chunk, int Budget, int Workers);
 
@@ -88,7 +89,7 @@ internal static class ThermalScenario
             {
                 items[slot] = new Item((5 * row + 3 * slot + salt) % 6, 0x01111111L + (slot % 5) * 0x09000000L + row % 7,
                     (row + slot + salt) % 5 != 0);
-                storage.State.Items[slot] = items[slot].ToComponent();
+                InventoryItems.At(ref storage.State.Items, slot) = items[slot].ToComponent();
             }
             long heat = ((row + salt + 9) % 22) * Unit + 0x07ffffff;
             long shield = ((row + salt) % 12) * Unit + 0x0ffffff;
@@ -129,7 +130,7 @@ internal static class ThermalScenario
                 int slot = (model.Serial + frame.SlotShift) % 16;
                 ref var item = ref model.Items[slot];
                 item = item with { Units = 2 + row % 5, Credit = 0x01111111L };
-                world.Get<ThermalInventory>(model.Entity).State.Items[slot] = item.ToComponent();
+                InventoryItems.At(ref world.Get<ThermalInventory>(model.Entity).State.Items, slot) = item.ToComponent();
             }
         }
     }
@@ -197,7 +198,7 @@ internal static class ThermalScenario
                 throw new InvalidDataException($"Own state diverged at {scenario}, tick {tick}, row {row}, slot {slot}.");
             for (int index = 0; index < model.Items.Length; index++)
             {
-                var observed = actual.State.Items[index];
+                var observed = InventoryItems.Read(in actual.State.Items, index);
                 var expected = model.Items[index];
                 if (observed.Units != expected.Units || observed.Credit.Raw != expected.Credit || observed.Enabled != expected.Enabled)
                     throw new InvalidDataException($"Inline inventory slot {index} diverged at {scenario}, tick {tick}, row {row}.");

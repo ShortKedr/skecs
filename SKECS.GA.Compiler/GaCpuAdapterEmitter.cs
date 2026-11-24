@@ -362,7 +362,8 @@ public static class GaCpuAdapterEmitter
                         string value = Slot(item.Local);
                         if (field.ClrEnumType != null)
                             value = $"({field.ClrEnumType}){value}";
-                        Line(GaFieldPath.CSharpAssignment(ArrayValueFieldAccess(field, element), value, item.IsReadOnly));
+                        Line(GaFieldPath.CSharpAssignment(ArrayValueFieldAccess(field, element), value, item.IsReadOnly,
+                            unityCompatible));
                     }
                     break;
                 }
@@ -458,7 +459,8 @@ public static class GaCpuAdapterEmitter
             string index = "arrayIndex" + Number(_arrayStore);
             string element = "arrayElement" + Number(_arrayStore++);
             Line($"int {index} = {CheckedArrayIndex(array, value, source)};");
-            string access = GaFieldPath.CSharpAccess("component" + Number(_components[first.Component]), path, index);
+            string access = GaFieldPath.CSharpAccess("component" + Number(_components[first.Component]), path, index,
+                first.FixedArrayType, writable);
             Line($"ref {(writable ? "" : "readonly ")}var {element} = ref {access};");
             return element;
         }
@@ -831,7 +833,7 @@ public static class GaCpuAdapterEmitter
         }
 
         private string FieldAccess(GaField field, string? index = null) =>
-            GaFieldPath.CSharpAccess("component" + Number(_components[field.Component]), field.Path, index);
+            GaFieldPath.CSharpAccess("component" + Number(_components[field.Component]), field, index);
 
         private static string Constant(GaConstant constant) => constant.Type switch
         {
