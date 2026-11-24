@@ -7,9 +7,9 @@ using System.Text.Json;
 using SKECS;
 using SKECS.Numerics;
 
-#if SKECS_DEMO_GA
+#if SKECS_EXECUTION_CONFORMANCE_GA
 if (args.Length > 0 && args[0] == "ga")
-    return GaDemo.Run(args[1..]);
+    return GaExecutionConformance.Run(args[1..]);
 #endif
 
 var measure = args.Length > 0 && args[0] == "--measure";
@@ -21,7 +21,7 @@ if (args.Length > 4 || (requestedMode != "all" && !modes.Contains(requestedMode)
     !PositiveArgument(args, 2, 12, out var ticks) ||
     !PositiveArgument(args, 3, 63, out var chunkCapacity))
 {
-    Console.Error.WriteLine("Usage: SKECS.Demo [--measure] [all|scalar|simd-auto|runner|sliced|parallel] [entities] [ticks] [chunk-capacity]");
+    Console.Error.WriteLine("Usage: SKECS.ExecutionConformance [--measure] [all|scalar|simd-auto|runner|sliced|parallel] [entities] [ticks] [chunk-capacity]");
     return 2;
 }
 

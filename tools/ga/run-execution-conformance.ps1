@@ -38,10 +38,10 @@ $framework = Get-ChildItem -LiteralPath (Join-Path $dotnetRoot 'packs/Microsoft.
 if (-not $framework) { throw 'The .NET 8 reference assemblies are required.' }
 
 $ga = Join-Path $workspace 'artifacts/ga'
-$build = Join-Path $ga 'demo-build'
+$build = Join-Path $ga 'execution-conformance-build'
 $native = Join-Path $ga 'probe'
 $nativeLibrary = Join-Path $native "ga-$Backend-native.dll"
-$scratch = (New-Item -ItemType Directory -Force (Join-Path $ga 'demo')).FullName
+$scratch = (New-Item -ItemType Directory -Force (Join-Path $ga 'execution-conformance')).FullName
 $temp = (New-Item -ItemType Directory -Force (Join-Path $ga 'temp')).FullName
 $environment = @{
     DOTNET_CLI_HOME = Join-Path $ga 'dotnet-home'
@@ -85,15 +85,15 @@ try {
     }
     foreach ($source in $PackageSource) { $buildFlags += @('--source', $source) }
     & $dotnet $sdk build (Join-Path $PSScriptRoot 'build/Ga.Build.csproj') @buildFlags
-    if ($LASTEXITCODE -ne 0) { throw 'GA Demo compiler build failed.' }
+    if ($LASTEXITCODE -ne 0) { throw 'GA execution conformance compiler build failed.' }
     $cli = Join-Path $build "bin/Ga.Build/$buildConfiguration"
     $request = [ordered]@{
-        sourceRoot = Join-Path $workspace 'SKECS.Demo'
+        sourceRoot = Join-Path $workspace 'SKECS.ExecutionConformance'
         sources = @('GaMovement.cs')
         references = @((Join-Path $cli 'SKECS.dll'), (Join-Path $cli 'SKECS.GA.dll'))
         referenceDirectories = @((Join-Path $framework.FullName 'ref/net8.0'))
-        systemId = 'demo.fixed-movement'
-        simulationContractId = 'demo.fixed-movement/1'
+        systemId = 'execution-conformance.fixed-movement'
+        simulationContractId = 'execution-conformance.fixed-movement/1'
         outputDirectory = 'packages'
         artifactName = 'ga-movement'
         policy = @{ 'cpu-only' = 'cpuOnly'; 'auto' = 'auto'; 'require-gpu' = 'requireGpu' }[$Policy]
@@ -106,17 +106,17 @@ try {
     $json = & $dotnet (Join-Path $cli 'Ga.Build.dll') $requestPath
     if ($LASTEXITCODE -ne 0) {
         if ($json) { Write-Output $json }
-        throw 'GA Demo package build failed.'
+        throw 'GA execution conformance package build failed.'
     }
     $bundle = ($json | ConvertFrom-Json).outputDirectory
-    & $dotnet $sdk build (Join-Path $workspace 'SKECS.Demo/SKECS.Demo.csproj') @buildFlags "-p:GaDemoBundleDirectory=$bundle"
-    if ($LASTEXITCODE -ne 0) { throw 'GA Demo build failed.' }
-    $demo = Join-Path $build "bin/SKECS.Demo/$buildConfiguration/SKECS.Demo.dll"
+    & $dotnet $sdk build (Join-Path $workspace 'SKECS.ExecutionConformance/SKECS.ExecutionConformance.csproj') @buildFlags "-p:GaExecutionConformanceBundleDirectory=$bundle"
+    if ($LASTEXITCODE -ne 0) { throw 'GA execution conformance build failed.' }
+    $conformanceExecutable = Join-Path $build "bin/SKECS.ExecutionConformance/$buildConfiguration/SKECS.ExecutionConformance.dll"
     $mode = @('ga')
     if ($Measure) { $mode += @('--measure', $WarmupTicks) }
     foreach ($index in $DeviceIndex) {
-        & $dotnet $demo @mode $Policy $bundle $nativeLibrary $index $Entities $Ticks $ChunkCapacity $JobBudget $Backend
-        if ($LASTEXITCODE -ne 0) { throw "GA Demo failed on device index $index." }
+        & $dotnet $conformanceExecutable @mode $Policy $bundle $nativeLibrary $index $Entities $Ticks $ChunkCapacity $JobBudget $Backend
+        if ($LASTEXITCODE -ne 0) { throw "GA execution conformance failed on device index $index." }
     }
 }
 finally {

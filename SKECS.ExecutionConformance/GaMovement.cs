@@ -34,7 +34,7 @@ internal struct GaAdded
     internal GaAddedData Data;
 }
 
-[SecsSystem(SystemId = "demo.fixed-movement")]
+[SecsSystem(SystemId = "execution-conformance.fixed-movement")]
 internal partial struct GaMovement
 {
     public void Execute(in SystemContext context, ref GaPosition position, in GaVelocity velocity)

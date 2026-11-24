@@ -10,7 +10,7 @@ using SKECS.GA.Backend.Vulkan;
 using SKECS.Numerics;
 using SKECS.Serialization;
 
-internal static class GaDemo
+internal static class GaExecutionConformance
 {
     private const string Artifact = "ga-movement";
     private const int RemovalTargetMarker = 21;
@@ -54,7 +54,7 @@ internal static class GaDemo
             !Read(args, 6, 63, 1, out int chunkCapacity) ||
             !Read(args, 7, 1, 1, out int budget))
         {
-            Console.Error.WriteLine("Usage: SKECS.Demo ga [--measure warmup-ticks] <cpu-only|auto|require-gpu> <bundle-dir> <native-library> [device] [entities] [ticks] [chunk-capacity] [job-budget] [vulkan|d3d12]");
+            Console.Error.WriteLine("Usage: SKECS.ExecutionConformance ga [--measure warmup-ticks] <cpu-only|auto|require-gpu> <bundle-dir> <native-library> [device] [entities] [ticks] [chunk-capacity] [job-budget] [vulkan|d3d12]");
             return 2;
         }
 
@@ -77,7 +77,7 @@ internal static class GaDemo
                 candidates = LoadCandidates(args[1], target);
             }
 
-            var contract = new GaContractIdentity(GaCpuAdapterRowCodec.SystemId, "demo.fixed-movement/1",
+            var contract = new GaContractIdentity(GaCpuAdapterRowCodec.SystemId, "execution-conformance.fixed-movement/1",
                 GaCpuAdapterRowCodec.SourceDigest, GaCpuAdapterRowCodec.IrDigest, GaCpuAdapterRowCodec.ComponentSchemaDigest,
                 GaProgram.NumericVersion, GaProgram.SubsetVersion, GaProgram.IrVersion)
             {
@@ -155,7 +155,7 @@ internal static class GaDemo
         }
         catch (IOException error)
         {
-            Console.Error.WriteLine($"The Demo GPU bundle is incomplete: {error.Message}");
+            Console.Error.WriteLine($"The execution conformance GPU bundle is incomplete: {error.Message}");
             return [];
         }
     }

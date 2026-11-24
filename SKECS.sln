@@ -39,7 +39,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Skecs.Migration.Tests", "sk
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Framework modules", "Framework modules", "{81BEDDD1-2F8E-4A45-9AA5-A655B63F4D53}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SKECS.Demo", "SKECS.Demo\SKECS.Demo.csproj", "{3534100C-E839-481B-B567-336597E102D4}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SKECS.ExecutionConformance", "SKECS.ExecutionConformance\SKECS.ExecutionConformance.csproj", "{3534100C-E839-481B-B567-336597E102D4}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SKECS.Serialization", "SKECS.Serialization\SKECS.Serialization.csproj", "{6548732D-639E-4667-9305-97FE99A2FADA}"
 EndProject
