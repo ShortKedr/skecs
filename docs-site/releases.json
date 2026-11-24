@@ -22,7 +22,7 @@
       "product": "SKECS",
       "packageId": "ShortKedr.SKECS",
       "sourceCommit": "98bf6b22ac8d9a122ce1baba8201ccad02c51465",
-      "docsCommit": "45401fc82124c49d4fd2bf8f272fce508fc22154",
+      "docsCommit": "5a29f99f0d608cd9615c7dde62da7921bc2ca2af",
       "releaseUrl": "https://github.com/ShortKedr/skecs/releases/tag/skecs-v0.2.0",
       "packageUrl": "https://github.com/ShortKedr/skecs/releases/download/skecs-v0.2.0/ShortKedr.SKECS.0.2.0.nupkg",
       "packageSha256": "a7ebeb0eed4909438c04303dcb21d18326200524072b8d4beddb14816756a2ef",
