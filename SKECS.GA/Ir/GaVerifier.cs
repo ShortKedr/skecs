@@ -94,7 +94,7 @@ internal static class GaVerifier
                 Require((uint)slot.Index < program.Locals.Count && program.Locals[slot.Index] == slot.Type);
         }
 
-        void CheckArrayField(GaArrayField range, GaValue index, HashSet<int> assigned, bool writable)
+        void CheckArrayField(GaArrayField range, bool writable)
         {
             Require(range.FirstField >= 0 && range.Length > 0 &&
                 (long)range.FirstField + range.Length <= program.Fields.Count);
@@ -123,14 +123,42 @@ internal static class GaVerifier
                 }
                 arrayFields.Add(range.FirstField, range);
             }
+        }
+
+        void CheckArrayIndex(GaValue index, HashSet<int> assigned)
+        {
             CheckValue(index, assigned);
             Require(index.Type == GaScalar.Int32);
+        }
+
+        void CheckArrayValueFields(IReadOnlyList<GaArrayValueField> fields, bool writable)
+        {
+            Require(fields.Count > 0);
+            var slots = new HashSet<int>();
+            var locals = new HashSet<int>();
+            string? prefix = null;
+            string? component = null;
+            int length = fields[0].Field.Length;
+            foreach (var field in fields)
+            {
+                CheckArrayField(field.Field, writable);
+                CheckSlot(field.Local);
+                Require(!field.Local.IsField && field.Field.Type == field.Local.Type &&
+                    field.Field.Length == length && slots.Add(field.Field.FirstField) && locals.Add(field.Local.Index));
+                var first = program.Fields[field.Field.FirstField];
+                int index = first.Path.IndexOf("[0]", StringComparison.Ordinal);
+                Require(index + 4 < first.Path.Length && first.Path[index + 3] == '.');
+                string pathPrefix = first.Path[..index];
+                prefix ??= pathPrefix;
+                component ??= first.Component;
+                Require(prefix == pathPrefix && component == first.Component);
+            }
         }
 
         int CheckStatement(GaStatement statement, HashSet<int> assigned, HashSet<int> assignedTickets, bool localOnly = false)
         {
             if (localOnly)
-                Require(statement is GaBlock or GaIf or GaLoop or GaStore { Slot.IsField: false });
+                Require(statement is GaBlock or GaIf or GaLoop or GaArrayValueRead or GaStore { Slot.IsField: false });
             switch (statement)
             {
                 case GaBlock block:
@@ -148,7 +176,8 @@ internal static class GaVerifier
                         assigned.Add(store.Slot.Index);
                     return 0;
                 case GaArrayStore indexed:
-                    CheckArrayField(indexed.Field, indexed.Index, assigned, writable: true);
+                    CheckArrayField(indexed.Field, writable: true);
+                    CheckArrayIndex(indexed.Index, assigned);
                     if (indexed.Previous is { } previous)
                     {
                         CheckSlot(previous);
@@ -158,6 +187,30 @@ internal static class GaVerifier
                     Require(indexed.Value.Type == indexed.Field.Type);
                     if (indexed.Previous is { } saved)
                         assigned.Remove(saved.Index);
+                    return 0;
+                case GaArrayValueRead indexed:
+                    CheckArrayValueFields(indexed.Fields, writable: false);
+                    CheckArrayIndex(indexed.Index, assigned);
+                    foreach (var field in indexed.Fields)
+                        assigned.Add(field.Local.Index);
+                    return 0;
+                case GaArrayValueStore indexed:
+                    CheckArrayValueFields(indexed.Fields, writable: true);
+                    CheckArrayIndex(indexed.Index, assigned);
+                    var prepared = new HashSet<int>(assigned);
+                    if (indexed.Previous is { } previousFields)
+                    {
+                        Require(previousFields.Count == indexed.Fields.Count);
+                        for (int i = 0; i < previousFields.Count; i++)
+                        {
+                            var local = previousFields[i];
+                            CheckSlot(local);
+                            Require(!local.IsField && local.Type == indexed.Fields[i].Field.Type && prepared.Add(local.Index));
+                        }
+                    }
+                    CheckStatement(indexed.Prepare, prepared, new HashSet<int>(), localOnly: true);
+                    foreach (var field in indexed.Fields)
+                        Require(prepared.Contains(field.Local.Index));
                     return 0;
                 case GaEmit emit:
                     CheckValue(emit.Value, assigned);
@@ -340,7 +393,8 @@ internal static class GaVerifier
                     }
                     break;
                 case GaArrayRead indexed:
-                    CheckArrayField(indexed.Field, indexed.Index, assigned, writable: false);
+                    CheckArrayField(indexed.Field, writable: false);
+                    CheckArrayIndex(indexed.Index, assigned);
                     Require(indexed.Type == indexed.Field.Type);
                     break;
                 case GaCast cast:

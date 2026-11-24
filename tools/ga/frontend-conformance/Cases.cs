@@ -37,6 +37,12 @@ internal static class Cases
         start.Slots[1] = -286;
         start.Slots[2] = 9191;
         start.Slots[3] = -52;
+        start.Packets[0] = start.Current;
+        start.Packets[1] = start.Mirror;
+        start.Packets[2] = start.Current with { Point = new Point { X = 300, Y = -10 } };
+        start.Packets[3] = start.Mirror with { Ready = true };
+        start.ReadonlyPackets[0] = new ReadonlyPacket(35, 0xff338822u, 108);
+        start.ReadonlyPackets[1] = new ReadonlyPacket(36, 0x5ee32e6u, -34);
 
         Input settings = new()
         {
@@ -144,6 +150,51 @@ internal static class Cases
                     GaFaultKind.DivideByZero, 5, "adjusted.Units / adjusted.Divisor"),
                 Failure("target index evaluates once", settings with { Left = int.MaxValue },
                     GaFaultKind.Overflow, 6, "input.Left + 949")
+            ]),
+            new(nameof(IndexedValueKernel), "fixtures.frontend.indexed-value", new IndexedValueKernel().Execute,
+            [
+                Success("compound reads old nested fields and copies updated element", settings with { Left = 6, Stop = 2 }),
+                Success("plain overwrite preserves unrelated elements", settings with { Flag = false, Left = 10, Stop = 2 }),
+                Failure("index expression faults before any bounds check", settings with { Left = 0, Right = 0 },
+                    GaFaultKind.DivideByZero, 0, "14 / input.Left"),
+                Failure("invalid compound target bounds before RHS", settings with { Left = 1, Right = 0 },
+                    GaFaultKind.IndexOutOfRange, 1, "state.Packets[14 / input.Left]"),
+                Failure("invalid plain target bounds before RHS", settings with { Flag = false, Left = 1, Right = 0 },
+                    GaFaultKind.IndexOutOfRange, 1, "state.Packets[20 / input.Left]"),
+                Failure("one compound target bounds check before RHS", settings with { Left = 6, Right = 0 },
+                    GaFaultKind.DivideByZero, 2, "840 / input.Right"),
+                Failure("overflow after scanning all old fields", settings with { Left = 6, Right = 1 },
+                    GaFaultKind.Overflow, 3, "packet.Point.X + amount", WithPacketX(2, int.MaxValue)),
+                Failure("one bounds check on subsequent whole read", settings with { Left = 6, Stop = -1 },
+                    GaFaultKind.IndexOutOfRange, 4, "state.Packets[input.Stop]"),
+                Failure("plain target and read each check once", settings with { Flag = false, Left = int.MaxValue, Stop = 0 },
+                    GaFaultKind.Overflow, 4, "input.Left + 9490"),
+                Failure("compound target and read each check once", settings with { Left = int.MaxValue, Stop = 0 },
+                    GaFaultKind.Overflow, 5, "input.Left + 9490"),
+            ]),
+            new(nameof(IndexedReadonlyReadFirstKernel), "fixtures.frontend.indexed-readonly-read-first",
+                new IndexedReadonlyReadFirstKernel().Execute,
+            [
+                Success("cached read-only range upgraded by whole write", settings with
+                {
+                    Left = 0, Replacement = new ReadonlyPacket(72, 0x91f390a1u, -16)
+                }),
+                Failure("fault after replacing readonly fields", settings with
+                {
+                    Left = 1, Replacement = new ReadonlyPacket(int.MaxValue, 13u, 36)
+                }, GaFaultKind.Overflow, 3, "before + after")
+            ]),
+            new(nameof(IndexedReadonlyStoreFirstKernel), "fixtures.frontend.indexed-readonly-store-first",
+                new IndexedReadonlyStoreFirstKernel().Execute,
+            [
+                Success("whole write declares shared range before readonly read", settings with
+                {
+                    Right = 1, Replacement = new ReadonlyPacket(-74, uint.MaxValue, 27)
+                }),
+                Failure("subsequent fault with no committed replacement", settings with
+                {
+                    Right = 0, Stop = 0, Replacement = new ReadonlyPacket(-12, 52u, 66)
+                }, GaFaultKind.DivideByZero, 2, "907 / input.Stop")
             ])
         ];
 
@@ -155,6 +206,12 @@ internal static class Cases
             Current = start.Current with { Ready = ready, Point = start.Current.Point with { X = x } }
         };
         State WithBalance(int units) => start with { Balance = start.Balance with { Units = units } };
+        State WithPacketX(int index, int value)
+        {
+            State state = start;
+            state.Packets[index].Point.X = value;
+            return state;
+        }
         State WithSlot(int index, int value)
         {
             State state = start;

@@ -52,7 +52,7 @@ foreach (Kernel kernel in kernels)
         var program = result.Program ?? throw new InvalidOperationException(
             $"GA frontend rejected {kernel.Type}.{Environment.NewLine}{string.Join(Environment.NewLine, result.Diagnostics)}");
         Require(kernel.SystemId == program.SystemId, $"{kernel.Type} generated an unexpected system ID.");
-        var register = EmitAdapter(program, kernel.Type, parse, options, references, sourceAssembly);
+        var register = EmitAdapter(program, kernel.Type, parse, options, references, sourceAssembly, out var codecType);
         var deviceRows = new List<GpuRow>();
         for (int i = 0; i < kernel.Cases.Length; i++)
         {
@@ -75,8 +75,21 @@ foreach (Kernel kernel in kernels)
             if (oracle is { } expectedFault)
                 CheckFault(actual, expectedFault, kernel.SystemId, ordinal: 0, label);
             else
+            {
                 Require(actual.Fault is null && actual.States.Length == 1 && SameState(actual.States[0], expected[i]),
                     $"{label} generated CPU result differs. Actual fault {actual.Fault}.");
+                if (kernel.Type is nameof(IndexedReadonlyReadFirstKernel) or nameof(IndexedReadonlyStoreFirstKernel))
+                {
+                    var query = (DeterministicQuery)codecType.GetMethod("CreateQuery", Type.EmptyTypes)!.Invoke(null, null)!;
+                    var apply = codecType.GetMethod("Apply")!.MakeGenericMethod(typeof(byte))
+                        .CreateDelegate<GaBatchProcessor<byte>.ApplyJob>();
+                    var applied = RunAdapter((workload, stage) =>
+                        workload.AddSystem(stage, query, job => apply(job, 1, expectedWords)),
+                        [sample], chunkCapacity: 1, workers: 1, budget: 1);
+                    Require(applied.Fault is null && applied.States.Length == 1 && SameState(applied.States[0], expected[i]),
+                        $"{label} generated row codec applied different readonly fields.");
+                }
+            }
         }
 
         if (kernel.Type == nameof(NamedKernel))
@@ -149,7 +162,7 @@ static GaSourceSpan LocateFault(SyntaxTree source, string expression)
 
 static Func<DeterministicWorkload<byte>, SystemStage, DeterministicWorkload<byte>> EmitAdapter(
     GaProgram program, string kernel, CSharpParseOptions parse, CSharpCompilationOptions options,
-    MetadataReference[] references, Assembly sourceAssembly)
+    MetadataReference[] references, Assembly sourceAssembly, out Type codecType)
 {
     string name = kernel + "Adapter";
     var adapter = CSharpSyntaxTree.ParseText(GaCpuAdapterEmitter.Emit(program, name),
@@ -163,6 +176,7 @@ static Func<DeterministicWorkload<byte>, SystemStage, DeterministicWorkload<byte
     Require(emitted.Success, $"Generated source did not compile.{Environment.NewLine}{string.Join(Environment.NewLine, emitted.Diagnostics)}");
     stream.Position = 0;
     var assembly = AssemblyLoadContext.Default.LoadFromStream(stream);
+    codecType = assembly.GetType(name + "RowCodec")!;
     var method = assembly.GetType(name)!.GetMethods(BindingFlags.Public | BindingFlags.Static)
         .Single(candidate => candidate.Name == "Register" &&
             candidate.GetParameters() is [_, var stage] && stage.ParameterType == typeof(SystemStage));
@@ -226,7 +240,11 @@ static void CheckFault(AdapterResult result, GaKernelFault expected, string id, 
 static bool SameState(State a, State b) =>
     a.Current.Equals(b.Current) && a.Mirror.Equals(b.Mirror) && a.Point.Equals(b.Point) &&
     a.Balance.Equals(b.Balance) && a.Result == b.Result &&
-    a.Slots[0] == b.Slots[0] && a.Slots[1] == b.Slots[1] && a.Slots[2] == b.Slots[2] && a.Slots[3] == b.Slots[3];
+    a.Slots[0] == b.Slots[0] && a.Slots[1] == b.Slots[1] && a.Slots[2] == b.Slots[2] && a.Slots[3] == b.Slots[3] &&
+    a.Packets[0].Equals(b.Packets[0]) && a.Packets[1].Equals(b.Packets[1]) &&
+    a.Packets[2].Equals(b.Packets[2]) && a.Packets[3].Equals(b.Packets[3]) &&
+    a.ReadonlyPackets[0].Equals(b.ReadonlyPackets[0]) && a.ReadonlyPackets[1].Equals(b.ReadonlyPackets[1]) &&
+    a.ReadonlyPackets[2].Equals(b.ReadonlyPackets[2]) && a.ReadonlyPackets[3].Equals(b.ReadonlyPackets[3]);
 
 static uint[] Pack(GaProgram program, State state, Input input)
 {
@@ -238,7 +256,7 @@ static uint[] Pack(GaProgram program, State state, Input input)
         {
             "global::FrontendFixture.State" => field.Path.StartsWith("Slots[", StringComparison.Ordinal)
                 ? state.Slots[int.Parse(field.Path.AsSpan(6, field.Path.Length - 7))]
-                : ReadField(state, field.Path),
+                : ReadStateField(state, field.Path),
             "global::FrontendFixture.Input" => ReadField(input, field.Path),
             _ => throw new InvalidOperationException($"Unexpected GA component {field.Component}.")
         };
@@ -263,6 +281,21 @@ static uint[] Pack(GaProgram program, State state, Input input)
     }
     Require(offset == words.Length, "Packed row width differs.");
     return words;
+}
+
+static object ReadStateField(State state, string path)
+{
+    if (path.StartsWith("ReadonlyPackets[", StringComparison.Ordinal))
+    {
+        int terminator = path.IndexOf(']');
+        int element = int.Parse(path.AsSpan("ReadonlyPackets[".Length, terminator - "ReadonlyPackets[".Length));
+        return ReadField(state.ReadonlyPackets[element], path[(terminator + 2)..]);
+    }
+    if (!path.StartsWith("Packets[", StringComparison.Ordinal))
+        return ReadField(state, path);
+    int end = path.IndexOf(']');
+    int index = int.Parse(path.AsSpan("Packets[".Length, end - "Packets[".Length));
+    return ReadField(state.Packets[index], path[(end + 2)..]);
 }
 
 static object ReadField(object component, string path)

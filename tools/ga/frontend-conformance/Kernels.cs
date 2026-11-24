@@ -17,6 +17,14 @@ public struct Packet
     public uint Tag;
     public Fixed Offset;
 
+    public static Packet operator +(Packet packet, int amount) => new()
+    {
+        Point = new Point { X = checked(packet.Point.X + amount), Y = packet.Point.Y },
+        Tag = packet.Tag,
+        Ready = packet.Ready,
+        Offset = packet.Offset
+    };
+
     public readonly Packet Transformed => new()
     {
         Point = new Point { X = unchecked(Point.X - 5), Y = unchecked(Point.Y + 17) },
@@ -100,6 +108,42 @@ public struct Slots
     private int _element;
 }
 
+[InlineArray(4)]
+public struct Packets
+{
+    private Packet _element;
+}
+
+public struct ReadonlyMeta
+{
+    public int Code;
+    public readonly uint Tag;
+
+    public ReadonlyMeta(int code, uint tag)
+    {
+        Code = code;
+        Tag = tag;
+    }
+}
+
+public struct ReadonlyPacket
+{
+    public readonly ReadonlyMeta Meta;
+    public int Counter;
+
+    public ReadonlyPacket(int code, uint tag, int counter)
+    {
+        Meta = new ReadonlyMeta(code, tag);
+        Counter = counter;
+    }
+}
+
+[InlineArray(4)]
+public struct ReadonlyPackets
+{
+    private ReadonlyPacket _element;
+}
+
 public struct State
 {
     public Packet Current;
@@ -107,11 +151,14 @@ public struct State
     public Point Point;
     public Balance Balance;
     public Slots Slots;
+    public Packets Packets;
+    public ReadonlyPackets ReadonlyPackets;
     public int Result;
 }
 
 public struct Input
 {
+    public ReadonlyPacket Replacement;
     public int Left;
     public int Right;
     public int Stop;
@@ -277,4 +324,48 @@ public partial struct IndexedCompoundKernel
         Units = 840 / divisor,
         Divisor = resultDivisor
     };
+}
+
+[SecsSystem(SystemId = "fixtures.frontend.indexed-value")]
+public partial struct IndexedValueKernel
+{
+    public void Execute(ref State state, in Input input)
+    {
+        if (input.Flag)
+            state.Packets[14 / input.Left] += 840 / input.Right;
+        else
+            state.Packets[20 / input.Left] = new Packet
+            {
+                Point = new Point { X = 700 / input.Right, Y = input.Left },
+                Tag = input.Tag,
+                Offset = input.Offset,
+                Ready = true
+            };
+
+        state.Mirror = state.Packets[input.Stop];
+        state.Result = checked(input.Left + 9490);
+    }
+}
+
+[SecsSystem(SystemId = "fixtures.frontend.indexed-readonly-read-first")]
+public partial struct IndexedReadonlyReadFirstKernel
+{
+    public void Execute(ref State state, in Input input)
+    {
+        int before = state.ReadonlyPackets[input.Left].Meta.Code;
+        state.ReadonlyPackets[input.Left] = input.Replacement;
+        int after = state.ReadonlyPackets[input.Left].Meta.Code;
+        state.Result = checked(before + after);
+    }
+}
+
+[SecsSystem(SystemId = "fixtures.frontend.indexed-readonly-store-first")]
+public partial struct IndexedReadonlyStoreFirstKernel
+{
+    public void Execute(ref State state, in Input input)
+    {
+        state.ReadonlyPackets[input.Right] = input.Replacement;
+        state.Result = state.ReadonlyPackets[input.Right].Meta.Code;
+        state.Result += 907 / input.Stop;
+    }
 }

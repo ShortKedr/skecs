@@ -178,8 +178,34 @@ internal static class GaIrDigest
                     WriteSlot(writer, previous);
                 WriteValue(writer, store.Value);
                 break;
+            case GaArrayValueRead read:
+                writer.Write((byte)15);
+                WriteArrayValueFields(writer, read.Fields);
+                WriteValue(writer, read.Index);
+                break;
+            case GaArrayValueStore store:
+                writer.Write((byte)16);
+                WriteArrayValueFields(writer, store.Fields);
+                WriteValue(writer, store.Index);
+                writer.Write(store.Previous != null);
+                if (store.Previous != null)
+                    foreach (var oldField in store.Previous)
+                        WriteSlot(writer, oldField);
+                WriteStatement(writer, store.Prepare);
+                break;
             default:
                 throw new InvalidOperationException("Unknown GA IR statement.");
+        }
+    }
+
+    private static void WriteArrayValueFields(BinaryWriter writer, IReadOnlyList<GaArrayValueField> fields)
+    {
+        writer.Write(fields.Count);
+        foreach (var field in fields)
+        {
+            WriteArrayField(writer, field.Field);
+            WriteSlot(writer, field.Local);
+            writer.Write(field.IsReadOnly);
         }
     }
 

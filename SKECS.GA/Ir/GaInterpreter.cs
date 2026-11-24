@@ -263,17 +263,29 @@ public static class GaInterpreter
 
         private bool TryIndex(GaArrayField field, GaValue index, GaSourceSpan source, out GaSlot slot)
         {
-            slot = default;
-            uint element = unchecked((uint)Read(index));
+            if (!TryElement(field.Length, index, source, out int element))
+            {
+                slot = default;
+                return false;
+            }
+            slot = ArraySlot(field, element);
+            return true;
+        }
+
+        private static GaSlot ArraySlot(GaArrayField field, int element) =>
+            new(true, field.FirstField + element, field.Type);
+
+        private bool TryElement(int length, GaValue index, GaSourceSpan source, out int element)
+        {
+            element = unchecked((int)Read(index));
             if (Fault != null)
                 return false;
             ulong ordinal = _evaluationOrdinal++;
-            if (element >= (uint)field.Length)
+            if ((uint)element >= (uint)length)
             {
                 Fault = new GaKernelFault(GaFaultKind.IndexOutOfRange, ordinal, source);
                 return false;
             }
-            slot = new GaSlot(true, field.FirstField + (int)element, field.Type);
             return true;
         }
 
@@ -298,6 +310,23 @@ public static class GaInterpreter
                         ulong updated = Read(indexed.Value);
                         if (Fault == null)
                             Store(target, updated);
+                    }
+                    break;
+                case GaArrayValueRead indexed:
+                    if (TryElement(indexed.Fields[0].Field.Length, indexed.Index, indexed.Source, out int readElement))
+                        foreach (var field in indexed.Fields)
+                            Store(field.Local, Load(ArraySlot(field.Field, readElement)));
+                    break;
+                case GaArrayValueStore indexed:
+                    if (TryElement(indexed.Fields[0].Field.Length, indexed.Index, indexed.Source, out int writeElement))
+                    {
+                        if (indexed.Previous is { } previousFields)
+                            for (int i = 0; i < previousFields.Count; i++)
+                                Store(previousFields[i], Load(ArraySlot(indexed.Fields[i].Field, writeElement)));
+                        Run(indexed.Prepare);
+                        if (Fault == null)
+                            foreach (var field in indexed.Fields)
+                                Store(ArraySlot(field.Field, writeElement), Load(field.Local));
                     }
                     break;
                 case GaEmit emit:

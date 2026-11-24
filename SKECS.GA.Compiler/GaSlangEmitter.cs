@@ -394,6 +394,27 @@ public static class GaSlangEmitter
                     ArraySelect(store.Field, index, element => $"{element} = {value};");
                     break;
                 }
+                case GaArrayValueRead read:
+                {
+                    string index = CheckedArrayIndex(read.Fields[0].Field, read.Index, read.Source);
+                    foreach (var field in read.Fields)
+                        ArraySelect(field.Field, index, element => $"{Slot(field.Local)} = {element};");
+                    break;
+                }
+                case GaArrayValueStore store:
+                {
+                    string index = CheckedArrayIndex(store.Fields[0].Field, store.Index, store.Source);
+                    if (store.Previous is { } previous)
+                        for (int i = 0; i < previous.Count; i++)
+                        {
+                            string local = Slot(previous[i]);
+                            ArraySelect(store.Fields[i].Field, index, element => $"{local} = {element};");
+                        }
+                    Statement(store.Prepare);
+                    foreach (var field in store.Fields)
+                        ArraySelect(field.Field, index, element => $"{element} = {Slot(field.Local)};");
+                    break;
+                }
                 case GaEmit emission:
                     if (_eventCapacity != 0)
                     {

@@ -341,6 +341,31 @@ public static class GaCpuAdapterEmitter
                 case GaArrayStore store:
                     ArrayStore(store);
                     break;
+                case GaArrayValueRead read:
+                {
+                    string element = ArrayValueReference(read.Fields, read.Index, read.Source, writable: false);
+                    foreach (var field in read.Fields)
+                        ReadArrayValueField(field.Field, field.Local, element);
+                    break;
+                }
+                case GaArrayValueStore store:
+                {
+                    string element = ArrayValueReference(store.Fields, store.Index, store.Source, writable: true);
+                    if (store.Previous is { } previous)
+                        for (int i = 0; i < previous.Count; i++)
+                            ReadArrayValueField(store.Fields[i].Field, previous[i], element);
+                    Statement(store.Prepare);
+                    foreach (var item in store.Fields)
+                    {
+                        var field = program.Fields[item.Field.FirstField];
+                        _writable.Add(_components[field.Component]);
+                        string value = Slot(item.Local);
+                        if (field.ClrEnumType != null)
+                            value = $"({field.ClrEnumType}){value}";
+                        Line(GaFieldPath.CSharpAssignment(ArrayValueFieldAccess(field, element), value, item.IsReadOnly));
+                    }
+                    break;
+                }
                 case GaEmit emission:
                     if (program.EventCapacity != 0)
                     {
@@ -423,6 +448,31 @@ public static class GaCpuAdapterEmitter
                 default:
                     throw new InvalidOperationException("Unknown GA IR statement.");
             }
+        }
+
+        private string ArrayValueReference(IReadOnlyList<GaArrayValueField> fields, GaValue value, GaSourceSpan source, bool writable)
+        {
+            var array = fields[0].Field;
+            var first = program.Fields[array.FirstField];
+            string path = first.Path[..(first.Path.IndexOf("[0]", StringComparison.Ordinal) + 3)];
+            string index = "arrayIndex" + Number(_arrayStore);
+            string element = "arrayElement" + Number(_arrayStore++);
+            Line($"int {index} = {CheckedArrayIndex(array, value, source)};");
+            string access = GaFieldPath.CSharpAccess("component" + Number(_components[first.Component]), path, index);
+            Line($"ref {(writable ? "" : "readonly ")}var {element} = ref {access};");
+            return element;
+        }
+
+        private static string ArrayValueFieldAccess(GaField field, string element) =>
+            GaFieldPath.CSharpAccess(element, field.Path[(field.Path.IndexOf("[0]", StringComparison.Ordinal) + 4)..]);
+
+        private void ReadArrayValueField(GaArrayField array, GaSlot local, string element)
+        {
+            var field = program.Fields[array.FirstField];
+            string access = ArrayValueFieldAccess(field, element);
+            if (field.ClrEnumType != null)
+                access = $"({Scalar(field.Type)}){access}";
+            Line($"{Slot(local)} = {access};");
         }
 
         private void ArrayStore(GaArrayStore store)

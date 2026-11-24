@@ -335,7 +335,9 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                 return new GaBlock([]);
             case ISimpleAssignmentOperation assignment when !assignment.IsRef:
                 if (IsAggregate(ResolveHelperType(assignment.Target.Type)!))
-                    return StoreAggregate(assignment.Target.Type!, AggregateDestination(assignment.Target), assignment.Value);
+                    return FindInlineAccess(assignment.Target) is { } valueAccess
+                        ? LowerArrayValueStore(assignment.Target, valueAccess, assignment.Value, null)
+                        : StoreAggregate(assignment.Target.Type!, AggregateDestination(assignment.Target), assignment.Value);
                 if (_helperReturn == null && FindInlineAccess(assignment.Target) is { } assignmentAccess)
                 {
                     var array = LowerArrayAccess(assignment.Target, assignmentAccess, writable: true);
@@ -344,7 +346,9 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                 return new GaStore(WritableSlot(assignment.Target), LowerValue(assignment.Value));
             case ICompoundAssignmentOperation compound when !compound.IsLifted:
                 if (IsAggregate(ResolveHelperType(compound.Target.Type)!))
-                    return LowerAggregateCompound(compound);
+                    return FindInlineAccess(compound.Target) is { } valueCompoundAccess
+                        ? LowerArrayValueStore(compound.Target, valueCompoundAccess, compound.Value, compound)
+                        : LowerAggregateCompound(compound);
 
                 if (_helperReturn == null && FindInlineAccess(compound.Target) is { } compoundAccess)
                 {
@@ -890,6 +894,10 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
                 return LoopEntries(store.Value);
             case GaArrayStore store:
                 return Math.Min(SaturatedLoopEntries, LoopEntries(store.Index) + LoopEntries(store.Value));
+            case GaArrayValueRead read:
+                return LoopEntries(read.Index);
+            case GaArrayValueStore store:
+                return Math.Min(SaturatedLoopEntries, LoopEntries(store.Index) + LoopEntries(store.Prepare));
             case GaEmit emit:
                 return LoopEntries(emit.Value);
             case GaEmitTyped emit:
@@ -1754,6 +1762,14 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
 
     private GaArrayRead LowerArrayAccess(IOperation operation, IInlineArrayAccessOperation access, bool writable)
     {
+        var layout = ReadArrayLayout(operation, access);
+        var field = ArrayField(operation, layout, "", Scalar(operation.Type, operation), operation.Type, writable);
+        return new GaArrayRead(field, LowerValue(access.Argument), Source(access));
+    }
+
+    private (GaComponent Component, string Prefix, string Suffix, int Length, bool ReadOnly)
+        ReadArrayLayout(IOperation operation, IInlineArrayAccessOperation access)
+    {
         if (access.Argument.Type?.SpecialType != SpecialType.System_Int32 ||
             access.Instance.Type is not INamedTypeSymbol { IsUnmanagedType: true } buffer ||
             HasExplicitLayout(buffer))
@@ -1771,18 +1787,24 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
         var root = ReadArrayFieldPath(access.Instance, path, ref readOnly);
         if (root is IInlineArrayAccessOperation)
             throw Unsupported(access, "Use one inline array element index per component field path.");
-        var component = ResolveStorage(root, access);
+        return (ResolveStorage(root, access), string.Join(".", path), suffix, length, readOnly);
+    }
 
-        var fieldAccess = readOnly ? GaFieldAccess.Read : component.Access;
+    private GaArrayField ArrayField(IOperation operation,
+        (GaComponent Component, string Prefix, string Suffix, int Length, bool ReadOnly) layout,
+        string fieldPath, GaScalar type, ITypeSymbol? clrType, bool writable, bool fieldReadOnly = false,
+        bool replaceValue = false)
+    {
+        var (component, prefix, suffix, length, readOnly) = layout;
+        suffix += fieldPath;
+        var fieldAccess = readOnly || fieldReadOnly && !replaceValue ? GaFieldAccess.Read : component.Access;
         if (writable && fieldAccess != GaFieldAccess.ReadWrite)
             throw Unsupported(operation, "The target inline array field was declared read-only.");
-        var type = Scalar(operation.Type, operation);
-        string prefix = string.Join(".", path);
         var key = (component.Id, prefix + "[]" + suffix);
         if (!_arrayFields.TryGetValue(key, out var group))
         {
             group = new GaArrayField(_schema.Count, length, type);
-            string? enumType = operation.Type is { TypeKind: TypeKind.Enum } scalarEnum ? QualifiedName(scalarEnum) : null;
+            string? enumType = clrType is { TypeKind: TypeKind.Enum } scalarEnum ? QualifiedName(scalarEnum) : null;
             for (int index = 0; index < length; index++)
             {
                 string element = index.ToString(CultureInfo.InvariantCulture);
@@ -1790,7 +1812,15 @@ internal sealed partial class GaLowerer(CSharpCompilation compilation, IMethodSy
             }
             _arrayFields.Add(key, group);
         }
-        return new GaArrayRead(group, LowerValue(access.Argument), Source(access));
+        else if (replaceValue && writable && _schema[group.FirstField].Access == GaFieldAccess.Read)
+        {
+            for (int index = 0; index < group.Length; index++)
+            {
+                int field = group.FirstField + index;
+                _schema[field] = _schema[field] with { Access = GaFieldAccess.ReadWrite };
+            }
+        }
+        return group;
     }
 
     private static IOperation? ReadArrayFieldPath(IOperation operation, Stack<string> path, ref bool readOnly)

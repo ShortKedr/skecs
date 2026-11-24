@@ -31,21 +31,27 @@ public static class GaRowCodecEmitter
             throw new ArgumentException("The codec needs a C# class identifier outside its member names.", nameof(className));
 
         var writes = WrittenFields(program.Body).Distinct().OrderBy(index => index).ToArray();
-        return new Emitter(program, writes, unityCompatible).Emit(className);
+        var readonlyWrites = EnumerateWrittenFields(program.Body, readOnlyOnly: true).ToHashSet();
+        return new Emitter(program, writes, readonlyWrites, unityCompatible).Emit(className);
     }
 
-    internal static IEnumerable<int> WrittenFields(GaStatement statement) => statement switch
+    internal static IEnumerable<int> WrittenFields(GaStatement statement) => EnumerateWrittenFields(statement, readOnlyOnly: false);
+
+    private static IEnumerable<int> EnumerateWrittenFields(GaStatement statement, bool readOnlyOnly) => statement switch
     {
-        GaStore { Slot: { IsField: true } slot } => [slot.Index],
-        GaArrayStore store => Enumerable.Range(store.Field.FirstField, store.Field.Length),
-        GaBlock block => block.Statements.SelectMany(WrittenFields),
-        GaIf { Else: { } alternative } branch => WrittenFields(branch.Then).Concat(WrittenFields(alternative)),
-        GaIf branch => WrittenFields(branch.Then),
-        GaLoop loop => WrittenFields(loop.Body).Concat(WrittenFields(loop.Increment)),
+        GaStore { Slot: { IsField: true } slot } when !readOnlyOnly => [slot.Index],
+        GaArrayStore store when !readOnlyOnly => Enumerable.Range(store.Field.FirstField, store.Field.Length),
+        GaArrayValueStore store => store.Fields.Where(field => !readOnlyOnly || field.IsReadOnly)
+            .SelectMany(field => Enumerable.Range(field.Field.FirstField, field.Field.Length)),
+        GaBlock block => block.Statements.SelectMany(child => EnumerateWrittenFields(child, readOnlyOnly)),
+        GaIf { Else: { } alternative } branch => EnumerateWrittenFields(branch.Then, readOnlyOnly)
+            .Concat(EnumerateWrittenFields(alternative, readOnlyOnly)),
+        GaIf branch => EnumerateWrittenFields(branch.Then, readOnlyOnly),
+        GaLoop loop => EnumerateWrittenFields(loop.Body, readOnlyOnly).Concat(EnumerateWrittenFields(loop.Increment, readOnlyOnly)),
         _ => []
     };
 
-    private sealed class Emitter(GaProgram program, int[] writes, bool unityCompatible)
+    private sealed class Emitter(GaProgram program, int[] writes, HashSet<int> readonlyWrites, bool unityCompatible)
     {
         private const string Job = "global::SKECS.DeterministicJob<TInput>";
         private const string ReadJob = "global::SKECS.DeterministicBatchReadJob<TInput>";
@@ -323,7 +329,7 @@ public static class GaRowCodecEmitter
             };
             if (field.ClrEnumType != null)
                 value = $"({field.ClrEnumType})({value})";
-            Line($"{Field(index)} = {value};");
+            Line(GaFieldPath.CSharpAssignment(Field(index), value, readonlyWrites.Contains(index)));
         }
 
         private IEnumerable<int> ComponentIndexes(IEnumerable<int> fields) =>

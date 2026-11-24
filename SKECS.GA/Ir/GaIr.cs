@@ -110,6 +110,11 @@ internal sealed record GaBlock(IReadOnlyList<GaStatement> Statements) : GaStatem
 internal sealed record GaStore(GaSlot Slot, GaValue Value) : GaStatement;
 internal sealed record GaArrayStore(GaArrayField Field, GaValue Index, GaSlot? Previous, GaValue Value, GaSourceSpan Source)
     : GaStatement;
+internal readonly record struct GaArrayValueField(GaArrayField Field, GaSlot Local, bool IsReadOnly = false);
+internal sealed record GaArrayValueRead(IReadOnlyList<GaArrayValueField> Fields, GaValue Index, GaSourceSpan Source)
+    : GaStatement;
+internal sealed record GaArrayValueStore(IReadOnlyList<GaArrayValueField> Fields, GaValue Index,
+    IReadOnlyList<GaSlot>? Previous, GaBlock Prepare, GaSourceSpan Source) : GaStatement;
 internal sealed record GaEmit(GaValue Value) : GaStatement;
 internal sealed record GaEmitTyped(int EventTypeIndex, IReadOnlyList<GaAdditionValue> Values) : GaStatement;
 internal sealed record GaSetDomainOrder(GaValue Primary, GaValue Secondary) : GaStatement;
